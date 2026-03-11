@@ -1263,6 +1263,7 @@ fn mode_label(mode: WorkflowMode) -> &'static str {
         WorkflowMode::Chat => "chat",
         WorkflowMode::Plan => "plan",
         WorkflowMode::Task => "task",
+        WorkflowMode::Debug => "debug",
     }
 }
 

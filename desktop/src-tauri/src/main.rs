@@ -14,6 +14,7 @@ use plan_cascade_desktop::commands::mcp::McpRuntimeState;
 use plan_cascade_desktop::commands::permissions::PermissionState;
 use plan_cascade_desktop::commands::pipeline_execution::ExecutionRegistry;
 use plan_cascade_desktop::commands::plan_mode::PlanModeState;
+use plan_cascade_desktop::commands::debug_mode::DebugModeState;
 use plan_cascade_desktop::commands::plugins::PluginState;
 use plan_cascade_desktop::commands::quality_gates::QualityGatesState;
 use plan_cascade_desktop::commands::remote::RemoteState;
@@ -51,6 +52,7 @@ fn main() {
         .manage(RemoteState::new())
         .manage(TaskModeState::new())
         .manage(PlanModeState::new())
+        .manage(DebugModeState::new())
         .manage(WorkflowKernelState::new())
         .manage(ExecutionRegistry::new())
         .manage(KnowledgeState::new())
@@ -105,6 +107,7 @@ fn main() {
             plan_cascade_desktop::commands::mcp::list_connected_mcp_servers,
             plan_cascade_desktop::commands::mcp::list_mcp_tools,
             plan_cascade_desktop::commands::mcp::get_connected_mcp_server_tools,
+            plan_cascade_desktop::commands::mcp::invoke_connected_mcp_tool,
             plan_cascade_desktop::commands::mcp::get_mcp_server_detail,
             plan_cascade_desktop::commands::mcp::export_mcp_servers,
             plan_cascade_desktop::commands::mcp::list_mcp_catalog,
@@ -271,6 +274,22 @@ fn main() {
             plan_cascade_desktop::commands::plan_mode::lifecycle_reporting_commands::get_step_output,
             plan_cascade_desktop::commands::plan_mode::lifecycle_reporting_commands::exit_plan_mode,
             plan_cascade_desktop::commands::plan_mode::lifecycle_reporting_commands::list_plan_adapters,
+            // Debug Mode commands
+            plan_cascade_desktop::commands::debug_mode::enter_debug_mode,
+            plan_cascade_desktop::commands::debug_mode::submit_debug_clarification,
+            plan_cascade_desktop::commands::debug_mode::approve_debug_patch,
+            plan_cascade_desktop::commands::debug_mode::reject_debug_patch,
+            plan_cascade_desktop::commands::debug_mode::retry_debug_phase,
+            plan_cascade_desktop::commands::debug_mode::attach_debug_evidence,
+            plan_cascade_desktop::commands::debug_mode::seed_debug_fix_proposal,
+            plan_cascade_desktop::commands::debug_mode::fetch_debug_report,
+            plan_cascade_desktop::commands::debug_mode::list_debug_artifacts,
+            plan_cascade_desktop::commands::debug_mode::load_debug_artifact,
+            plan_cascade_desktop::commands::debug_mode::write_debug_artifact,
+            plan_cascade_desktop::commands::debug_mode::get_debug_capability_snapshot,
+            plan_cascade_desktop::commands::debug_mode::get_debug_session_snapshot,
+            plan_cascade_desktop::commands::debug_mode::cancel_debug_operation,
+            plan_cascade_desktop::commands::debug_mode::exit_debug_mode,
             // Workflow Kernel v2 commands
             plan_cascade_desktop::commands::workflow::workflow_open_session,
             plan_cascade_desktop::commands::workflow::workflow_list_sessions,

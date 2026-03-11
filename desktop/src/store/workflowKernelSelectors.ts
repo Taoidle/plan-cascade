@@ -8,16 +8,20 @@ import type {
   WorkflowSession,
   WorkflowStatus,
 } from '../types/workflowKernel';
+import type { DebugRuntimeCapabilities } from '../types/debugMode';
 import {
   isChatPhaseBusy,
+  isDebugPhaseBusy,
   isKernelLifecyclePhaseTerminal,
   isPlanPhaseBusy,
   isTaskPhaseBusy,
   isWorkflowModeActive,
   normalizeChatPhase,
+  normalizeDebugPhase,
   normalizePlanPhase,
   normalizeTaskPhase,
   type NormalizedChatPhase,
+  type NormalizedDebugPhase,
   type NormalizedPlanPhase,
   type NormalizedTaskPhase,
 } from './workflowPhaseModel';
@@ -58,6 +62,15 @@ export interface KernelChatRuntime extends KernelRuntimeBase {
   bindingSessionId: string | null;
   activeTurnId: string | null;
   backendKind: string | null;
+}
+
+export interface KernelDebugRuntime extends KernelRuntimeBase {
+  normalizedPhase: NormalizedDebugPhase;
+  isBusy: boolean;
+  pendingApproval: NonNullable<WorkflowSession['modeSnapshots']['debug']>['pendingApproval'];
+  capabilityProfile: NonNullable<WorkflowSession['modeSnapshots']['debug']>['capabilityProfile'];
+  toolBlockReason: string | null;
+  runtimeCapabilities: DebugRuntimeCapabilities | null;
 }
 
 function normalizePendingPrompt(prompt: string | null | undefined): string | null {
@@ -156,9 +169,34 @@ export function selectKernelPlanRuntime(session: WorkflowSession | null): Kernel
   };
 }
 
+export function selectKernelDebugRuntime(session: WorkflowSession | null): KernelDebugRuntime {
+  const phase = session?.modeSnapshots.debug?.phase ?? 'intaking';
+  const normalizedPhase = normalizeDebugPhase(phase);
+  const meta = session?.modeRuntimeMeta?.debug;
+  const pendingApproval = session?.modeSnapshots.debug?.pendingApproval ?? meta?.pendingApproval ?? null;
+  const isActive = isWorkflowModeActive({
+    mode: 'debug',
+    currentMode: session?.activeMode ?? 'chat',
+    isKernelSessionActive: session?.status === 'active',
+    phase,
+  });
+  return {
+    phase,
+    normalizedPhase,
+    linkedSessionId: session?.linkedModeSessions?.debug ?? null,
+    isActive,
+    isBusy: isActive && isDebugPhaseBusy(phase),
+    pendingPrompt: normalizePendingPrompt(session?.modeSnapshots.debug?.pendingPrompt),
+    pendingApproval,
+    capabilityProfile: session?.modeSnapshots.debug?.capabilityProfile ?? meta?.debugCapabilityProfile ?? 'dev_full',
+    toolBlockReason: session?.modeSnapshots.debug?.toolBlockReason ?? meta?.blockReason ?? null,
+    runtimeCapabilities: meta?.debugRuntimeCapabilities ?? null,
+  };
+}
+
 export function isKernelModeActive(
   session: WorkflowSession | null,
-  mode: 'chat' | 'plan' | 'task',
+  mode: 'chat' | 'plan' | 'task' | 'debug',
   expectedStatus: WorkflowStatus = 'active',
 ): boolean {
   return isWorkflowModeActive({
@@ -170,24 +208,31 @@ export function isKernelModeActive(
         ? (session?.modeSnapshots.task?.phase ?? 'idle')
         : mode === 'plan'
           ? (session?.modeSnapshots.plan?.phase ?? 'idle')
-          : (session?.modeSnapshots.chat?.phase ?? 'ready'),
+          : mode === 'debug'
+            ? (session?.modeSnapshots.debug?.phase ?? 'intaking')
+            : (session?.modeSnapshots.chat?.phase ?? 'ready'),
   });
 }
 
 export interface KernelRuntimeStatus {
   isTaskActive: boolean;
   isPlanActive: boolean;
+  isDebugActive: boolean;
   isTaskBusy: boolean;
   isPlanBusy: boolean;
+  isDebugBusy: boolean;
 }
 
 export function selectKernelRuntimeStatus(session: WorkflowSession | null): KernelRuntimeStatus {
   const taskRuntime = selectKernelTaskRuntime(session);
   const planRuntime = selectKernelPlanRuntime(session);
+  const debugRuntime = selectKernelDebugRuntime(session);
   return {
     isTaskActive: taskRuntime.isActive,
     isPlanActive: planRuntime.isActive,
+    isDebugActive: debugRuntime.isActive,
     isTaskBusy: taskRuntime.isBusy,
     isPlanBusy: planRuntime.isBusy,
+    isDebugBusy: debugRuntime.isBusy,
   };
 }

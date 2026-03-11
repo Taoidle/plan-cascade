@@ -4,12 +4,14 @@ import { withWorkflowClientRequestMetadata } from '../lib/workflowClientRequest'
 import { submitWorkflowKernelActionIntent, type SubmitKernelIntentSpec } from '../lib/workflowKernelIntent';
 import { useTaskModeStore } from './taskMode';
 import { usePlanModeStore } from './planMode';
+import { useDebugModeStore } from './debugMode';
 import { useWorkflowOrchestratorStore } from './workflowOrchestrator';
 import { usePlanOrchestratorStore } from './planOrchestrator';
+import { useDebugOrchestratorStore } from './debugOrchestrator';
 import { useWorkflowKernelStore } from './workflowKernel';
 import { useExecutionStore } from './execution';
 import { useWorkflowObservabilityStore } from './workflowObservability';
-import { selectKernelPlanRuntime, selectKernelTaskRuntime } from './workflowKernelSelectors';
+import { selectKernelDebugRuntime, selectKernelPlanRuntime, selectKernelTaskRuntime } from './workflowKernelSelectors';
 
 export interface SubmitWorkflowInputParams {
   transitionAndSubmitInput: (
@@ -37,6 +39,10 @@ export interface StartModeParams {
   startChat: (prompt: string, source: 'simple') => Promise<void>;
   startTaskWorkflow: (description: string, kernelSessionId: string | null) => Promise<{ modeSessionId: string | null }>;
   startPlanWorkflow: (description: string, kernelSessionId: string | null) => Promise<{ modeSessionId: string | null }>;
+  startDebugWorkflow?: (
+    description: string,
+    kernelSessionId: string | null,
+  ) => Promise<{ modeSessionId: string | null }>;
 }
 
 export interface StartModeResult {
@@ -65,7 +71,12 @@ async function refreshKernelStateWithRetry(mode: WorkflowMode): Promise<void> {
   const second = await kernelStore.refreshSessionState();
   if (!second) {
     const session = kernelStore.session;
-    const modeRuntime = mode === 'plan' ? selectKernelPlanRuntime(session) : selectKernelTaskRuntime(session);
+    const modeRuntime =
+      mode === 'plan'
+        ? selectKernelPlanRuntime(session)
+        : mode === 'debug'
+          ? selectKernelDebugRuntime(session)
+          : selectKernelTaskRuntime(session);
     void useWorkflowObservabilityStore.getState().recordInteractiveActionFailure({
       card: 'mode_sync',
       action: 'refresh_session_state',
@@ -140,6 +151,25 @@ async function rollbackModeRuntime(mode: WorkflowMode, modeSessionId?: string | 
       }
     }
     usePlanOrchestratorStore.getState().resetWorkflow();
+    return;
+  }
+
+  if (mode === 'debug') {
+    const debugStore = useDebugModeStore.getState();
+    const debugSessionId = modeSessionId ?? selectKernelDebugRuntime(kernelSession).linkedSessionId;
+    if (debugSessionId) {
+      try {
+        await debugStore.cancelOperation(debugSessionId);
+      } catch {
+        // best effort cleanup
+      }
+      try {
+        await debugStore.exitDebugMode(debugSessionId);
+      } catch {
+        // best effort cleanup
+      }
+    }
+    useDebugOrchestratorStore.getState().resetWorkflow();
   }
 }
 
@@ -169,6 +199,7 @@ export async function startModeWithCompensation({
   startChat,
   startTaskWorkflow,
   startPlanWorkflow,
+  startDebugWorkflow,
 }: StartModeParams): Promise<StartModeResult> {
   const kernelSession = await submitWorkflowInputWithTracking({
     transitionAndSubmitInput,
@@ -225,6 +256,29 @@ export async function startModeWithCompensation({
       return { ok: true, errorCode: null, session: linked };
     }
 
+    if (mode === 'debug') {
+      const startDebug = startDebugWorkflow;
+      if (!startDebug) {
+        await compensateStartFailure(mode, 'mode_start_failed', cancelKernelOperation);
+        return { ok: false, errorCode: 'mode_start_failed', session: kernelSession };
+      }
+      const { modeSessionId: debugModeSessionId } = await startDebug(prompt, kernelSession.sessionId);
+      if (!debugModeSessionId) {
+        await compensateStartFailure(mode, 'mode_start_failed', cancelKernelOperation);
+        return { ok: false, errorCode: 'mode_start_failed', session: kernelSession };
+      }
+
+      const linked = await linkModeSession('debug', debugModeSessionId);
+      if (!linked) {
+        await compensateStartFailure(mode, 'mode_session_link_failed', cancelKernelOperation, debugModeSessionId);
+        return { ok: false, errorCode: 'mode_session_link_failed', session: kernelSession };
+      }
+
+      await refreshKernelStateWithRetry('debug');
+
+      return { ok: true, errorCode: null, session: linked };
+    }
+
     await startChat(prompt, 'simple');
     return { ok: true, errorCode: null, session: kernelSession };
   } catch {
@@ -265,13 +319,16 @@ export async function cancelActiveWorkflow(params: {
   workflowMode: WorkflowMode;
   taskWorkflowCancelling: boolean;
   planWorkflowCancelling: boolean;
+  debugWorkflowCancelling?: boolean;
   isTaskExecuting: boolean;
   isPlanExecuting: boolean;
+  isDebugExecuting?: boolean;
   cancelKernelOperation: (reason?: string) => Promise<WorkflowSession | null>;
   cancelTaskWorkflow: () => Promise<void>;
   cancelPlanWorkflow: () => Promise<void>;
+  cancelDebugWorkflow?: () => Promise<void>;
 }): Promise<void> {
-  if (params.taskWorkflowCancelling || params.planWorkflowCancelling) return;
+  if (params.taskWorkflowCancelling || params.planWorkflowCancelling || params.debugWorkflowCancelling) return;
 
   if (params.workflowMode === 'chat') {
     await params.cancelKernelOperation('cancelled_by_user');
@@ -298,6 +355,19 @@ export async function cancelActiveWorkflow(params: {
       throw error;
     }
     if (!params.isTaskExecuting) {
+      await params.cancelKernelOperation('cancelled_by_user');
+    }
+    return;
+  }
+
+  if (params.workflowMode === 'debug') {
+    try {
+      await params.cancelDebugWorkflow?.();
+    } catch (error) {
+      await params.cancelKernelOperation('runtime_cancel_failed');
+      throw error;
+    }
+    if (!params.isDebugExecuting) {
       await params.cancelKernelOperation('cancelled_by_user');
     }
     return;

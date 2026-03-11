@@ -157,6 +157,7 @@
   "workflow": {
     "chat": "Chat",
     "plan": "Plan",
+    "debug": "Debug",
     "task": "Task"
   },
   "scope": {
@@ -184,7 +185,21 @@
     "task_story": "Task Story",
     "task_ai_verify": "AI Verify",
     "task_code_review": "Code Review",
-    "task_dod": "Definition of Done"
+    "task_dod": "Definition of Done",
+    "intaking": "Debug Intake",
+    "clarifying": "Debug Clarification",
+    "gathering_signal": "Signal Collection",
+    "reproducing": "Reproducing",
+    "hypothesizing": "Hypothesizing",
+    "testing_hypothesis": "Hypothesis Testing",
+    "identifying_root_cause": "Root Cause Analysis",
+    "proposing_fix": "Fix Proposal",
+    "patch_review": "Patch Review",
+    "patching": "Patching",
+    "verifying": "Verification",
+    "completed": "Completed",
+    "failed": "Failed",
+    "cancelled": "Cancelled"
   },
   "pricing": {
     "title": "Pricing Rules",

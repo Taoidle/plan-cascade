@@ -157,6 +157,7 @@
   "workflow": {
     "chat": "チャット",
     "plan": "プラン",
+    "debug": "デバッグ",
     "task": "タスク"
   },
   "scope": {
@@ -184,7 +185,21 @@
     "task_story": "タスクストーリー",
     "task_ai_verify": "AI 検証",
     "task_code_review": "コードレビュー",
-    "task_dod": "完了定義"
+    "task_dod": "完了定義",
+    "intaking": "デバッグ受付",
+    "clarifying": "デバッグ確認",
+    "gathering_signal": "シグナル収集",
+    "reproducing": "再現",
+    "hypothesizing": "仮説生成",
+    "testing_hypothesis": "仮説検証",
+    "identifying_root_cause": "根本原因分析",
+    "proposing_fix": "修正案作成",
+    "patch_review": "パッチレビュー",
+    "patching": "パッチ適用",
+    "verifying": "検証",
+    "completed": "完了",
+    "failed": "失敗",
+    "cancelled": "キャンセル"
   },
   "pricing": {
     "title": "価格ルール",

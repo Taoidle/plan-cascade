@@ -140,6 +140,44 @@
       "running": "実行中",
       "attention": "要確認"
     },
+    "mode": {
+      "chat": "Chat",
+      "plan": "Plan",
+      "task": "Task",
+      "debug": "Debug"
+    },
+    "debug": {
+      "pendingApproval": "承認待ち",
+      "rootCauseReady": "根本原因あり",
+      "verified": "検証済み",
+      "environment": {
+        "dev": "開発",
+        "staging": "ステージング",
+        "prod": "本番"
+      },
+      "severity": {
+        "low": "低",
+        "medium": "中",
+        "high": "高",
+        "critical": "重大"
+      },
+      "phase": {
+        "intaking": "受付",
+        "clarifying": "確認中",
+        "gathering_signal": "シグナル収集中",
+        "reproducing": "再現中",
+        "hypothesizing": "仮説生成中",
+        "testing_hypothesis": "仮説検証中",
+        "identifying_root_cause": "根本原因特定",
+        "proposing_fix": "修正案作成",
+        "patch_review": "パッチレビュー",
+        "patching": "パッチ適用",
+        "verifying": "検証中",
+        "completed": "完了",
+        "failed": "失敗",
+        "cancelled": "キャンセル"
+      }
+    },
     "time": {
       "justNow": "たった今",
       "minutesAgo": "{{count}}分前",
@@ -149,6 +187,7 @@
     "placeholderTitles": {
       "chat": "新しいチャット",
       "plan": "新しいプラン",
+      "debug": "新しいデバッグケース",
       "task": "新しいタスク",
       "session": "新しいセッション"
     }
@@ -521,6 +560,7 @@
   "workflowMode": {
     "chat": "チャット",
     "plan": "プラン",
+    "debug": "デバッグ",
     "task": "タスク"
   },
   "output": {
@@ -614,6 +654,7 @@
     "contextCleared": "コンテキストがクリアされました",
     "historyCleared": "会話履歴がクリアされました",
     "switchToPlanWithContext": "チャットコンテキスト付きでプランモードに切り替え",
+    "switchToDebugWithContext": "現在のコンテキスト付きで Debug モードに切り替え",
     "switchToTaskWithContext": "チャットコンテキスト付きでタスクモードに切り替え",
     "switchToChatWithTaskContext": "タスクコンテキスト付きでチャットモードに切り替え",
     "contextReset": "新しいタスクのためにコンテキストをクリアしました"
@@ -626,6 +667,10 @@
       "running_execution": "実行中です。モード切替前に一時停止またはキャンセルしてください。",
       "task_workflow_active": "Task ワークフローが進行中です。切替前にキャンセルしてください。",
       "plan_workflow_active": "Plan ワークフローが進行中です。切替前にキャンセルしてください。",
+      "debug_workflow_active": "Debug ワークフローが進行中です。切替前にキャンセルしてください。",
+      "approval_pending": "デバッグ承認待ちがあります。切替前に解消してください。",
+      "active_experiment": "デバッグ実験が実行中です。完了後に切り替えてください。",
+      "verification_running": "検証が実行中です。完了後に切り替えてください。",
       "structured_question_pending": "構造化された質問（インタビュー/確認）が未回答です。先に回答またはスキップしてください。"
     },
     "modeSwitchFailed": "ワークフローモードの切り替えに失敗しました。再試行してください。",
@@ -1025,6 +1070,7 @@
     },
     "input": {
       "taskPlaceholder": "タスクを説明してください（実装 / 分析 / リファクタリング）...",
+      "debugPlaceholder": "バグ、環境、再現手順、ログ、対象 URL またはエントリーポイントを説明してください...",
       "configuringPlaceholder": "設定を入力（例：「6並列、TDD有効」）するか、上のカードで続行をクリック...",
       "interviewPlaceholder": "回答を入力...",
       "prdFeedbackPlaceholder": "フィードバックを追加するか、PRDカードの承認ボタンを押してください...",
@@ -1308,6 +1354,7 @@
     "outputTab": "出力",
     "gitTab": "Git",
     "contextTab": "コンテキスト",
+    "artifactsTab": "アーティファクト",
     "resize": "パネル幅を調整",
     "workflowFailures": {
       "title": "ワークフロー信頼性",
@@ -1397,6 +1444,18 @@
       "meta": {
         "projectSession": "project: {{project}} | session: {{session}}"
       }
+    },
+    "debugArtifacts": {
+      "title": "デバッグアーティファクト",
+      "count": "件のアーティファクト",
+      "loading": "アーティファクトを読み込み中...",
+      "loadFailed": "デバッグアーティファクトの読み込みに失敗しました。",
+      "previewFailed": "アーティファクトのプレビュー読み込みに失敗しました。",
+      "loadingPreview": "プレビューを読み込み中...",
+      "empty": "デバッグアーティファクトはまだありません。",
+      "noSession": "Debug case を開始するとアーティファクトを確認できます。",
+      "selectArtifact": "内容を確認するアーティファクトを選択してください。",
+      "binary": "このアーティファクトはバイナリ形式か、テキストプレビューに対応していません。"
     },
     "errors": {
       "summary": "{{count}} 件の問題",

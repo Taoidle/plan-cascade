@@ -824,6 +824,10 @@ function buildFrontendExportState(settings: ReturnType<typeof useSettingsStore.g
     minimax_endpoint: settings.minimaxEndpoint,
     qwen_endpoint: settings.qwenEndpoint,
     search_provider: settings.searchProvider,
+    debug_default_environment: settings.debugDefaultEnvironment,
+    debug_browser_profile: settings.debugBrowserProfile,
+    debug_viewport_presets: settings.debugViewportPresets,
+    debug_production_diagnostics_allowlist: settings.debugProductionDiagnosticsAllowlist,
     max_concurrent_subagents: settings.maxConcurrentSubagents,
     phase_configs: settings.phaseConfigs,
     pinned_directories: settings.pinnedDirectories,
@@ -955,6 +959,21 @@ function syncSettingsToStore(settings: Record<string, unknown>) {
   // Search
   if (settings.search_provider && ['tavily', 'brave', 'duckduckgo'].includes(settings.search_provider as string)) {
     store.setSearchProvider(settings.search_provider as 'tavily' | 'brave' | 'duckduckgo');
+  }
+  if (
+    settings.debug_default_environment &&
+    ['dev', 'staging', 'prod'].includes(settings.debug_default_environment as string)
+  ) {
+    store.setDebugDefaultEnvironment(settings.debug_default_environment as 'dev' | 'staging' | 'prod');
+  }
+  if (settings.debug_browser_profile && ['desktop', 'mobile'].includes(settings.debug_browser_profile as string)) {
+    store.setDebugBrowserProfile(settings.debug_browser_profile as 'desktop' | 'mobile');
+  }
+  if (Array.isArray(settings.debug_viewport_presets)) {
+    store.setDebugViewportPresets(settings.debug_viewport_presets as string[]);
+  }
+  if (Array.isArray(settings.debug_production_diagnostics_allowlist)) {
+    store.setDebugProductionDiagnosticsAllowlist(settings.debug_production_diagnostics_allowlist as string[]);
   }
 
   // Execution (additional)

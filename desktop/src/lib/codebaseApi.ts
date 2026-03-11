@@ -179,7 +179,7 @@ export interface ContextItem {
   metadata?: Record<string, unknown> | null;
   source?: string | null;
   session_id?: string | null;
-  target_mode?: 'chat' | 'plan' | 'task' | null;
+  target_mode?: 'chat' | 'plan' | 'task' | 'debug' | null;
   context_ref_id?: string | null;
 }
 
@@ -340,7 +340,7 @@ export async function openCodebaseFileInEditor(
 }
 
 export async function addCodebaseContext(
-  targetMode: 'chat' | 'plan' | 'task',
+  targetMode: 'chat' | 'plan' | 'task' | 'debug',
   items: ContextItem[],
   sessionId?: string | null,
 ): Promise<CommandResponse<CodebaseContextAppendResult>> {

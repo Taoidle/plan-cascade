@@ -18,6 +18,7 @@ import { UsageTable } from './UsageTable';
 import { PricingRulesPanel } from './PricingRulesPanel';
 import AnalyticsSkeleton from './AnalyticsSkeleton';
 import { formatCost, formatTokens, type AnalyticsBreakdownRow } from '../../store/analytics';
+import { phaseLabel, scopeLabel, workflowLabel } from './analyticsLabels';
 
 export function Dashboard() {
   const { t } = useTranslation('analytics');
@@ -224,9 +225,21 @@ export function Dashboard() {
             </div>
 
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-              <BreakdownCard title={t('overview.byWorkflow', 'Workflow Overview')} rows={summary.by_workflow} />
-              <BreakdownCard title={t('overview.byPhase', 'Phase Overview')} rows={summary.by_phase} />
-              <BreakdownCard title={t('overview.byScope', 'Scope Overview')} rows={summary.by_scope} />
+              <BreakdownCard
+                title={t('overview.byWorkflow', 'Workflow Overview')}
+                rows={summary.by_workflow}
+                dimension="workflow"
+              />
+              <BreakdownCard
+                title={t('overview.byPhase', 'Phase Overview')}
+                rows={summary.by_phase}
+                dimension="phase"
+              />
+              <BreakdownCard
+                title={t('overview.byScope', 'Scope Overview')}
+                rows={summary.by_scope}
+                dimension="scope"
+              />
             </div>
 
             {/* Top Models Table */}
@@ -265,11 +278,22 @@ export function Dashboard() {
 interface BreakdownCardProps {
   title: string;
   rows: AnalyticsBreakdownRow[];
+  dimension?: 'workflow' | 'phase' | 'scope';
 }
 
-function BreakdownCard({ title, rows }: BreakdownCardProps) {
+function BreakdownCard({ title, rows, dimension }: BreakdownCardProps) {
   const { t } = useTranslation('analytics');
-  const displayRows = rows.slice(0, 5);
+  const displayRows = rows.slice(0, 5).map((row) => ({
+    ...row,
+    label:
+      dimension === 'workflow'
+        ? workflowLabel(t, row.key as Parameters<typeof workflowLabel>[1])
+        : dimension === 'phase'
+          ? phaseLabel(t, row.key)
+          : dimension === 'scope'
+            ? scopeLabel(t, row.key as Parameters<typeof scopeLabel>[1])
+            : row.label,
+  }));
 
   return (
     <div className={clsx('bg-white dark:bg-gray-900 rounded-xl', 'border border-gray-200 dark:border-gray-800', 'p-6')}>

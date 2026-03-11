@@ -43,6 +43,14 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
     setKbPickerServerSearch,
     kbIngestJobScopedProgress,
     setKbIngestJobScopedProgress,
+    debugDefaultEnvironment,
+    setDebugDefaultEnvironment,
+    debugBrowserProfile,
+    setDebugBrowserProfile,
+    debugViewportPresets,
+    setDebugViewportPresets,
+    debugProductionDiagnosticsAllowlist,
+    setDebugProductionDiagnosticsAllowlist,
     developerModeEnabled,
     setDeveloperModeEnabled,
     developerPanels,
@@ -210,6 +218,108 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
           <option value="dark">{t('general.theme.dark')}</option>
         </select>
         <p className="text-sm text-gray-500 dark:text-gray-400">{t('general.theme.description')}</p>
+      </section>
+
+      <section className="space-y-4">
+        <div>
+          <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('general.debug.title')}</h3>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{t('general.debug.description')}</p>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <label className="space-y-2">
+            <span className="text-sm font-medium text-gray-900 dark:text-white">
+              {t('general.debug.defaultEnvironment')}
+            </span>
+            <select
+              value={debugDefaultEnvironment}
+              onChange={(e) => setDebugDefaultEnvironment(e.target.value as 'dev' | 'staging' | 'prod')}
+              className={clsx(
+                'w-full px-3 py-2 rounded-lg border',
+                'border-gray-200 dark:border-gray-700',
+                'bg-white dark:bg-gray-800',
+                'text-gray-900 dark:text-white',
+                'focus:outline-none focus:ring-2 focus:ring-primary-500',
+              )}
+            >
+              <option value="dev">{t('general.debug.environments.dev')}</option>
+              <option value="staging">{t('general.debug.environments.staging')}</option>
+              <option value="prod">{t('general.debug.environments.prod')}</option>
+            </select>
+          </label>
+
+          <label className="space-y-2">
+            <span className="text-sm font-medium text-gray-900 dark:text-white">
+              {t('general.debug.browserProfile')}
+            </span>
+            <select
+              value={debugBrowserProfile}
+              onChange={(e) => setDebugBrowserProfile(e.target.value as 'desktop' | 'mobile')}
+              className={clsx(
+                'w-full px-3 py-2 rounded-lg border',
+                'border-gray-200 dark:border-gray-700',
+                'bg-white dark:bg-gray-800',
+                'text-gray-900 dark:text-white',
+                'focus:outline-none focus:ring-2 focus:ring-primary-500',
+              )}
+            >
+              <option value="desktop">{t('general.debug.browserProfiles.desktop')}</option>
+              <option value="mobile">{t('general.debug.browserProfiles.mobile')}</option>
+            </select>
+          </label>
+        </div>
+
+        <label className="space-y-2 block">
+          <span className="text-sm font-medium text-gray-900 dark:text-white">
+            {t('general.debug.viewportPresets')}
+          </span>
+          <textarea
+            value={debugViewportPresets.join('\n')}
+            onChange={(e) =>
+              setDebugViewportPresets(
+                e.target.value
+                  .split('\n')
+                  .map((line) => line.trim())
+                  .filter(Boolean),
+              )
+            }
+            rows={4}
+            className={clsx(
+              'w-full px-3 py-2 rounded-lg border',
+              'border-gray-200 dark:border-gray-700',
+              'bg-white dark:bg-gray-800',
+              'text-gray-900 dark:text-white',
+              'focus:outline-none focus:ring-2 focus:ring-primary-500',
+            )}
+          />
+          <p className="text-sm text-gray-500 dark:text-gray-400">{t('general.debug.viewportPresetsHelp')}</p>
+        </label>
+
+        <label className="space-y-2 block">
+          <span className="text-sm font-medium text-gray-900 dark:text-white">
+            {t('general.debug.prodDiagnosticsAllowlist')}
+          </span>
+          <textarea
+            value={debugProductionDiagnosticsAllowlist.join('\n')}
+            onChange={(e) =>
+              setDebugProductionDiagnosticsAllowlist(
+                e.target.value
+                  .split('\n')
+                  .map((line) => line.trim())
+                  .filter(Boolean),
+              )
+            }
+            rows={4}
+            className={clsx(
+              'w-full px-3 py-2 rounded-lg border',
+              'border-gray-200 dark:border-gray-700',
+              'bg-white dark:bg-gray-800',
+              'text-gray-900 dark:text-white',
+              'focus:outline-none focus:ring-2 focus:ring-primary-500',
+            )}
+          />
+          <p className="text-sm text-gray-500 dark:text-gray-400">{t('general.debug.prodDiagnosticsAllowlistHelp')}</p>
+        </label>
       </section>
 
       {/* Panel Hover Section */}

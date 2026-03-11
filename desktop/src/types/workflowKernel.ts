@@ -4,7 +4,16 @@
  * Mirrors Rust types from `services/workflow_kernel`.
  */
 
-export type WorkflowMode = 'chat' | 'plan' | 'task';
+import type {
+  DebugCapabilityProfile,
+  DebugEnvironment,
+  DebugPendingApproval,
+  DebugRuntimeCapabilities,
+  DebugSeverity,
+  DebugState,
+} from './debugMode';
+
+export type WorkflowMode = 'chat' | 'plan' | 'task' | 'debug';
 
 export type WorkflowStatus = 'active' | 'completed' | 'failed' | 'cancelled' | 'archived';
 
@@ -196,12 +205,14 @@ export interface TaskState {
 export type ModeState =
   | { kind: 'chat'; state: ChatState }
   | { kind: 'plan'; state: PlanState }
-  | { kind: 'task'; state: TaskState };
+  | { kind: 'task'; state: TaskState }
+  | { kind: 'debug'; state: DebugState };
 
 export interface ModeSnapshots {
   chat: ChatState | null;
   plan: PlanState | null;
   task: TaskState | null;
+  debug?: DebugState | null;
 }
 
 export type WorkflowEventKind =
@@ -236,6 +247,11 @@ export type UserInputIntentType =
   | 'task_configuration'
   | 'task_interview_answer'
   | 'task_prd_feedback'
+  | 'debug_intake'
+  | 'debug_clarification'
+  | 'debug_hypothesis_feedback'
+  | 'debug_patch_approval'
+  | 'debug_verification_control'
   | 'execution_control';
 
 export interface UserInputIntent {
@@ -298,6 +314,11 @@ export interface ModeRuntimeMeta {
   backendKind?: string | null;
   controlCapabilities?: ChatControlCapabilities | null;
   blockReason?: string | null;
+  debugCapabilityProfile?: DebugCapabilityProfile | null;
+  debugRuntimeCapabilities?: DebugRuntimeCapabilities | null;
+  debugEnvironment?: DebugEnvironment | null;
+  debugSeverity?: DebugSeverity | null;
+  pendingApproval?: DebugPendingApproval | null;
 }
 
 export interface WorkflowContextLedgerSummary {

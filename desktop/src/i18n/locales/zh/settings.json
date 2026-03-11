@@ -42,6 +42,25 @@
       "dark": "深色",
       "description": "选择你偏好的配色方案。跟随系统将使用操作系统设置。"
     },
+    "debug": {
+      "title": "Debug 模式默认值",
+      "description": "配置启动 Debug 模式时默认使用的环境和浏览器诊断配置。",
+      "defaultEnvironment": "默认 Debug 环境",
+      "browserProfile": "默认浏览器配置",
+      "viewportPresets": "视口预设",
+      "viewportPresetsHelp": "每行一个预设，例如：desktop:1440x900 或 mobile:390x844",
+      "prodDiagnosticsAllowlist": "生产诊断白名单",
+      "prodDiagnosticsAllowlistHelp": "每行一个工具或类别提示，用于记录哪些诊断能力允许在生产只读排障中使用。",
+      "environments": {
+        "dev": "开发环境",
+        "staging": "预发环境",
+        "prod": "生产环境"
+      },
+      "browserProfiles": {
+        "desktop": "桌面端",
+        "mobile": "移动端"
+      }
+    },
 
     "panelHover": {
       "title": "面板交互",

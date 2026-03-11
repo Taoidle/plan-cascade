@@ -168,7 +168,8 @@ fn parse_workflow_mode(value: &str) -> Result<WorkflowMode, String> {
         "chat" => Ok(WorkflowMode::Chat),
         "plan" => Ok(WorkflowMode::Plan),
         "task" => Ok(WorkflowMode::Task),
-        _ => Err("mode_mismatch: target_mode must be one of: chat, plan, task".to_string()),
+        "debug" => Ok(WorkflowMode::Debug),
+        _ => Err("mode_mismatch: target_mode must be one of: chat, plan, task, debug".to_string()),
     }
 }
 

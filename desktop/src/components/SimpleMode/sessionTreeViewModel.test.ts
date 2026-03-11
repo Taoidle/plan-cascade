@@ -285,4 +285,96 @@ describe('sessionTreeViewModel', () => {
       }),
     ).toBe('Custom billing session');
   });
+
+  it('derives debug chips and summary from debug session state', () => {
+    const groups = buildSessionTreeViewModel({
+      workflowSessions: [
+        createWorkflowSession({
+          sessionId: 'debug-1',
+          activeMode: 'debug',
+          displayTitle: 'Checkout error',
+          modeSnapshots: {
+            chat: {
+              phase: 'ready',
+              pendingInput: '',
+              activeTurnId: null,
+              turnCount: 0,
+              lastUserMessage: null,
+              lastAssistantMessage: null,
+            },
+            plan: {
+              phase: 'idle',
+              planId: null,
+              runningStepId: null,
+              pendingClarification: null,
+              retryableSteps: [],
+              planRevision: 0,
+              lastEditOperation: null,
+            },
+            task: {
+              phase: 'idle',
+              prdId: null,
+              currentStoryId: null,
+              interviewSessionId: null,
+              pendingInterview: null,
+              completedStories: 0,
+              failedStories: 0,
+            },
+            debug: {
+              caseId: 'case-1',
+              phase: 'patch_review',
+              severity: 'high',
+              environment: 'staging',
+              symptomSummary: 'Checkout page crashes after clicking Pay now',
+              title: 'Checkout error',
+              expectedBehavior: 'Checkout completes successfully',
+              actualBehavior: 'The page crashes before payment confirmation.',
+              reproSteps: ['Open checkout', 'Click Pay now'],
+              affectedSurface: ['checkout'],
+              recentChanges: 'Refactored payment intent initialization.',
+              targetUrlOrEntry: 'https://app.example.com/checkout',
+              evidenceRefs: [],
+              activeHypotheses: [],
+              selectedRootCause: {
+                conclusion: 'A null payment intent leaks into the submit handler.',
+                supportingEvidenceIds: ['ev-1'],
+                contradictions: [],
+                confidence: 0.84,
+                impactScope: ['checkout'],
+                recommendedDirection: 'Guard missing intent and retry initialization.',
+              },
+              fixProposal: {
+                summary: 'Guard the missing payment intent before submission.',
+                changeScope: ['frontend'],
+                riskLevel: 'medium',
+                filesOrSystemsTouched: ['src/pages/Checkout.tsx'],
+                manualApprovalsRequired: ['code_patch'],
+                verificationPlan: ['Retry checkout flow'],
+                patchPreviewRef: null,
+              },
+              pendingApproval: {
+                kind: 'patch_review',
+                title: 'Apply checkout guard',
+                description: 'Guard null intent before payment submission.',
+                requiredActions: ['Review patch'],
+              },
+              verificationReport: null,
+              pendingPrompt: null,
+              capabilityProfile: 'staging_limited',
+              toolBlockReason: null,
+              backgroundStatus: null,
+              lastCheckpointId: null,
+            },
+          },
+        }),
+      ],
+    });
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0].children).toHaveLength(1);
+    expect(groups[0].children[0]?.detailSummary).toContain('null payment intent');
+    expect(groups[0].children[0]?.detailChips.length).toBeGreaterThanOrEqual(3);
+    expect(groups[0].children[0]?.mode).toBe('debug');
+    expect(groups[0].children[0]?.status).toBe('attention');
+  });
 });

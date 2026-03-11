@@ -9,10 +9,15 @@ export function useSimpleModeSwitch(params: {
   isRunning: boolean;
   workflowPhase: string;
   planPhase: string;
+  debugPhase?: string;
   isTaskWorkflowActive: boolean;
   isPlanWorkflowActive: boolean;
+  isDebugWorkflowActive?: boolean;
   hasStructuredInterviewQuestion: boolean;
   hasPlanClarifyQuestion: boolean;
+  hasDebugPendingApproval?: boolean;
+  hasDebugActiveExperiment?: boolean;
+  hasDebugVerificationRunning?: boolean;
   setWorkflowMode: (mode: WorkflowMode) => void;
   transitionWorkflowKernelMode: (
     targetMode: WorkflowMode,

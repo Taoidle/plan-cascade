@@ -9,7 +9,7 @@ export interface QueuedChatMessage {
   sessionId: string;
   prompt: string;
   submitAsFollowUp: boolean;
-  mode: 'chat' | 'plan' | 'task';
+  mode: 'chat' | 'plan' | 'task' | 'debug';
   attempts: number;
   attachments: FileAttachmentData[];
   references: WorkspaceFileReferenceData[];
@@ -37,7 +37,7 @@ interface PersistedQueueV2 {
     id: string;
     prompt: string;
     submitAsFollowUp: boolean;
-    mode: 'chat' | 'plan' | 'task';
+    mode: 'chat' | 'plan' | 'task' | 'debug';
     attempts: number;
   }>;
 }
@@ -49,7 +49,7 @@ interface PersistedQueueV3 {
     id: string;
     prompt: string;
     submitAsFollowUp: boolean;
-    mode: 'chat' | 'plan' | 'task';
+    mode: 'chat' | 'plan' | 'task' | 'debug';
     attempts: number;
     attachments: FileAttachmentData[];
   }>;
@@ -174,7 +174,10 @@ function isQueuedChatMessage(value: unknown): value is QueuedChatMessage {
     typeof candidate.sessionId === 'string' &&
     typeof candidate.prompt === 'string' &&
     typeof candidate.submitAsFollowUp === 'boolean' &&
-    (candidate.mode === 'chat' || candidate.mode === 'plan' || candidate.mode === 'task') &&
+    (candidate.mode === 'chat' ||
+      candidate.mode === 'plan' ||
+      candidate.mode === 'task' ||
+      candidate.mode === 'debug') &&
     typeof candidate.attempts === 'number' &&
     attachments !== null &&
     attachments.every((attachment) => sanitizeQueuedAttachment(attachment) !== null) &&
@@ -189,7 +192,7 @@ function normalizeLegacyEntry(
     id: string;
     prompt: string;
     submitAsFollowUp: boolean;
-    mode: 'chat' | 'plan' | 'task';
+    mode: 'chat' | 'plan' | 'task' | 'debug';
     attempts: number;
     attachments?: FileAttachmentData[];
     references?: WorkspaceFileReferenceData[];

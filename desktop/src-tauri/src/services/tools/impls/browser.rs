@@ -12,6 +12,14 @@
 //! - `screenshot()` - Take a screenshot of the current page
 //! - `extract_text(selector)` - Extract text content from an element
 //! - `wait_for(selector, timeout)` - Wait for an element to appear
+//! - `capture_dom_snapshot(selector?)` - Capture DOM text/HTML snapshot for debugging
+//! - `capture_console_logs(limit?)` - Read buffered browser console logs
+//! - `capture_network_log(limit?)` - Read buffered fetch/XHR network events
+//! - `read_storage(storage, key?)` - Inspect local/session storage
+//! - `read_cookie_names()` - List cookie names for the current page
+//! - `collect_performance_entries(entry_type?, limit?)` - Inspect browser performance entries
+//! - `set_viewport(width, height, mobile?, device_scale_factor?)` - Override viewport metrics
+//! - `emulate_device(preset)` - Apply a named viewport preset (desktop/tablet/mobile)
 //!
 //! ## Architecture
 //! - BrowserAction/BrowserActionResult: unconditional types
@@ -43,6 +51,11 @@ pub enum BrowserAction {
         /// Target URL to navigate to.
         url: String,
     },
+    /// Navigate to a URL (alias of Navigate, friendlier for debug mode prompts).
+    OpenPage {
+        /// Target URL to navigate to.
+        url: String,
+    },
     /// Click an element matching a CSS selector.
     Click {
         /// CSS selector for the target element.
@@ -70,10 +83,76 @@ pub enum BrowserAction {
         #[serde(default = "default_timeout")]
         timeout_ms: u64,
     },
+    /// Capture a DOM snapshot for the current page or a specific selector.
+    CaptureDomSnapshot {
+        /// Optional CSS selector to scope the snapshot.
+        selector: Option<String>,
+    },
+    /// Capture buffered console logs from the page.
+    CaptureConsoleLogs {
+        /// Maximum number of log entries to return.
+        #[serde(default = "default_log_limit")]
+        limit: u64,
+        /// Whether to clear the buffered logs after reading them.
+        #[serde(default)]
+        clear_after_read: bool,
+    },
+    /// Capture buffered fetch/XHR network events from the page.
+    CaptureNetworkLog {
+        /// Maximum number of network entries to return.
+        #[serde(default = "default_log_limit")]
+        limit: u64,
+        /// Whether to clear the buffered network log after reading it.
+        #[serde(default)]
+        clear_after_read: bool,
+    },
+    /// Read local/session storage entries.
+    ReadStorage {
+        /// Which storage bucket to inspect: local, session, or both.
+        #[serde(default = "default_storage_scope")]
+        storage: String,
+        /// Optional key to fetch from the selected storage bucket.
+        key: Option<String>,
+    },
+    /// Read cookie names for the current page URL.
+    ReadCookieNames,
+    /// Collect performance entries using the Performance API.
+    CollectPerformanceEntries {
+        /// Optional performance entry type filter.
+        entry_type: Option<String>,
+        /// Maximum number of entries to return.
+        #[serde(default = "default_log_limit")]
+        limit: u64,
+    },
+    /// Override viewport/device metrics.
+    SetViewport {
+        width: u64,
+        height: u64,
+        #[serde(default)]
+        mobile: bool,
+        #[serde(default = "default_device_scale_factor")]
+        device_scale_factor: f64,
+    },
+    /// Apply a named viewport preset.
+    EmulateDevice {
+        preset: String,
+    },
 }
 
 fn default_timeout() -> u64 {
     5000
+}
+
+fn default_log_limit() -> u64 {
+    50
+}
+
+fn default_storage_scope() -> String {
+    "both".to_string()
+}
+
+fn default_device_scale_factor() -> f64 {
+    1.0
 }
 
 /// Result of a browser action.
@@ -266,6 +345,8 @@ mod backend {
     use super::*;
     use base64::Engine;
     use chromiumoxide::browser::{Browser, BrowserConfig};
+    use chromiumoxide::cdp::browser_protocol::emulation::SetDeviceMetricsOverrideParams;
+    use chromiumoxide::cdp::browser_protocol::page::AddScriptToEvaluateOnNewDocumentParams;
     use chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat;
     use chromiumoxide::page::ScreenshotParams;
     use futures::StreamExt;
@@ -274,6 +355,131 @@ mod backend {
     use tokio::sync::Mutex;
     use tokio::task::JoinHandle;
     use tracing::{debug, info, warn};
+
+    const DEBUG_HOOK_SCRIPT: &str = r#"
+(() => {
+  try {
+    const root = window.__planCascadeDebug = window.__planCascadeDebug || {
+      console: [],
+      network: [],
+      maxEntries: 200,
+      installedAt: new Date().toISOString()
+    };
+    const pushBounded = (kind, payload) => {
+      const list = root[kind] || (root[kind] = []);
+      list.push({ ...payload, timestamp: new Date().toISOString() });
+      const maxEntries = Number(root.maxEntries || 200);
+      if (list.length > maxEntries) {
+        list.splice(0, list.length - maxEntries);
+      }
+    };
+
+    if (!root.consolePatched) {
+      const levels = ['log', 'info', 'warn', 'error', 'debug'];
+      for (const level of levels) {
+        const original = console[level];
+        console[level] = function (...args) {
+          try {
+            pushBounded('console', {
+              level,
+              args: args.map((arg) => {
+                if (typeof arg === 'string') return arg;
+                try {
+                  return JSON.stringify(arg);
+                } catch (_error) {
+                  return String(arg);
+                }
+              })
+            });
+          } catch (_error) {}
+          return original.apply(this, args);
+        };
+      }
+      window.addEventListener('error', (event) => {
+        pushBounded('console', {
+          level: 'error',
+          args: [event.message || 'Unhandled window error', event.filename || '', String(event.lineno || ''), String(event.colno || '')]
+        });
+      });
+      window.addEventListener('unhandledrejection', (event) => {
+        pushBounded('console', {
+          level: 'error',
+          args: ['Unhandled promise rejection', String(event.reason)]
+        });
+      });
+      root.consolePatched = true;
+    }
+
+    if (!root.networkPatched) {
+      const originalFetch = window.fetch.bind(window);
+      window.fetch = async (...args) => {
+        const startedAt = performance.now();
+        const url = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url) || '';
+        const method = (args[1] && args[1].method) || 'GET';
+        try {
+          const response = await originalFetch(...args);
+          pushBounded('network', {
+            kind: 'fetch',
+            url,
+            method,
+            status: response.status,
+            ok: response.ok,
+            durationMs: Math.round(performance.now() - startedAt)
+          });
+          return response;
+        } catch (error) {
+          pushBounded('network', {
+            kind: 'fetch',
+            url,
+            method,
+            status: null,
+            ok: false,
+            error: String(error),
+            durationMs: Math.round(performance.now() - startedAt)
+          });
+          throw error;
+        }
+      };
+
+      const originalOpen = XMLHttpRequest.prototype.open;
+      const originalSend = XMLHttpRequest.prototype.send;
+      XMLHttpRequest.prototype.open = function (method, url, ...rest) {
+        this.__planCascadeDebug = { method, url: String(url), startedAt: 0 };
+        return originalOpen.call(this, method, url, ...rest);
+      };
+      XMLHttpRequest.prototype.send = function (...args) {
+        if (this.__planCascadeDebug) {
+          this.__planCascadeDebug.startedAt = performance.now();
+        }
+        this.addEventListener('loadend', () => {
+          const meta = this.__planCascadeDebug || { method: 'GET', url: '' };
+          pushBounded('network', {
+            kind: 'xhr',
+            url: meta.url || '',
+            method: meta.method || 'GET',
+            status: Number(this.status || 0),
+            ok: this.status >= 200 && this.status < 400,
+            durationMs: meta.startedAt ? Math.round(performance.now() - meta.startedAt) : null
+          });
+        });
+        return originalSend.apply(this, args);
+      };
+
+      root.networkPatched = true;
+    }
+
+    return {
+      installed: true,
+      consolePatched: !!root.consolePatched,
+      networkPatched: !!root.networkPatched,
+      consoleCount: Array.isArray(root.console) ? root.console.length : 0,
+      networkCount: Array.isArray(root.network) ? root.network.length : 0
+    };
+  } catch (error) {
+    return { installed: false, error: String(error) };
+  }
+})()
+"#;
 
     /// Internal state for an active browser session.
     struct BrowserState {
@@ -344,6 +550,8 @@ mod backend {
                     .await
                     .map_err(|e| format!("Failed to create browser page: {}", e))?;
 
+                Self::install_debug_hooks(&page).await?;
+
                 info!("BrowserBackend: Headless Chrome launched successfully");
 
                 *guard = Some(BrowserState {
@@ -365,9 +573,13 @@ mod backend {
             let state = guard.as_mut().ok_or_else(|| {
                 "Browser state unexpectedly None after initialization".to_string()
             })?;
+            Self::install_debug_hooks(&state.page).await?;
 
             match action {
                 BrowserAction::Navigate { url } => {
+                    Self::action_navigate(&mut state.page, url).await
+                }
+                BrowserAction::OpenPage { url } => {
                     Self::action_navigate(&mut state.page, url).await
                 }
                 BrowserAction::Click { selector } => {
@@ -384,6 +596,59 @@ mod backend {
                     selector,
                     timeout_ms,
                 } => Self::action_wait_for(&mut state.page, selector, *timeout_ms).await,
+                BrowserAction::CaptureDomSnapshot { selector } => {
+                    Self::action_capture_dom_snapshot(&mut state.page, selector.as_deref()).await
+                }
+                BrowserAction::CaptureConsoleLogs {
+                    limit,
+                    clear_after_read,
+                } => Self::action_capture_console_logs(
+                    &mut state.page,
+                    *limit,
+                    *clear_after_read,
+                )
+                .await,
+                BrowserAction::CaptureNetworkLog {
+                    limit,
+                    clear_after_read,
+                } => Self::action_capture_network_log(
+                    &mut state.page,
+                    *limit,
+                    *clear_after_read,
+                )
+                .await,
+                BrowserAction::ReadStorage { storage, key } => {
+                    Self::action_read_storage(&mut state.page, storage, key.as_deref()).await
+                }
+                BrowserAction::ReadCookieNames => {
+                    Self::action_read_cookie_names(&mut state.page).await
+                }
+                BrowserAction::CollectPerformanceEntries { entry_type, limit } => {
+                    Self::action_collect_performance_entries(
+                        &mut state.page,
+                        entry_type.as_deref(),
+                        *limit,
+                    )
+                    .await
+                }
+                BrowserAction::SetViewport {
+                    width,
+                    height,
+                    mobile,
+                    device_scale_factor,
+                } => {
+                    Self::action_set_viewport(
+                        &mut state.page,
+                        *width,
+                        *height,
+                        *mobile,
+                        *device_scale_factor,
+                    )
+                    .await
+                }
+                BrowserAction::EmulateDevice { preset } => {
+                    Self::action_emulate_device(&mut state.page, preset).await
+                }
             }
         }
 
@@ -462,6 +727,7 @@ mod backend {
             page.goto(url)
                 .await
                 .map_err(|e| format!("Navigation to '{}' failed: {}", url, e))?;
+            Self::install_debug_hooks(page).await?;
 
             // Get page metadata after navigation
             let current_url = page
@@ -501,6 +767,356 @@ mod backend {
                 current_url: Some(current_url),
                 page_title,
             })
+        }
+
+        async fn install_debug_hooks(page: &chromiumoxide::Page) -> Result<(), String> {
+            page.execute(AddScriptToEvaluateOnNewDocumentParams {
+                source: DEBUG_HOOK_SCRIPT.to_string(),
+                world_name: None,
+                include_command_line_api: None,
+                run_immediately: Some(true),
+            })
+            .await
+            .map_err(|e| format!("Failed to register browser debug hooks: {}", e))?;
+
+            page.evaluate(DEBUG_HOOK_SCRIPT)
+                .await
+                .map_err(|e| format!("Failed to install browser debug hooks: {}", e))?;
+            Ok(())
+        }
+
+        async fn page_metadata(
+            page: &chromiumoxide::Page,
+        ) -> (Option<String>, Option<String>) {
+            let current_url = page.url().await.ok().flatten();
+            let page_title = page
+                .evaluate("document.title")
+                .await
+                .ok()
+                .and_then(|v| v.into_value::<String>().ok());
+            (current_url, page_title)
+        }
+
+        async fn action_capture_dom_snapshot(
+            page: &mut chromiumoxide::Page,
+            selector: Option<&str>,
+        ) -> Result<BrowserActionResult, String> {
+            let expr = match selector {
+                Some(selector) => format!(
+                    r#"(() => {{
+                        const selector = {};
+                        const element = document.querySelector(selector);
+                        if (!element) {{
+                          return {{ selector, found: false }};
+                        }}
+                        return {{
+                          selector,
+                          found: true,
+                          tagName: element.tagName,
+                          text: (element.innerText || '').slice(0, 4000),
+                          html: (element.outerHTML || '').slice(0, 4000),
+                          childElementCount: element.childElementCount
+                        }};
+                    }})()"#,
+                    serde_json::to_string(selector).unwrap_or_else(|_| "\"\"".to_string())
+                ),
+                None => r#"(() => ({
+                    selector: null,
+                    found: true,
+                    tagName: document.documentElement?.tagName || 'HTML',
+                    text: (document.body?.innerText || '').slice(0, 4000),
+                    html: (document.documentElement?.outerHTML || '').slice(0, 4000),
+                    childElementCount: document.body?.childElementCount || 0
+                }))()"#
+                    .to_string(),
+            };
+            let snapshot: Value = page
+                .evaluate(expr)
+                .await
+                .map_err(|e| format!("DOM snapshot failed: {}", e))?
+                .into_value()
+                .map_err(|e| format!("DOM snapshot decode failed: {}", e))?;
+            let (current_url, page_title) = Self::page_metadata(page).await;
+            Ok(BrowserActionResult {
+                success: true,
+                output: Some(
+                    serde_json::to_string_pretty(&snapshot)
+                        .unwrap_or_else(|_| snapshot.to_string()),
+                ),
+                current_url,
+                page_title,
+            })
+        }
+
+        async fn action_capture_console_logs(
+            page: &mut chromiumoxide::Page,
+            limit: u64,
+            clear_after_read: bool,
+        ) -> Result<BrowserActionResult, String> {
+            let expr = format!(
+                r#"(() => {{
+                    const root = window.__planCascadeDebug || {{ console: [] }};
+                    const logs = Array.isArray(root.console) ? root.console.slice(-{}) : [];
+                    if ({}) {{
+                      root.console = [];
+                    }}
+                    return {{
+                      count: logs.length,
+                      cleared: {},
+                      logs
+                    }};
+                }})()"#,
+                limit,
+                if clear_after_read { "true" } else { "false" },
+                if clear_after_read { "true" } else { "false" },
+            );
+            let logs: Value = page
+                .evaluate(expr)
+                .await
+                .map_err(|e| format!("Console log capture failed: {}", e))?
+                .into_value()
+                .map_err(|e| format!("Console log decode failed: {}", e))?;
+            let (current_url, page_title) = Self::page_metadata(page).await;
+            Ok(BrowserActionResult {
+                success: true,
+                output: Some(
+                    serde_json::to_string_pretty(&logs).unwrap_or_else(|_| logs.to_string()),
+                ),
+                current_url,
+                page_title,
+            })
+        }
+
+        async fn action_capture_network_log(
+            page: &mut chromiumoxide::Page,
+            limit: u64,
+            clear_after_read: bool,
+        ) -> Result<BrowserActionResult, String> {
+            let expr = format!(
+                r#"(() => {{
+                    const root = window.__planCascadeDebug || {{ network: [] }};
+                    const events = Array.isArray(root.network) ? root.network.slice(-{}) : [];
+                    if ({}) {{
+                      root.network = [];
+                    }}
+                    return {{
+                      count: events.length,
+                      cleared: {},
+                      events
+                    }};
+                }})()"#,
+                limit,
+                if clear_after_read { "true" } else { "false" },
+                if clear_after_read { "true" } else { "false" },
+            );
+            let events: Value = page
+                .evaluate(expr)
+                .await
+                .map_err(|e| format!("Network log capture failed: {}", e))?
+                .into_value()
+                .map_err(|e| format!("Network log decode failed: {}", e))?;
+            let (current_url, page_title) = Self::page_metadata(page).await;
+            Ok(BrowserActionResult {
+                success: true,
+                output: Some(
+                    serde_json::to_string_pretty(&events).unwrap_or_else(|_| events.to_string()),
+                ),
+                current_url,
+                page_title,
+            })
+        }
+
+        async fn action_read_storage(
+            page: &mut chromiumoxide::Page,
+            storage: &str,
+            key: Option<&str>,
+        ) -> Result<BrowserActionResult, String> {
+            let storage = storage.to_ascii_lowercase();
+            let expr = format!(
+                r#"(() => {{
+                    const scope = {};
+                    const key = {};
+                    const readAll = (store) => Object.fromEntries(Array.from({{ length: store.length }}, (_, idx) => {{
+                      const itemKey = store.key(idx);
+                      return [itemKey, store.getItem(itemKey)];
+                    }}));
+                    const readOne = (store, selectedKey) => selectedKey ? store.getItem(selectedKey) : null;
+                    const payload = {{}};
+                    if (scope === 'local' || scope === 'both') {{
+                      payload.local = key ? readOne(localStorage, key) : readAll(localStorage);
+                    }}
+                    if (scope === 'session' || scope === 'both') {{
+                      payload.session = key ? readOne(sessionStorage, key) : readAll(sessionStorage);
+                    }}
+                    return payload;
+                }})()"#,
+                serde_json::to_string(&storage).unwrap_or_else(|_| "\"both\"".to_string()),
+                serde_json::to_string(&key).unwrap_or_else(|_| "null".to_string()),
+            );
+            let payload: Value = page
+                .evaluate(expr)
+                .await
+                .map_err(|e| format!("Storage read failed: {}", e))?
+                .into_value()
+                .map_err(|e| format!("Storage decode failed: {}", e))?;
+            let (current_url, page_title) = Self::page_metadata(page).await;
+            Ok(BrowserActionResult {
+                success: true,
+                output: Some(
+                    serde_json::to_string_pretty(&payload)
+                        .unwrap_or_else(|_| payload.to_string()),
+                ),
+                current_url,
+                page_title,
+            })
+        }
+
+        async fn action_read_cookie_names(
+            page: &mut chromiumoxide::Page,
+        ) -> Result<BrowserActionResult, String> {
+            let cookies = page
+                .get_cookies()
+                .await
+                .map_err(|e| format!("Cookie inspection failed: {}", e))?;
+            let payload = serde_json::json!({
+                "count": cookies.len(),
+                "cookies": cookies.iter().map(|cookie| serde_json::json!({
+                    "name": cookie.name,
+                    "domain": cookie.domain,
+                    "path": cookie.path,
+                    "secure": cookie.secure,
+                    "httpOnly": cookie.http_only,
+                    "sameSite": cookie.same_site.as_ref().map(|value| format!("{value:?}")),
+                })).collect::<Vec<_>>(),
+            });
+            let (current_url, page_title) = Self::page_metadata(page).await;
+            Ok(BrowserActionResult {
+                success: true,
+                output: Some(
+                    serde_json::to_string_pretty(&payload)
+                        .unwrap_or_else(|_| payload.to_string()),
+                ),
+                current_url,
+                page_title,
+            })
+        }
+
+        async fn action_collect_performance_entries(
+            page: &mut chromiumoxide::Page,
+            entry_type: Option<&str>,
+            limit: u64,
+        ) -> Result<BrowserActionResult, String> {
+            let expr = match entry_type {
+                Some(entry_type) => format!(
+                    r#"(() => {{
+                        const entries = performance.getEntriesByType({});
+                        return entries.slice(-{}).map((entry) => {{
+                          const json = typeof entry.toJSON === 'function' ? entry.toJSON() : {{}};
+                          return {{
+                            ...json,
+                            name: entry.name,
+                            entryType: entry.entryType,
+                            startTime: entry.startTime,
+                            duration: entry.duration
+                          }};
+                        }});
+                    }})()"#,
+                    serde_json::to_string(entry_type).unwrap_or_else(|_| "\"\"".to_string()),
+                    limit,
+                ),
+                None => format!(
+                    r#"(() => performance.getEntries().slice(-{}).map((entry) => {{
+                        const json = typeof entry.toJSON === 'function' ? entry.toJSON() : {{}};
+                        return {{
+                          ...json,
+                          name: entry.name,
+                          entryType: entry.entryType,
+                          startTime: entry.startTime,
+                          duration: entry.duration
+                        }};
+                    }}))()"#,
+                    limit
+                ),
+            };
+            let payload: Value = page
+                .evaluate(expr)
+                .await
+                .map_err(|e| format!("Performance entry capture failed: {}", e))?
+                .into_value()
+                .map_err(|e| format!("Performance entry decode failed: {}", e))?;
+            let (current_url, page_title) = Self::page_metadata(page).await;
+            Ok(BrowserActionResult {
+                success: true,
+                output: Some(
+                    serde_json::to_string_pretty(&payload)
+                        .unwrap_or_else(|_| payload.to_string()),
+                ),
+                current_url,
+                page_title,
+            })
+        }
+
+        async fn action_set_viewport(
+            page: &mut chromiumoxide::Page,
+            width: u64,
+            height: u64,
+            mobile: bool,
+            device_scale_factor: f64,
+        ) -> Result<BrowserActionResult, String> {
+            let width_i64 = i64::try_from(width).map_err(|_| "Viewport width is too large".to_string())?;
+            let height_i64 = i64::try_from(height).map_err(|_| "Viewport height is too large".to_string())?;
+            page.execute(SetDeviceMetricsOverrideParams::new(
+                width_i64,
+                height_i64,
+                device_scale_factor,
+                mobile,
+            ))
+            .await
+            .map_err(|e| format!("Viewport override failed: {}", e))?;
+
+            let metrics: Value = page
+                .evaluate("({ innerWidth: window.innerWidth, innerHeight: window.innerHeight, devicePixelRatio: window.devicePixelRatio })")
+                .await
+                .map_err(|e| format!("Viewport verification failed: {}", e))?
+                .into_value()
+                .map_err(|e| format!("Viewport verification decode failed: {}", e))?;
+            let (current_url, page_title) = Self::page_metadata(page).await;
+            Ok(BrowserActionResult {
+                success: true,
+                output: Some(
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "requested": {
+                            "width": width,
+                            "height": height,
+                            "mobile": mobile,
+                            "deviceScaleFactor": device_scale_factor,
+                        },
+                        "effective": metrics,
+                    }))
+                    .unwrap_or_else(|_| "Viewport updated".to_string()),
+                ),
+                current_url,
+                page_title,
+            })
+        }
+
+        async fn action_emulate_device(
+            page: &mut chromiumoxide::Page,
+            preset: &str,
+        ) -> Result<BrowserActionResult, String> {
+            let normalized = preset.trim().to_ascii_lowercase();
+            let (width, height, mobile, device_scale_factor) = match normalized.as_str() {
+                "desktop" => (1440_u64, 900_u64, false, 1.0),
+                "tablet" => (1024_u64, 768_u64, true, 2.0),
+                "mobile" | "iphone" | "phone" => (390_u64, 844_u64, true, 3.0),
+                other => {
+                    return Err(format!(
+                        "Unknown device preset '{}'. Supported presets: desktop, tablet, mobile",
+                        other
+                    ))
+                }
+            };
+            Self::action_set_viewport(page, width, height, mobile, device_scale_factor).await
         }
 
         /// Click an element matching a CSS selector.
@@ -781,6 +1397,15 @@ impl BrowserTool {
                     url: url.to_string(),
                 })
             }
+            "open_page" => {
+                let url = args
+                    .get("url")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "Missing 'url' parameter for open_page action".to_string())?;
+                Ok(BrowserAction::OpenPage {
+                    url: url.to_string(),
+                })
+            }
             "click" => {
                 let selector = args
                     .get("selector")
@@ -836,8 +1461,72 @@ impl BrowserTool {
                     timeout_ms,
                 })
             }
+            "capture_dom_snapshot" => Ok(BrowserAction::CaptureDomSnapshot {
+                selector: args
+                    .get("selector")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string),
+            }),
+            "capture_console_logs" => Ok(BrowserAction::CaptureConsoleLogs {
+                limit: args.get("limit").and_then(|value| value.as_u64()).unwrap_or(default_log_limit()),
+                clear_after_read: args
+                    .get("clear_after_read")
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(false),
+            }),
+            "capture_network_log" => Ok(BrowserAction::CaptureNetworkLog {
+                limit: args.get("limit").and_then(|value| value.as_u64()).unwrap_or(default_log_limit()),
+                clear_after_read: args
+                    .get("clear_after_read")
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(false),
+            }),
+            "read_storage" => Ok(BrowserAction::ReadStorage {
+                storage: args
+                    .get("storage")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("both")
+                    .to_string(),
+                key: args
+                    .get("key")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string),
+            }),
+            "read_cookie_names" => Ok(BrowserAction::ReadCookieNames),
+            "collect_performance_entries" => Ok(BrowserAction::CollectPerformanceEntries {
+                entry_type: args
+                    .get("entry_type")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string),
+                limit: args.get("limit").and_then(|value| value.as_u64()).unwrap_or(default_log_limit()),
+            }),
+            "set_viewport" => Ok(BrowserAction::SetViewport {
+                width: args
+                    .get("width")
+                    .and_then(|value| value.as_u64())
+                    .ok_or_else(|| "Missing 'width' parameter for set_viewport action".to_string())?,
+                height: args
+                    .get("height")
+                    .and_then(|value| value.as_u64())
+                    .ok_or_else(|| "Missing 'height' parameter for set_viewport action".to_string())?,
+                mobile: args
+                    .get("mobile")
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(false),
+                device_scale_factor: args
+                    .get("device_scale_factor")
+                    .and_then(|value| value.as_f64())
+                    .unwrap_or(default_device_scale_factor()),
+            }),
+            "emulate_device" => Ok(BrowserAction::EmulateDevice {
+                preset: args
+                    .get("preset")
+                    .and_then(|value| value.as_str())
+                    .ok_or_else(|| "Missing 'preset' parameter for emulate_device action".to_string())?
+                    .to_string(),
+            }),
             other => Err(format!(
-                "Unknown action '{}'. Supported: navigate, click, type_text, screenshot, extract_text, wait_for",
+                "Unknown action '{}'. Supported: navigate, open_page, click, type_text, screenshot, extract_text, wait_for, capture_dom_snapshot, capture_console_logs, capture_network_log, read_storage, read_cookie_names, collect_performance_entries, set_viewport, emulate_device",
                 other
             )),
         }
@@ -870,7 +1559,10 @@ impl Tool for BrowserTool {
 
     fn description(&self) -> &str {
         "Headless browser automation tool. Supports actions: navigate(url), click(selector), \
-         type_text(selector, text), screenshot(), extract_text(selector), wait_for(selector, timeout_ms). \
+         type_text(selector, text), screenshot(), extract_text(selector), wait_for(selector, timeout_ms), \
+         capture_dom_snapshot(selector?), capture_console_logs(limit?), capture_network_log(limit?), \
+         read_storage(storage, key?), read_cookie_names(), collect_performance_entries(entry_type?, limit?), \
+         set_viewport(width, height, mobile?, device_scale_factor?), emulate_device(preset). \
          Uses runtime detection to find Chrome/Chromium. Returns a helpful error if no browser is available."
     }
 
@@ -880,7 +1572,7 @@ impl Tool for BrowserTool {
         properties.insert(
             "action".to_string(),
             ParameterSchema::string(Some(
-                "The browser action: navigate, click, type_text, screenshot, extract_text, wait_for",
+                "The browser action: navigate, open_page, click, type_text, screenshot, extract_text, wait_for, capture_dom_snapshot, capture_console_logs, capture_network_log, read_storage, read_cookie_names, collect_performance_entries, set_viewport, emulate_device",
             )),
         );
         properties.insert(
@@ -900,6 +1592,46 @@ impl Tool for BrowserTool {
         properties.insert(
             "timeout_ms".to_string(),
             ParameterSchema::integer(Some("Max wait time in ms (for 'wait_for', default: 5000)")),
+        );
+        properties.insert(
+            "limit".to_string(),
+            ParameterSchema::integer(Some("Max entries to return (for console/network/performance actions, default: 50)")),
+        );
+        properties.insert(
+            "clear_after_read".to_string(),
+            ParameterSchema::boolean(Some("Clear buffered console/network logs after reading")),
+        );
+        properties.insert(
+            "storage".to_string(),
+            ParameterSchema::string(Some("Storage scope for 'read_storage': local, session, or both")),
+        );
+        properties.insert(
+            "key".to_string(),
+            ParameterSchema::string(Some("Optional storage key for 'read_storage'")),
+        );
+        properties.insert(
+            "entry_type".to_string(),
+            ParameterSchema::string(Some("Optional performance entry type filter for 'collect_performance_entries'")),
+        );
+        properties.insert(
+            "width".to_string(),
+            ParameterSchema::integer(Some("Viewport width in CSS pixels (for 'set_viewport')")),
+        );
+        properties.insert(
+            "height".to_string(),
+            ParameterSchema::integer(Some("Viewport height in CSS pixels (for 'set_viewport')")),
+        );
+        properties.insert(
+            "mobile".to_string(),
+            ParameterSchema::boolean(Some("Whether to emulate a mobile viewport (for 'set_viewport')")),
+        );
+        properties.insert(
+            "device_scale_factor".to_string(),
+            ParameterSchema::number(Some("Device scale factor override (for 'set_viewport', default: 1.0)")),
+        );
+        properties.insert(
+            "preset".to_string(),
+            ParameterSchema::string(Some("Named viewport preset for 'emulate_device': desktop, tablet, mobile")),
         );
 
         ParameterSchema::object(
@@ -922,11 +1654,20 @@ impl Tool for BrowserTool {
 
         let action_name = match &action {
             BrowserAction::Navigate { .. } => "navigate",
+            BrowserAction::OpenPage { .. } => "open_page",
             BrowserAction::Click { .. } => "click",
             BrowserAction::TypeText { .. } => "type_text",
             BrowserAction::Screenshot => "screenshot",
             BrowserAction::ExtractText { .. } => "extract_text",
             BrowserAction::WaitFor { .. } => "wait_for",
+            BrowserAction::CaptureDomSnapshot { .. } => "capture_dom_snapshot",
+            BrowserAction::CaptureConsoleLogs { .. } => "capture_console_logs",
+            BrowserAction::CaptureNetworkLog { .. } => "capture_network_log",
+            BrowserAction::ReadStorage { .. } => "read_storage",
+            BrowserAction::ReadCookieNames => "read_cookie_names",
+            BrowserAction::CollectPerformanceEntries { .. } => "collect_performance_entries",
+            BrowserAction::SetViewport { .. } => "set_viewport",
+            BrowserAction::EmulateDevice { .. } => "emulate_device",
         };
 
         // Step 1: Check runtime browser availability
@@ -1205,6 +1946,19 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_open_page_action() {
+        let args = serde_json::json!({
+            "action": "open_page",
+            "url": "https://example.com/login"
+        });
+        let action = BrowserTool::parse_action(&args).unwrap();
+        match action {
+            BrowserAction::OpenPage { url } => assert_eq!(url, "https://example.com/login"),
+            _ => panic!("Expected OpenPage"),
+        }
+    }
+
+    #[test]
     fn test_parse_type_text_action() {
         let args = serde_json::json!({
             "action": "type_text",
@@ -1273,6 +2027,69 @@ mod tests {
                 assert_eq!(timeout_ms, 5000);
             }
             _ => panic!("Expected WaitFor"),
+        }
+    }
+
+    #[test]
+    fn test_parse_capture_console_logs_action() {
+        let args = serde_json::json!({
+            "action": "capture_console_logs",
+            "limit": 20,
+            "clear_after_read": true
+        });
+        let action = BrowserTool::parse_action(&args).unwrap();
+        match action {
+            BrowserAction::CaptureConsoleLogs {
+                limit,
+                clear_after_read,
+            } => {
+                assert_eq!(limit, 20);
+                assert!(clear_after_read);
+            }
+            _ => panic!("Expected CaptureConsoleLogs"),
+        }
+    }
+
+    #[test]
+    fn test_parse_read_storage_action() {
+        let args = serde_json::json!({
+            "action": "read_storage",
+            "storage": "local",
+            "key": "auth-token"
+        });
+        let action = BrowserTool::parse_action(&args).unwrap();
+        match action {
+            BrowserAction::ReadStorage { storage, key } => {
+                assert_eq!(storage, "local");
+                assert_eq!(key.as_deref(), Some("auth-token"));
+            }
+            _ => panic!("Expected ReadStorage"),
+        }
+    }
+
+    #[test]
+    fn test_parse_set_viewport_action() {
+        let args = serde_json::json!({
+            "action": "set_viewport",
+            "width": 1280,
+            "height": 720,
+            "mobile": false,
+            "device_scale_factor": 2.0
+        });
+        let action = BrowserTool::parse_action(&args).unwrap();
+        match action {
+            BrowserAction::SetViewport {
+                width,
+                height,
+                mobile,
+                device_scale_factor,
+            } => {
+                assert_eq!(width, 1280);
+                assert_eq!(height, 720);
+                assert!(!mobile);
+                assert_eq!(device_scale_factor, 2.0);
+            }
+            _ => panic!("Expected SetViewport"),
         }
     }
 

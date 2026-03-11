@@ -31,7 +31,7 @@ export function CodebaseSearch({ projectPath }: CodebaseSearchProps) {
   } = useCodebaseStore();
   const [query, setQuery] = useState('');
   const [mode, setMode] = useState<'hybrid' | 'semantic' | 'symbol' | 'path'>('hybrid');
-  const [targetMode, setTargetMode] = useState<'chat' | 'plan' | 'task'>('chat');
+  const [targetMode, setTargetMode] = useState<'chat' | 'plan' | 'task' | 'debug'>('chat');
 
   const handleSearch = useCallback(() => {
     if (query.trim()) {
@@ -113,7 +113,7 @@ export function CodebaseSearch({ projectPath }: CodebaseSearchProps) {
           </button>
           <select
             value={targetMode}
-            onChange={(e) => setTargetMode(e.target.value as 'chat' | 'plan' | 'task')}
+            onChange={(e) => setTargetMode(e.target.value as 'chat' | 'plan' | 'task' | 'debug')}
             className={clsx(
               'px-2.5 py-2 rounded-lg text-sm',
               'border border-gray-300 dark:border-gray-600',
@@ -124,6 +124,7 @@ export function CodebaseSearch({ projectPath }: CodebaseSearchProps) {
           >
             <option value="chat">{t('targetMode.chat')}</option>
             <option value="plan">{t('targetMode.plan')}</option>
+            <option value="debug">{t('targetMode.debug', { defaultValue: 'Debug' })}</option>
             <option value="task">{t('targetMode.task')}</option>
           </select>
           <button

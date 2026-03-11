@@ -9,6 +9,7 @@ import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import type { AnalyticsBreakdownRow, ModelUsage, ProjectUsage } from '../../store/analytics';
 import { formatCost, formatTokens } from '../../store/analytics';
+import { phaseLabel, scopeLabel, workflowLabel } from './analyticsLabels';
 
 type BreakdownTab = 'model' | 'project' | 'workflow' | 'phase' | 'scope';
 
@@ -65,13 +66,25 @@ export function TokenBreakdown({ byModel, byProject, byWorkflow, byPhase, byScop
         />
       )}
       {activeTab === 'workflow' && (
-        <BreakdownBarList rows={byWorkflow} emptyLabel={t('breakdown.noWorkflowData', 'No workflow data available')} />
+        <BreakdownBarList
+          rows={byWorkflow}
+          emptyLabel={t('breakdown.noWorkflowData', 'No workflow data available')}
+          dimension="workflow"
+        />
       )}
       {activeTab === 'phase' && (
-        <BreakdownBarList rows={byPhase} emptyLabel={t('breakdown.noPhaseData', 'No phase data available')} />
+        <BreakdownBarList
+          rows={byPhase}
+          emptyLabel={t('breakdown.noPhaseData', 'No phase data available')}
+          dimension="phase"
+        />
       )}
       {activeTab === 'scope' && (
-        <BreakdownBarList rows={byScope} emptyLabel={t('breakdown.noScopeData', 'No scope data available')} />
+        <BreakdownBarList
+          rows={byScope}
+          emptyLabel={t('breakdown.noScopeData', 'No scope data available')}
+          dimension="scope"
+        />
       )}
     </div>
   );
@@ -185,22 +198,36 @@ function ModelPieChart({ data }: ModelPieChartProps) {
 interface BreakdownBarListProps {
   rows: AnalyticsBreakdownRow[];
   emptyLabel: string;
+  dimension?: BreakdownTab;
 }
 
-function BreakdownBarList({ rows, emptyLabel }: BreakdownBarListProps) {
+function BreakdownBarList({ rows, emptyLabel, dimension }: BreakdownBarListProps) {
   const { t } = useTranslation('analytics');
   const chartData = useMemo(() => {
     if (!rows.length) return { rows: [], maxCost: 0 };
     const maxCost = Math.max(...rows.map((row) => row.stats.total_cost_microdollars), 1);
+    const localizedLabel = (row: AnalyticsBreakdownRow) => {
+      if (dimension === 'workflow') {
+        return workflowLabel(t, row.key as Parameters<typeof workflowLabel>[1]);
+      }
+      if (dimension === 'phase') {
+        return phaseLabel(t, row.key);
+      }
+      if (dimension === 'scope') {
+        return scopeLabel(t, row.key as Parameters<typeof scopeLabel>[1]);
+      }
+      return row.label;
+    };
     return {
       maxCost,
       rows: rows.slice(0, 10).map((row, index) => ({
         ...row,
+        label: localizedLabel(row),
         percentage: row.stats.total_cost_microdollars / maxCost,
         color: COLORS[index % COLORS.length],
       })),
     };
-  }, [rows]);
+  }, [dimension, rows, t]);
 
   if (!chartData.rows.length) {
     return (

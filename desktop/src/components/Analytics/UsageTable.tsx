@@ -234,6 +234,7 @@ export function UsageTable() {
               <option value="">{t('filters.workflowAll', 'All Workflows')}</option>
               <option value="chat">{t('workflow.chat', 'Chat')}</option>
               <option value="plan">{t('workflow.plan', 'Plan')}</option>
+              <option value="debug">{t('workflow.debug', 'Debug')}</option>
               <option value="task">{t('workflow.task', 'Task')}</option>
             </select>
           </div>

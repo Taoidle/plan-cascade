@@ -130,6 +130,14 @@ export interface ConnectedMcpToolDetail {
   is_parallel_safe: boolean;
 }
 
+export interface ConnectedMcpToolInvokeResult {
+  server_id: string;
+  server_name: string;
+  qualified_name: string;
+  tool_name: string;
+  value: unknown;
+}
+
 export interface McpExportPayload {
   version?: string;
   exported_at?: string;

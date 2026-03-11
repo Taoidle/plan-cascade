@@ -451,6 +451,7 @@ function modeBadgeLabel(mode: SessionTreeItem['mode']): string | null {
   if (mode === 'chat') return 'C';
   if (mode === 'plan') return 'P';
   if (mode === 'task') return 'T';
+  if (mode === 'debug') return 'D';
   return null;
 }
 
@@ -616,8 +617,23 @@ function SessionTreeRow({
             </span>
           )}
         </div>
+        {item.detailChips.length > 0 && (
+          <div className="mt-1 flex flex-wrap items-center gap-1">
+            {item.detailChips.map((chip) => (
+              <span
+                key={`${item.id}-${chip}`}
+                className="inline-flex max-w-full items-center rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium leading-none text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+              >
+                <span className="truncate">{chip}</span>
+              </span>
+            ))}
+          </div>
+        )}
+        {item.detailSummary && (
+          <p className="mt-1 text-2xs leading-4 text-gray-500 dark:text-gray-400 line-clamp-2">{item.detailSummary}</p>
+        )}
         <div className="mt-0.5 flex items-center gap-2 text-2xs text-gray-500 dark:text-gray-400">
-          {item.status === 'attention' ? <span>{statusText(item.status, t)}</span> : null}
+          {item.status !== 'idle' ? <span>{statusText(item.status, t)}</span> : null}
           <span>{timeAgo(item.updatedAt, nowMs, t)}</span>
         </div>
       </div>

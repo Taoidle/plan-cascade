@@ -44,6 +44,7 @@ vi.mock('react-i18next', () => ({
         'rightPanel.outputTab': 'Output',
         'rightPanel.gitTab': 'Git',
         'rightPanel.contextTab': 'Context',
+        'rightPanel.artifactsTab': 'Artifacts',
         'rightPanel.workflowFailures.title': 'Workflow Reliability',
         'rightPanel.workflowFailures.none': 'No recent workflow failures.',
         'rightPanel.developerHidden.title': 'Developer content is hidden',
@@ -93,6 +94,10 @@ vi.mock('./ContextOpsPanel', () => ({
   ContextOpsPanel: () => <div>Context Panel</div>,
 }));
 
+vi.mock('./DebugArtifactsPanel', () => ({
+  DebugArtifactsPanel: () => <div>Debug Artifacts Panel</div>,
+}));
+
 vi.mock('./WorkflowKernelProgressPanel', () => ({
   WorkflowKernelProgressPanel: () => <div>Workflow Event Timeline</div>,
 }));
@@ -128,6 +133,7 @@ describe('TabbedRightPanel', () => {
         modeTranscriptLines={[]}
         workspacePath="/repo"
         contextSessionId={null}
+        debugSessionId={null}
       />,
     );
 
@@ -170,6 +176,7 @@ describe('TabbedRightPanel', () => {
         modeTranscriptLines={[]}
         workspacePath="/repo"
         contextSessionId={null}
+        debugSessionId={null}
       />,
     );
 
@@ -193,6 +200,7 @@ describe('TabbedRightPanel', () => {
         modeTranscriptLines={[]}
         workspacePath="/repo"
         contextSessionId={null}
+        debugSessionId={null}
       />,
     );
 
@@ -221,6 +229,7 @@ describe('TabbedRightPanel', () => {
         modeTranscriptLines={[]}
         workspacePath="/repo"
         contextSessionId={null}
+        debugSessionId={null}
       />,
     );
 
@@ -228,5 +237,26 @@ describe('TabbedRightPanel', () => {
     expect(screen.getByText('Workflow Reliability')).toBeInTheDocument();
     expect(screen.getByText('Execution Logs')).toBeInTheDocument();
     expect(screen.getByText('Streaming Output')).toBeInTheDocument();
+  });
+
+  it('shows the artifacts tab for debug workflows with an active debug session', () => {
+    render(
+      <TabbedRightPanel
+        activeTab="artifacts"
+        onTabChange={vi.fn()}
+        workflowMode="debug"
+        workflowPhase="patching"
+        logs={[]}
+        analysisCoverage={null}
+        executionStatus="idle"
+        modeTranscriptLines={[]}
+        workspacePath="/repo"
+        contextSessionId={null}
+        debugSessionId="debug-session-1"
+      />,
+    );
+
+    expect(screen.getByText('Artifacts')).toBeInTheDocument();
+    expect(screen.getByText('Debug Artifacts Panel')).toBeInTheDocument();
   });
 });

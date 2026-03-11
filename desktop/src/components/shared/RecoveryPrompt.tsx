@@ -8,17 +8,24 @@
  * Story-004: Resume & Recovery System
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { clsx } from 'clsx';
+import { useTranslation } from 'react-i18next';
 import { useRecoveryStore, EXECUTION_MODE_LABELS, type IncompleteTask, type ExecutionMode } from '../../store/recovery';
+import { buildDebugStateChips, summarizeDebugCase } from '../../lib/debugLabels';
+import { useWorkflowKernelStore } from '../../store/workflowKernel';
+import { useSettingsStore } from '../../store/settings';
 
 // ============================================================================
 // Helper Functions
 // ============================================================================
 
 /** Format a timestamp into a relative "time ago" string */
-function formatTimeAgo(timestamp: string | null): string {
-  if (!timestamp) return 'Unknown';
+function formatTimeAgo(
+  timestamp: string | null,
+  t: (key: string, options?: Record<string, unknown>) => string,
+): string {
+  if (!timestamp) return t('common:time.unknown', { defaultValue: 'Unknown' });
 
   const date = new Date(timestamp);
   const now = new Date();
@@ -27,10 +34,10 @@ function formatTimeAgo(timestamp: string | null): string {
   const diffHours = Math.floor(diffMinutes / 60);
   const diffDays = Math.floor(diffHours / 24);
 
-  if (diffMinutes < 1) return 'Just now';
-  if (diffMinutes < 60) return `${diffMinutes}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays < 7) return `${diffDays}d ago`;
+  if (diffMinutes < 1) return t('common:time.justNow', { defaultValue: 'Just now' });
+  if (diffMinutes < 60) return t('common:time.minutesAgo', { count: diffMinutes, defaultValue: `${diffMinutes}m ago` });
+  if (diffHours < 24) return t('common:time.hoursAgo', { count: diffHours, defaultValue: `${diffHours}h ago` });
+  if (diffDays < 7) return t('common:time.daysAgo', { count: diffDays, defaultValue: `${diffDays}d ago` });
   return date.toLocaleDateString();
 }
 
@@ -70,7 +77,19 @@ interface TaskCardProps {
   onDiscard: (taskId: string) => void;
 }
 
+interface WorkflowRecoveryCandidate {
+  sessionId: string;
+  title: string;
+  workspacePath: string | null;
+  phase: string;
+  environment: string | null;
+  severity: string | null;
+  statusChips: string[];
+  summary: string | null;
+}
+
 function TaskCard({ task, isResuming, resumingTaskId, onResume, onDiscard }: TaskCardProps) {
+  const { t } = useTranslation();
   const isThisResuming = isResuming && resumingTaskId === task.id;
   const [confirmDiscard, setConfirmDiscard] = useState(false);
 
@@ -99,7 +118,7 @@ function TaskCard({ task, isResuming, resumingTaskId, onResume, onDiscard }: Tas
       <div className="flex items-start justify-between gap-3 mb-3">
         <div className="min-w-0 flex-1">
           <h4 className="text-sm font-medium text-gray-900 dark:text-white truncate">
-            {task.name || 'Untitled execution'}
+            {task.name || t('common:recoveryPrompt.fallbackTaskTitle', { defaultValue: 'Untitled execution' })}
           </h4>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">{task.project_path}</p>
         </div>
@@ -133,18 +152,21 @@ function TaskCard({ task, isResuming, resumingTaskId, onResume, onDiscard }: Tas
       <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400 mb-3">
         <span className="flex items-center gap-1">
           <ClockIcon />
-          {formatTimeAgo(task.last_checkpoint_timestamp)}
+          {formatTimeAgo(task.last_checkpoint_timestamp, t)}
         </span>
         {task.checkpoint_count > 0 && (
           <span className="flex items-center gap-1">
             <CheckpointIcon />
-            {task.checkpoint_count} checkpoint{task.checkpoint_count !== 1 ? 's' : ''}
+            {t('common:recoveryPrompt.checkpoints', {
+              count: task.checkpoint_count,
+              defaultValue: `${task.checkpoint_count} checkpoints`,
+            })}
           </span>
         )}
         {task.error_message && (
           <span className="flex items-center gap-1 text-red-500 dark:text-red-400">
             <ErrorIcon />
-            Failed
+            {t('common:status.failed', { defaultValue: 'Failed' })}
           </span>
         )}
       </div>
@@ -170,10 +192,10 @@ function TaskCard({ task, isResuming, resumingTaskId, onResume, onDiscard }: Tas
           {isThisResuming ? (
             <span className="flex items-center justify-center gap-1.5">
               <SpinnerIcon />
-              Resuming...
+              {t('common:recoveryPrompt.resuming', { defaultValue: 'Resuming...' })}
             </span>
           ) : (
-            'Resume'
+            t('common:buttons.resume', { defaultValue: 'Resume' })
           )}
         </button>
         <button
@@ -188,7 +210,108 @@ function TaskCard({ task, isResuming, resumingTaskId, onResume, onDiscard }: Tas
             isResuming && 'opacity-50 cursor-not-allowed',
           )}
         >
-          {confirmDiscard ? 'Confirm Discard' : 'Discard'}
+          {confirmDiscard
+            ? t('common:recoveryPrompt.confirmDiscard', { defaultValue: 'Confirm Discard' })
+            : t('common:recoveryPrompt.discard', { defaultValue: 'Discard' })}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function WorkflowRecoveryCard({
+  candidate,
+  isRecovering,
+  onRecover,
+  onDismiss,
+}: {
+  candidate: WorkflowRecoveryCandidate;
+  isRecovering: boolean;
+  onRecover: (sessionId: string, workspacePath: string | null) => void;
+  onDismiss: (sessionId: string) => void;
+}) {
+  const { t } = useTranslation();
+  const detailChips = [candidate.phase, candidate.environment, candidate.severity, ...candidate.statusChips].filter(
+    (value): value is string => Boolean(value),
+  );
+  return (
+    <div
+      className={clsx(
+        'rounded-lg border p-4',
+        'bg-white dark:bg-gray-800',
+        'border-gray-200 dark:border-gray-700',
+        'transition-all duration-200',
+        isRecovering && 'opacity-75',
+      )}
+    >
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div className="min-w-0 flex-1">
+          <h4 className="text-sm font-medium text-gray-900 dark:text-white truncate">
+            {candidate.title ||
+              t('common:recoveryPrompt.fallbackDebugTitle', { defaultValue: 'Interrupted debug case' })}
+          </h4>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">
+            {candidate.workspacePath || t('simpleMode:sidebar.noWorkspace', { defaultValue: 'No Workspace' })}
+          </p>
+        </div>
+        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium shrink-0 bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300">
+          {t('debugMode:modeLabel', { defaultValue: 'Debug' })}
+        </span>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-400 mb-3">
+        {detailChips.map((chip) => (
+          <span
+            key={`${candidate.sessionId}:${chip}`}
+            className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 dark:bg-gray-700"
+          >
+            {chip}
+          </span>
+        ))}
+      </div>
+
+      {candidate.summary ? (
+        <p className="text-xs text-gray-500 dark:text-gray-400 mb-3 line-clamp-2">{candidate.summary}</p>
+      ) : (
+        <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+          {t('common:recoveryPrompt.debugDescription', {
+            defaultValue: 'This debug session was interrupted and can be recovered.',
+          })}
+        </p>
+      )}
+
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => onRecover(candidate.sessionId, candidate.workspacePath)}
+          disabled={isRecovering}
+          className={clsx(
+            'flex-1 px-3 py-1.5 rounded-md text-sm font-medium',
+            'transition-colors duration-150',
+            !isRecovering
+              ? 'bg-primary-600 text-white hover:bg-primary-700 active:bg-primary-800'
+              : 'bg-gray-200 text-gray-400 dark:bg-gray-700 dark:text-gray-500 cursor-not-allowed',
+          )}
+        >
+          {isRecovering ? (
+            <span className="flex items-center justify-center gap-1.5">
+              <SpinnerIcon />
+              {t('common:recoveryPrompt.recovering', { defaultValue: 'Recovering...' })}
+            </span>
+          ) : (
+            t('common:recoveryPrompt.recoverDebugCase', { defaultValue: 'Recover Debug Case' })
+          )}
+        </button>
+        <button
+          onClick={() => onDismiss(candidate.sessionId)}
+          disabled={isRecovering}
+          className={clsx(
+            'px-3 py-1.5 rounded-md text-sm font-medium',
+            'transition-colors duration-150',
+            'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600',
+            isRecovering && 'opacity-50 cursor-not-allowed',
+          )}
+        >
+          {t('common:recoveryPrompt.dismiss', { defaultValue: 'Dismiss' })}
         </button>
       </div>
     </div>
@@ -200,6 +323,7 @@ function TaskCard({ task, isResuming, resumingTaskId, onResume, onDiscard }: Tas
 // ============================================================================
 
 export function RecoveryPrompt() {
+  const { t } = useTranslation();
   const {
     incompleteTasks,
     isResuming,
@@ -211,19 +335,76 @@ export function RecoveryPrompt() {
     dismissPrompt,
     clearError,
   } = useRecoveryStore();
+  const workflowSessionCatalog = useWorkflowKernelStore((s) => s.sessionCatalog);
+  const recoverWorkflowSession = useWorkflowKernelStore((s) => s.recoverSession);
+  const setWorkspacePath = useSettingsStore((s) => s.setWorkspacePath);
 
   const [isVisible, setIsVisible] = useState(false);
+  const [dismissedWorkflowSessionIds, setDismissedWorkflowSessionIds] = useState<Set<string>>(() => new Set());
+  const [recoveringWorkflowSessionId, setRecoveringWorkflowSessionId] = useState<string | null>(null);
+
+  const workflowRecoveryCandidates = useMemo<WorkflowRecoveryCandidate[]>(
+    () =>
+      workflowSessionCatalog
+        .filter((session) => {
+          if (session.activeMode !== 'debug') return false;
+          const debugMeta = session.modeRuntimeMeta?.debug;
+          return (
+            session.backgroundState === 'interrupted' ||
+            debugMeta?.isInterrupted === true ||
+            session.status === 'failed'
+          );
+        })
+        .filter((session) => !dismissedWorkflowSessionIds.has(session.sessionId))
+        .map((session) => ({
+          sessionId: session.sessionId,
+          title:
+            session.displayTitle ||
+            session.modeSnapshots.debug?.title ||
+            t('common:recoveryPrompt.fallbackDebugTitle', { defaultValue: 'Interrupted debug case' }),
+          workspacePath: session.workspacePath,
+          phase:
+            buildDebugStateChips(session.modeSnapshots.debug, {
+              includeEnvironment: false,
+              includeSeverity: false,
+              includeDerivedStatus: false,
+              max: 1,
+            })[0] || t('common:recoveryPrompt.interrupted', { defaultValue: 'Interrupted' }),
+          environment:
+            buildDebugStateChips(session.modeSnapshots.debug, {
+              includePhase: false,
+              includeSeverity: false,
+              includeDerivedStatus: false,
+              max: 1,
+            })[0] || null,
+          severity:
+            buildDebugStateChips(session.modeSnapshots.debug, {
+              includePhase: false,
+              includeEnvironment: false,
+              includeDerivedStatus: false,
+              max: 1,
+            })[0] || null,
+          statusChips: buildDebugStateChips(session.modeSnapshots.debug, {
+            includePhase: false,
+            includeEnvironment: false,
+            includeSeverity: false,
+            max: 3,
+          }),
+          summary: summarizeDebugCase(session.modeSnapshots.debug, session.lastError),
+        })),
+    [dismissedWorkflowSessionIds, t, workflowSessionCatalog],
+  );
 
   // Animate in when showPrompt becomes true
   useEffect(() => {
-    if (showPrompt && incompleteTasks.length > 0) {
+    if ((showPrompt && incompleteTasks.length > 0) || workflowRecoveryCandidates.length > 0) {
       // Small delay for slide-in animation
       const timer = setTimeout(() => setIsVisible(true), 50);
       return () => clearTimeout(timer);
     } else {
       setIsVisible(false);
     }
-  }, [showPrompt, incompleteTasks.length]);
+  }, [showPrompt, incompleteTasks.length, workflowRecoveryCandidates.length]);
 
   const handleResume = useCallback(
     async (taskId: string) => {
@@ -243,12 +424,42 @@ export function RecoveryPrompt() {
 
   const handleDismiss = useCallback(() => {
     setIsVisible(false);
+    if (workflowRecoveryCandidates.length > 0) {
+      setDismissedWorkflowSessionIds((prev) => {
+        const next = new Set(prev);
+        workflowRecoveryCandidates.forEach((candidate) => next.add(candidate.sessionId));
+        return next;
+      });
+    }
     // Wait for animation to complete before actually hiding
     setTimeout(() => dismissPrompt(), 300);
-  }, [dismissPrompt]);
+  }, [dismissPrompt, workflowRecoveryCandidates]);
+
+  const handleRecoverWorkflow = useCallback(
+    async (sessionId: string, workspacePath: string | null) => {
+      setRecoveringWorkflowSessionId(sessionId);
+      clearError();
+      try {
+        const recovered = await recoverWorkflowSession(sessionId);
+        if (recovered && workspacePath) {
+          setWorkspacePath(workspacePath);
+        }
+        if (recovered) {
+          setDismissedWorkflowSessionIds((prev) => {
+            const next = new Set(prev);
+            next.add(sessionId);
+            return next;
+          });
+        }
+      } finally {
+        setRecoveringWorkflowSessionId(null);
+      }
+    },
+    [clearError, recoverWorkflowSession, setWorkspacePath],
+  );
 
   // Don't render if no tasks or prompt is not shown
-  if (!showPrompt || incompleteTasks.length === 0) {
+  if ((!showPrompt || incompleteTasks.length === 0) && workflowRecoveryCandidates.length === 0) {
     return null;
   }
 
@@ -286,16 +497,16 @@ export function RecoveryPrompt() {
           <div className="flex items-center gap-2">
             <RecoveryIcon />
             <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
-              Interrupted Execution{incompleteTasks.length > 1 ? 's' : ''} Detected
+              {t('common:recoveryPrompt.title', { defaultValue: 'Interrupted Recovery Items Detected' })}
             </h3>
             <span className="inline-flex items-center justify-center px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300">
-              {incompleteTasks.length}
+              {incompleteTasks.length + workflowRecoveryCandidates.length}
             </span>
           </div>
           <button
             onClick={handleDismiss}
             className="p-1 rounded-md text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-            aria-label="Dismiss"
+            aria-label={t('common:recoveryPrompt.dismiss', { defaultValue: 'Dismiss' })}
           >
             <CloseIcon />
           </button>
@@ -320,13 +531,30 @@ export function RecoveryPrompt() {
               onDiscard={handleDiscard}
             />
           ))}
+          {workflowRecoveryCandidates.map((candidate) => (
+            <WorkflowRecoveryCard
+              key={candidate.sessionId}
+              candidate={candidate}
+              isRecovering={recoveringWorkflowSessionId === candidate.sessionId}
+              onRecover={handleRecoverWorkflow}
+              onDismiss={(sessionId) =>
+                setDismissedWorkflowSessionIds((prev) => {
+                  const next = new Set(prev);
+                  next.add(sessionId);
+                  return next;
+                })
+              }
+            />
+          ))}
         </div>
 
         {/* Footer */}
         <div className="px-5 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
           <p className="text-xs text-gray-500 dark:text-gray-400 text-center">
-            These executions were interrupted during a previous session. You can resume them from their last checkpoint
-            or discard them.
+            {t('common:recoveryPrompt.footer', {
+              defaultValue:
+                'These tasks or debug sessions were interrupted during a previous session. You can resume them from their last checkpoint or dismiss them.',
+            })}
           </p>
         </div>
       </div>

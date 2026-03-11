@@ -615,7 +615,7 @@ fn common_os() -> Vec<String> {
     ]
 }
 
-/// Built-in v1 catalog list (12 entries).
+/// Built-in v1 catalog list (13+ entries).
 pub fn built_in_catalog_items() -> Vec<McpCatalogItem> {
     vec![
         McpCatalogItem {
@@ -812,6 +812,49 @@ pub fn built_in_catalog_items() -> Vec<McpCatalogItem> {
                 ),
             ],
             secrets_schema: vec![secret("GITHUB_TOKEN", "GitHub Token", true, "api_key")],
+        },
+        McpCatalogItem {
+            id: "chrome-devtools-mcp".to_string(),
+            name: "Chrome DevTools MCP".to_string(),
+            vendor: "Chrome DevTools".to_string(),
+            trust_level: McpCatalogTrustLevel::Official,
+            tags: vec![
+                "browser".to_string(),
+                "devtools".to_string(),
+                "frontend".to_string(),
+                "debugging".to_string(),
+                "performance".to_string(),
+            ],
+            docs_url: Some("https://github.com/ChromeDevTools/chrome-devtools-mcp".to_string()),
+            maintained_by: Some("ChromeDevTools".to_string()),
+            os_support: common_os(),
+            strategies: vec![
+                strategy(
+                    "node_managed_pkg",
+                    McpInstallStrategyKind::NodeManagedPkg,
+                    1,
+                    vec![requirement(McpRuntimeKind::Node, "20.19", false)],
+                    serde_json::json!({
+                        "server_type": "stdio",
+                        "launcher": "node_managed_pkg",
+                        "package": "chrome-devtools-mcp@latest",
+                        "args": ["--isolated=true", "--no-usage-statistics"]
+                    }),
+                ),
+                strategy(
+                    "node_managed_pkg_slim_headless",
+                    McpInstallStrategyKind::NodeManagedPkg,
+                    2,
+                    vec![requirement(McpRuntimeKind::Node, "20.19", false)],
+                    serde_json::json!({
+                        "server_type": "stdio",
+                        "launcher": "node_managed_pkg",
+                        "package": "chrome-devtools-mcp@latest",
+                        "args": ["--slim", "--headless=true", "--isolated=true", "--no-usage-statistics"]
+                    }),
+                ),
+            ],
+            secrets_schema: vec![],
         },
         McpCatalogItem {
             id: "redis-mcp".to_string(),

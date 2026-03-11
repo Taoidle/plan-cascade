@@ -4,6 +4,7 @@
 
 use std::sync::Arc;
 use std::time::Duration;
+use serde_json::Value;
 use tokio::sync::RwLock;
 
 use crate::models::response::CommandResponse;
@@ -45,6 +46,14 @@ impl Default for McpRuntimeState {
     }
 }
 
+async fn sync_runtime_tools_snapshot(
+    manager: &McpManager,
+    registry: &ToolRegistry,
+) {
+    let metadata = manager.runtime_tool_metadata().await;
+    runtime_tools::replace_from_registry_with_metadata(registry, metadata);
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct McpAutoConnectResult {
     pub connected: Vec<ConnectedServerInfo>,
@@ -58,6 +67,15 @@ pub struct ConnectedMcpToolDetail {
     pub description: String,
     pub input_schema: serde_json::Value,
     pub is_parallel_safe: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ConnectedMcpToolInvokeResult {
+    pub server_id: String,
+    pub server_name: String,
+    pub qualified_name: String,
+    pub tool_name: String,
+    pub value: Value,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -228,7 +246,7 @@ pub async fn remove_mcp_server(
             registry.unregister(&stale);
         }
 
-        runtime_tools::replace_from_registry(&registry);
+        sync_runtime_tools_snapshot(&state.manager, &registry).await;
     }
 
     match service.remove_server(&id) {
@@ -507,14 +525,14 @@ pub async fn connect_mcp_server(
             if let Err(e) = service.mark_server_connected(&id) {
                 let mut registry = state.registry.write().await;
                 let _ = state.manager.disconnect_server(&id, &mut registry).await;
-                runtime_tools::replace_from_registry(&registry);
+                sync_runtime_tools_snapshot(&state.manager, &registry).await;
                 return Ok(CommandResponse::err(format!(
                     "Connected but failed to persist MCP status: {}",
                     e
                 )));
             }
             let registry = state.registry.read().await;
-            runtime_tools::replace_from_registry(&registry);
+            sync_runtime_tools_snapshot(&state.manager, &registry).await;
             Ok(CommandResponse::ok(info))
         }
         Err(e) => {
@@ -537,7 +555,7 @@ pub async fn disconnect_mcp_server(
     let mut registry = state.registry.write().await;
     match state.manager.disconnect_server(&id, &mut registry).await {
         Ok(()) => {
-            runtime_tools::replace_from_registry(&registry);
+            sync_runtime_tools_snapshot(&state.manager, &registry).await;
             if let Err(e) = service.mark_server_disconnected(&id) {
                 return Ok(CommandResponse::err(format!(
                     "Disconnected but failed to persist MCP status: {}",
@@ -649,6 +667,42 @@ pub async fn get_connected_mcp_server_tools(
 }
 
 #[tauri::command]
+pub async fn invoke_connected_mcp_tool(
+    server_id: String,
+    tool_name: String,
+    arguments: Option<Value>,
+    state: tauri::State<'_, McpRuntimeState>,
+) -> Result<CommandResponse<ConnectedMcpToolInvokeResult>, String> {
+    let normalized_tool_name = tool_name.trim();
+    if normalized_tool_name.is_empty() {
+        return Ok(CommandResponse::err(
+            "MCP tool name cannot be empty".to_string(),
+        ));
+    }
+
+    match state
+        .manager
+        .invoke_connected_tool(
+            &server_id,
+            normalized_tool_name,
+            arguments.unwrap_or(Value::Object(serde_json::Map::new())),
+        )
+        .await
+    {
+        Ok((server_name, raw_tool_name, value)) => Ok(CommandResponse::ok(
+            ConnectedMcpToolInvokeResult {
+                qualified_name: format!("mcp:{}:{}", server_id, raw_tool_name),
+                server_id,
+                server_name,
+                tool_name: raw_tool_name,
+                value,
+            },
+        )),
+        Err(e) => Ok(CommandResponse::err(e.to_string())),
+    }
+}
+
+#[tauri::command]
 pub fn list_mcp_catalog(
     filter: Option<McpCatalogFilter>,
 ) -> Result<CommandResponse<McpCatalogListResponse>, String> {
@@ -723,7 +777,7 @@ pub async fn install_mcp_catalog_item(
                                 Ok(_) => {
                                     let _ = service.mark_server_connected(&server_id);
                                     let registry = state.registry.read().await;
-                                    runtime_tools::replace_from_registry(&registry);
+                                    sync_runtime_tools_snapshot(&state.manager, &registry).await;
                                 }
                                 Err(e) => {
                                     let _ = service.mark_server_connection_error(
@@ -931,7 +985,7 @@ pub(crate) async fn reconcile_and_connect_enabled_servers(
     );
 
     let registry = registry.read().await;
-    runtime_tools::replace_from_registry(&registry);
+    sync_runtime_tools_snapshot(&manager, &registry).await;
     Ok(McpAutoConnectResult { connected, failed })
 }
 

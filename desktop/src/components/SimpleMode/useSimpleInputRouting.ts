@@ -29,12 +29,17 @@ interface UseSimpleInputRoutingParams {
   workflowMode: WorkflowMode;
   workflowPhase: string;
   planPhase: string;
+  debugPhase?: string;
   isSubmitting: boolean;
   isAnalyzingStrategy: boolean;
   start: (prompt: string, source: 'simple') => Promise<void>;
   sendFollowUp: (prompt: string) => Promise<void>;
   startWorkflow: (description: string, kernelSessionId?: string | null) => Promise<{ modeSessionId: string | null }>;
   startPlanWorkflow: (
+    description: string,
+    kernelSessionId?: string | null,
+  ) => Promise<{ modeSessionId: string | null }>;
+  startDebugWorkflow?: (
     description: string,
     kernelSessionId?: string | null,
   ) => Promise<{ modeSessionId: string | null }>;
@@ -52,6 +57,8 @@ interface UseSimpleInputRoutingParams {
   taskPendingQuestion: InterviewQuestionCardData | null;
   planClarifyingPhase: boolean;
   planPendingQuestion: PlanClarifyQuestionCardData | null;
+  debugClarifyingPhase?: boolean;
+  submitDebugClarification?: (answer: string) => Promise<{ ok: boolean; errorCode?: string | null }>;
   hasStructuredInterviewQuestion: boolean;
   hasStructuredPlanClarifyQuestion: boolean;
   linkWorkflowKernelModeSession: (mode: WorkflowMode, modeSessionId: string) => Promise<WorkflowSession | null>;
@@ -60,11 +67,13 @@ interface UseSimpleInputRoutingParams {
     targetMode: WorkflowMode,
     handoff: HandoffContextBundle,
   ) => Promise<WorkflowSession | null>;
-  transitionAndSubmitWorkflowKernelInput: (
-    targetMode: WorkflowMode,
-    intent: UserInputIntent,
-    handoff?: HandoffContextBundle,
-  ) => Promise<WorkflowSession | null>;
+  transitionAndSubmitWorkflowKernelInput: {
+    bivarianceHack(
+      targetMode: WorkflowMode,
+      intent: UserInputIntent,
+      handoff?: HandoffContextBundle,
+    ): Promise<WorkflowSession | null>;
+  }['bivarianceHack'];
 }
 
 interface UseSimpleInputRoutingResult {
@@ -83,12 +92,14 @@ export function useSimpleInputRouting({
   workflowMode,
   workflowPhase,
   planPhase,
+  debugPhase,
   isSubmitting,
   isAnalyzingStrategy,
   start,
   sendFollowUp,
   startWorkflow,
   startPlanWorkflow,
+  startDebugWorkflow,
   overrideConfigNatural,
   addPrdFeedback,
   submitPlanClarification,
@@ -99,6 +110,8 @@ export function useSimpleInputRouting({
   taskPendingQuestion,
   planClarifyingPhase,
   planPendingQuestion,
+  debugClarifyingPhase = false,
+  submitDebugClarification,
   hasStructuredInterviewQuestion,
   hasStructuredPlanClarifyQuestion,
   linkWorkflowKernelModeSession,
@@ -160,6 +173,7 @@ export function useSimpleInputRouting({
         startChat: start,
         startTaskWorkflow: startWorkflow,
         startPlanWorkflow: startPlanWorkflow,
+        startDebugWorkflow,
       });
     },
     [
@@ -170,6 +184,7 @@ export function useSimpleInputRouting({
       linkWorkflowKernelModeSession,
       setDescription,
       start,
+      startDebugWorkflow,
       startPlanWorkflow,
       startWorkflow,
       transitionAndSubmitWorkflowKernelInput,
@@ -273,14 +288,40 @@ export function useSimpleInputRouting({
         return;
       }
 
+      if (workflowMode === 'debug' && debugClarifyingPhase && submitDebugClarification) {
+        const submitted = await submitWorkflowInputWithTracking({
+          transitionAndSubmitInput: transitionAndSubmitWorkflowKernelInput,
+          targetMode: workflowMode,
+          intent: {
+            type: 'debug_clarification',
+            content: prompt,
+            metadata: {
+              mode: workflowMode,
+              phase: debugPhase ?? 'clarifying',
+            },
+          },
+        });
+        if (!submitted) return;
+        await submitDebugClarification(prompt);
+        return;
+      }
+
       const submitted = await submitWorkflowInputWithTracking({
         transitionAndSubmitInput: transitionAndSubmitWorkflowKernelInput,
         targetMode: workflowMode,
         intent: {
-          type: 'chat_message',
+          type:
+            workflowMode === 'debug' &&
+            (debugPhase === 'hypothesizing' ||
+              debugPhase === 'testing_hypothesis' ||
+              debugPhase === 'identifying_root_cause' ||
+              debugPhase === 'proposing_fix')
+              ? 'debug_hypothesis_feedback'
+              : 'chat_message',
           content: prompt,
           metadata: {
             mode: workflowMode,
+            phase: workflowMode === 'debug' ? (debugPhase ?? null) : undefined,
           },
         },
       });
@@ -293,6 +334,8 @@ export function useSimpleInputRouting({
       hasStructuredInterviewQuestion,
       isSubmitting,
       overrideConfigNatural,
+      debugClarifyingPhase,
+      debugPhase,
       planClarifyingPhase,
       planPendingQuestion,
       planPhase,
@@ -300,6 +343,7 @@ export function useSimpleInputRouting({
       sendFollowUp,
       setDescription,
       submitInterviewAnswer,
+      submitDebugClarification,
       submitPlanClarification,
       taskInterviewingPhase,
       taskPendingQuestion,

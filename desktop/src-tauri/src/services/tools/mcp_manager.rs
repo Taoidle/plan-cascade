@@ -9,7 +9,10 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::services::tools::mcp_adapter::McpToolAdapter;
-use crate::services::tools::mcp_client::{McpClient, McpServerConfig, McpTransportConfig};
+use crate::services::tools::mcp_client::{
+    McpClient, McpServerConfig, McpToolDebugMetadata, McpTransportConfig,
+};
+use crate::services::tools::runtime_tools::RuntimeToolMetadata;
 use crate::services::tools::trait_def::{Tool, ToolRegistry};
 use crate::utils::error::{AppError, AppResult};
 
@@ -46,6 +49,8 @@ pub struct McpManager {
     server_names: RwLock<HashMap<String, String>>,
     /// First connection timestamp by server id
     connected_at: RwLock<HashMap<String, String>>,
+    /// Runtime metadata for connected server tools, keyed by server id then tool name.
+    server_tool_metadata: RwLock<HashMap<String, HashMap<String, RuntimeToolMetadata>>>,
 }
 
 struct PreparedConnection {
@@ -57,6 +62,25 @@ struct PreparedConnection {
     tool_names: Vec<String>,
     qualified_names: Vec<String>,
     adapters: Vec<Arc<dyn Tool>>,
+    metadata: HashMap<String, RuntimeToolMetadata>,
+}
+
+fn runtime_metadata_from_debug_metadata(
+    server_name: &str,
+    debug_metadata: Option<&McpToolDebugMetadata>,
+) -> RuntimeToolMetadata {
+    RuntimeToolMetadata {
+        source: format!("mcp:{server_name}"),
+        capability_class: debug_metadata.and_then(|meta| meta.capability_class.clone()),
+        debug_categories: debug_metadata
+            .map(|meta| meta.debug_categories.clone())
+            .unwrap_or_default(),
+        environment_allowlist: debug_metadata
+            .map(|meta| meta.environment_allowlist.clone())
+            .unwrap_or_default(),
+        write_behavior: debug_metadata.and_then(|meta| meta.write_behavior.clone()),
+        approval_required: debug_metadata.and_then(|meta| meta.approval_required),
+    }
 }
 
 impl McpManager {
@@ -66,6 +90,7 @@ impl McpManager {
             server_tools: RwLock::new(HashMap::new()),
             server_names: RwLock::new(HashMap::new()),
             connected_at: RwLock::new(HashMap::new()),
+            server_tool_metadata: RwLock::new(HashMap::new()),
         }
     }
 
@@ -140,6 +165,7 @@ impl McpManager {
         let mut qualified_names = Vec::new();
         let mut seen = HashSet::new();
         let mut adapters: Vec<Arc<dyn Tool>> = Vec::new();
+        let mut metadata = HashMap::new();
 
         for tool_info in &tools {
             let adapter = Arc::new(McpToolAdapter::new(
@@ -162,6 +188,10 @@ impl McpManager {
 
             tool_names.push(tool_info.name.clone());
             qualified_names.push(qualified_name);
+            metadata.insert(
+                adapter.qualified_name().to_string(),
+                runtime_metadata_from_debug_metadata(&server_name, tool_info.debug_metadata.as_ref()),
+            );
             adapters.push(adapter);
         }
 
@@ -174,6 +204,7 @@ impl McpManager {
             tool_names,
             qualified_names,
             adapters,
+            metadata,
         })
     }
 
@@ -214,6 +245,10 @@ impl McpManager {
         {
             let mut connected = self.connected_at.write().await;
             connected.insert(prepared.server_id.clone(), connected_at.clone());
+        }
+        {
+            let mut metadata = self.server_tool_metadata.write().await;
+            metadata.insert(prepared.server_id.clone(), prepared.metadata.clone());
         }
         connected_at
     }
@@ -368,6 +403,10 @@ impl McpManager {
             let mut server_names = self.server_names.write().await;
             server_names.remove(server_id);
         }
+        {
+            let mut metadata = self.server_tool_metadata.write().await;
+            metadata.remove(server_id);
+        }
 
         {
             let mut connected = self.connected_at.write().await;
@@ -386,6 +425,76 @@ impl McpManager {
         );
 
         Ok(())
+    }
+
+    pub async fn runtime_tool_metadata(&self) -> HashMap<String, RuntimeToolMetadata> {
+        self.server_tool_metadata
+            .read()
+            .await
+            .values()
+            .flat_map(|items| items.iter().map(|(name, metadata)| (name.clone(), metadata.clone())))
+            .collect()
+    }
+
+    pub async fn invoke_connected_tool(
+        &self,
+        server_id: &str,
+        tool_name: &str,
+        arguments: serde_json::Value,
+    ) -> AppResult<(String, String, serde_json::Value)> {
+        let client = {
+            let clients = self.clients.read().await;
+            clients.get(server_id).cloned()
+        }
+        .ok_or_else(|| {
+            AppError::not_found(format!("MCP server '{}' is not connected", server_id))
+        })?;
+
+        let server_name = {
+            let server_names = self.server_names.read().await;
+            server_names
+                .get(server_id)
+                .cloned()
+                .unwrap_or_else(|| server_id.to_string())
+        };
+
+        let normalized_tool_name = if let Some((server_token, raw_tool_name)) =
+            McpToolAdapter::parse_qualified_name(tool_name)
+        {
+            if server_token != server_id && server_token != server_name {
+                return Err(AppError::validation(format!(
+                    "Qualified MCP tool '{}' does not belong to server '{}'",
+                    tool_name, server_id
+                )));
+            }
+            raw_tool_name.to_string()
+        } else {
+            tool_name.trim().to_string()
+        };
+
+        if normalized_tool_name.is_empty() {
+            return Err(AppError::validation(
+                "MCP tool name cannot be empty".to_string(),
+            ));
+        }
+
+        let qualified_name = format!("mcp:{}:{}", server_id, normalized_tool_name);
+        let tool_registered = {
+            let server_tools = self.server_tools.read().await;
+            server_tools
+                .get(server_id)
+                .map(|names| names.iter().any(|name| name == &qualified_name))
+                .unwrap_or(false)
+        };
+        if !tool_registered {
+            return Err(AppError::not_found(format!(
+                "Tool '{}' is not registered on MCP server '{}'",
+                normalized_tool_name, server_id
+            )));
+        }
+
+        let value = client.call_tool(&normalized_tool_name, arguments).await?;
+        Ok((server_name, normalized_tool_name, value))
     }
 
     pub async fn disconnect_all(&self, registry: &mut ToolRegistry) -> AppResult<()> {

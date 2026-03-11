@@ -19,6 +19,18 @@ use rmcp::ServiceExt;
 use crate::utils::error::{AppError, AppResult};
 use crate::utils::configure_background_process;
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct McpToolDebugMetadata {
+    pub capability_class: Option<String>,
+    #[serde(default)]
+    pub debug_categories: Vec<String>,
+    #[serde(default)]
+    pub environment_allowlist: Vec<String>,
+    pub write_behavior: Option<String>,
+    pub approval_required: Option<bool>,
+}
+
 /// Configuration for connecting to an MCP server
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpServerConfig {
@@ -75,6 +87,8 @@ pub struct McpToolInfo {
     pub description: String,
     /// JSON Schema for the tool's input parameters
     pub input_schema: Value,
+    /// Optional debug/capability metadata derived from vendor extensions.
+    pub debug_metadata: Option<McpToolDebugMetadata>,
 }
 
 /// MCP client for communicating with MCP servers
@@ -84,6 +98,88 @@ pub struct McpClient {
 }
 
 impl McpClient {
+    fn parse_string_array(value: Option<&Value>) -> Vec<String> {
+        value
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(|item| item.trim().to_ascii_lowercase())
+                    .filter(|item| !item.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn extract_debug_metadata(input_schema: &Value, description: &str) -> Option<McpToolDebugMetadata> {
+        let object = input_schema.as_object()?;
+        let debug_object = object
+            .get("x-plan-cascade-debug")
+            .or_else(|| object.get("x-debug"))
+            .and_then(Value::as_object);
+
+        let mut debug_categories = Self::parse_string_array(
+            debug_object
+                .and_then(|map| map.get("debug_categories"))
+                .or_else(|| object.get("x-debug-categories")),
+        );
+
+        if debug_categories.is_empty() {
+            debug_categories = description
+                .split(|ch: char| ch.is_whitespace() || ch == ',' || ch == ';')
+                .filter_map(|token| {
+                    let normalized = token
+                        .trim_matches(|ch: char| ch == '[' || ch == ']' || ch == '(' || ch == ')')
+                        .to_ascii_lowercase();
+                    normalized
+                        .strip_prefix("debug:")
+                        .map(|suffix| format!("debug:{suffix}"))
+                })
+                .collect();
+        }
+
+        let environment_allowlist = Self::parse_string_array(
+            debug_object
+                .and_then(|map| map.get("environment_allowlist"))
+                .or_else(|| object.get("x-environment-allowlist")),
+        );
+
+        let capability_class = debug_object
+            .and_then(|map| map.get("capability_class"))
+            .or_else(|| object.get("x-capability-class"))
+            .and_then(Value::as_str)
+            .map(|value| value.trim().to_ascii_lowercase());
+
+        let write_behavior = debug_object
+            .and_then(|map| map.get("write_behavior"))
+            .or_else(|| object.get("x-write-behavior"))
+            .and_then(Value::as_str)
+            .map(|value| value.trim().to_ascii_lowercase());
+
+        let approval_required = debug_object
+            .and_then(|map| map.get("approval_required"))
+            .or_else(|| object.get("x-approval-required"))
+            .and_then(Value::as_bool);
+
+        if capability_class.is_none()
+            && debug_categories.is_empty()
+            && environment_allowlist.is_empty()
+            && write_behavior.is_none()
+            && approval_required.is_none()
+        {
+            return None;
+        }
+
+        Some(McpToolDebugMetadata {
+            capability_class,
+            debug_categories,
+            environment_allowlist,
+            write_behavior,
+            approval_required,
+        })
+    }
+
     /// Connect to an MCP server using the provided configuration.
     pub async fn connect(config: &McpServerConfig) -> AppResult<Self> {
         match &config.transport {
@@ -201,10 +297,13 @@ impl McpClient {
         for tool in tools {
             let input_schema = serde_json::to_value(tool.input_schema.as_ref())
                 .unwrap_or_else(|_| serde_json::json!({"type": "object"}));
+            let description = tool.description.map(|d| d.into_owned()).unwrap_or_default();
+            let debug_metadata = Self::extract_debug_metadata(&input_schema, &description);
 
             result.push(McpToolInfo {
                 name: tool.name.into_owned(),
-                description: tool.description.map(|d| d.into_owned()).unwrap_or_default(),
+                description,
+                debug_metadata,
                 input_schema,
             });
         }
@@ -350,6 +449,50 @@ mod tests {
 
         let parts = McpClient::extract_text_content(&content);
         assert_eq!(parts, vec!["hello".to_string(), "world".to_string()]);
+    }
+
+    #[test]
+    fn test_extract_debug_metadata_from_schema_extensions() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "x-plan-cascade-debug": {
+                "capability_class": "observe",
+                "debug_categories": ["debug:logs", "debug:trace"],
+                "environment_allowlist": ["staging", "prod"],
+                "write_behavior": "read_only",
+                "approval_required": true
+            }
+        });
+
+        let metadata =
+            McpClient::extract_debug_metadata(&schema, "Inspect logs").expect("metadata");
+
+        assert_eq!(metadata.capability_class.as_deref(), Some("observe"));
+        assert_eq!(
+            metadata.debug_categories,
+            vec!["debug:logs".to_string(), "debug:trace".to_string()]
+        );
+        assert_eq!(
+            metadata.environment_allowlist,
+            vec!["staging".to_string(), "prod".to_string()]
+        );
+        assert_eq!(metadata.write_behavior.as_deref(), Some("read_only"));
+        assert_eq!(metadata.approval_required, Some(true));
+    }
+
+    #[test]
+    fn test_extract_debug_metadata_from_description_tags() {
+        let schema = serde_json::json!({ "type": "object" });
+        let metadata = McpClient::extract_debug_metadata(
+            &schema,
+            "Read application logs [debug:logs] [debug:metrics]",
+        )
+        .expect("metadata");
+
+        assert_eq!(
+            metadata.debug_categories,
+            vec!["debug:logs".to_string(), "debug:metrics".to_string()]
+        );
     }
 
     #[tokio::test]

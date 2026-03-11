@@ -1,0 +1,91 @@
+{
+  "modeLabel": "Debug",
+  "intake": {
+    "defaultTitle": "New debug case"
+  },
+  "cards": {
+    "browserRuntime": {
+      "title": "Browser bridge",
+      "installHint": "Recommended MCP catalog item: {{itemId}}"
+    },
+    "console": {
+      "title": "Console diagnostics"
+    },
+    "network": {
+      "title": "Network diagnostics",
+      "slowest": "Slowest requests",
+      "harCaptured": "HAR-style summary captured from browser traffic."
+    },
+    "sourceMapping": {
+      "title": "Source mapping hints",
+      "summary": "These browser-side source hints can help trace the failure back to the frontend bundle or route.",
+      "bundleScripts": "Bundle scripts",
+      "sourceMaps": "Source maps",
+      "resolvedSources": "Resolved sources",
+      "stackFrames": "Stack frames",
+      "matchedMaps": "Matched source maps",
+      "originalPositions": "Original positions"
+    },
+    "performance": {
+      "title": "Performance diagnostics",
+      "longTasks": "Longest tasks"
+    },
+    "reproduction": {
+      "missingUrl": "Provide a page URL to let Debug capture browser evidence automatically.",
+      "bridgeOnly": "No browser bridge is ready for automatic capture on this machine. Connect Chrome DevTools MCP or enable the built-in Browser tool.",
+      "captureFailed": "Automatic browser evidence capture failed. Check the page URL and browser availability.",
+      "captured": "Browser evidence was captured from the target page.",
+      "screenshotCaptured": "Screenshot captured"
+    },
+    "patchReview": {
+      "title": "Patch review required",
+      "approve": "Approve patch",
+      "reject": "Ask for another fix"
+    },
+    "incidentSummary": {
+      "defaultTitle": "Debug case summary"
+    }
+  },
+  "palette": {
+    "switchToDebug": {
+      "title": "Switch to Debug mode",
+      "description": "Switch the active Simple workflow to Debug mode for evidence-driven troubleshooting."
+    },
+    "collectBrowserEvidence": {
+      "title": "Collect browser evidence",
+      "description": "Capture browser console, network, DOM, and source-map hints for the active debug case.",
+      "failure": "Failed to collect browser evidence"
+    },
+    "approvePatch": {
+      "title": "Approve debug patch",
+      "description": "Approve the current debug patch proposal and continue into patching.",
+      "failure": "Failed to approve the debug patch"
+    },
+    "refreshAnalysis": {
+      "title": "Refresh debug analysis",
+      "description": "Recompute hypotheses, root cause, and patch proposal from the current debug evidence.",
+      "failure": "Failed to refresh debug analysis"
+    },
+    "rejectPatch": {
+      "title": "Request another debug patch",
+      "description": "Reject the current debug patch proposal and ask for another fix candidate.",
+      "failure": "Failed to reject the debug patch"
+    },
+    "runVerification": {
+      "title": "Run debug verification",
+      "description": "Re-run verification for the active debug case and refresh the verification card.",
+      "failure": "Failed to run debug verification"
+    }
+  },
+  "bridgeKinds": {
+    "devtools_mcp": "DevTools MCP connected",
+    "builtin_browser": "Built-in browser bridge",
+    "unavailable": "No browser bridge available"
+  },
+  "bridgeNotes": {
+    "devtoolsConnected": "Chrome DevTools MCP is connected and Debug can invoke its tools directly.",
+    "installedNotConnected": "Chrome DevTools MCP is installed for this workspace but not connected.",
+    "catalogAvailable": "Chrome DevTools MCP is available in the built-in MCP catalog but not installed for this workspace.",
+    "builtinFallback": "The built-in Browser tool remains available as an automatic fallback."
+  }
+}

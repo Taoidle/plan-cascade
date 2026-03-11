@@ -140,6 +140,44 @@
       "running": "Running",
       "attention": "Attention"
     },
+    "mode": {
+      "chat": "Chat",
+      "plan": "Plan",
+      "task": "Task",
+      "debug": "Debug"
+    },
+    "debug": {
+      "pendingApproval": "Approval",
+      "rootCauseReady": "Root Cause",
+      "verified": "Verified",
+      "environment": {
+        "dev": "Dev",
+        "staging": "Staging",
+        "prod": "Prod"
+      },
+      "severity": {
+        "low": "Low",
+        "medium": "Medium",
+        "high": "High",
+        "critical": "Critical"
+      },
+      "phase": {
+        "intaking": "Intake",
+        "clarifying": "Clarifying",
+        "gathering_signal": "Collecting Signals",
+        "reproducing": "Reproducing",
+        "hypothesizing": "Hypothesizing",
+        "testing_hypothesis": "Testing Hypothesis",
+        "identifying_root_cause": "Root Cause",
+        "proposing_fix": "Fix Proposal",
+        "patch_review": "Patch Review",
+        "patching": "Patching",
+        "verifying": "Verifying",
+        "completed": "Completed",
+        "failed": "Failed",
+        "cancelled": "Cancelled"
+      }
+    },
     "time": {
       "justNow": "just now",
       "minutesAgo": "{{count}}m ago",
@@ -149,6 +187,7 @@
     "placeholderTitles": {
       "chat": "New chat",
       "plan": "New plan",
+      "debug": "New debug case",
       "task": "New task",
       "session": "New session"
     }
@@ -521,6 +560,7 @@
   "workflowMode": {
     "chat": "Chat",
     "plan": "Plan",
+    "debug": "Debug",
     "task": "Task"
   },
   "output": {
@@ -614,6 +654,7 @@
     "contextCleared": "Context cleared",
     "historyCleared": "Conversation history cleared",
     "switchToPlanWithContext": "Switching to Plan mode with chat context",
+    "switchToDebugWithContext": "Switching to Debug mode with current context",
     "switchToTaskWithContext": "Switching to Task mode with chat context",
     "switchToChatWithTaskContext": "Switching to Chat mode with task context",
     "contextReset": "Context cleared for new task"
@@ -626,6 +667,10 @@
       "running_execution": "Execution is running. Switch modes only after canceling or pausing the current run.",
       "task_workflow_active": "Task workflow is active. Cancel it before switching modes.",
       "plan_workflow_active": "Plan workflow is active. Cancel it before switching modes.",
+      "debug_workflow_active": "Debug workflow is active. Cancel it before switching modes.",
+      "approval_pending": "A debug approval is pending. Resolve it before switching modes.",
+      "active_experiment": "A debug experiment is running. Wait for it to finish before switching modes.",
+      "verification_running": "Verification is still running. Wait for it to finish before switching modes.",
       "structured_question_pending": "A structured interview/clarification question is pending. Answer or skip it before switching modes."
     },
     "modeSwitchFailed": "Failed to switch workflow mode. Please retry.",
@@ -1025,6 +1070,7 @@
     },
     "input": {
       "taskPlaceholder": "Describe a task (implementation / analysis / refactor)...",
+      "debugPlaceholder": "Describe the bug, environment, repro steps, logs, and target URL or entrypoint...",
       "configuringPlaceholder": "Type config overrides (e.g. \"6 parallel, enable TDD\") or click Continue above...",
       "interviewPlaceholder": "Type your answer...",
       "prdFeedbackPlaceholder": "Add feedback or press Approve on the PRD card...",
@@ -1308,6 +1354,7 @@
     "outputTab": "Output",
     "gitTab": "Git",
     "contextTab": "Context",
+    "artifactsTab": "Artifacts",
     "resize": "Resize panel",
     "workflowFailures": {
       "title": "Workflow Reliability",
@@ -1397,6 +1444,18 @@
       "meta": {
         "projectSession": "project: {{project}} | session: {{session}}"
       }
+    },
+    "debugArtifacts": {
+      "title": "Debug artifacts",
+      "count": "artifacts",
+      "loading": "Loading artifacts...",
+      "loadFailed": "Failed to load debug artifacts.",
+      "previewFailed": "Failed to load artifact preview.",
+      "loadingPreview": "Loading preview...",
+      "empty": "No debug artifacts are available yet.",
+      "noSession": "Start a Debug case to inspect artifacts.",
+      "selectArtifact": "Select an artifact to inspect it.",
+      "binary": "This artifact is binary or not previewable as text."
     },
     "errors": {
       "summary": "{{count}} issue(s)",

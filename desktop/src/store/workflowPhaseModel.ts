@@ -4,7 +4,11 @@ export type ModeSwitchBlockReason =
   | 'running_execution'
   | 'task_workflow_active'
   | 'plan_workflow_active'
+  | 'debug_workflow_active'
   | 'structured_question_pending'
+  | 'approval_pending'
+  | 'active_experiment'
+  | 'verification_running'
   | null;
 
 export const TASK_PHASES = [
@@ -46,17 +50,36 @@ export const PLAN_PHASES = [
   'failed',
   'cancelled',
 ] as const;
+export const DEBUG_PHASES = [
+  'intaking',
+  'clarifying',
+  'gathering_signal',
+  'reproducing',
+  'hypothesizing',
+  'testing_hypothesis',
+  'identifying_root_cause',
+  'proposing_fix',
+  'patch_review',
+  'patching',
+  'verifying',
+  'completed',
+  'failed',
+  'cancelled',
+] as const;
 
 export type TaskPhase = (typeof TASK_PHASES)[number];
 export type PlanPhase = (typeof PLAN_PHASES)[number];
 export type ChatPhase = (typeof CHAT_PHASES)[number];
+export type DebugPhase = (typeof DEBUG_PHASES)[number];
 export type NormalizedChatPhase = ChatPhase | 'unknown';
 export type NormalizedTaskPhase = TaskPhase | 'unknown';
 export type NormalizedPlanPhase = PlanPhase | 'unknown';
+export type NormalizedDebugPhase = DebugPhase | 'unknown';
 
 const CHAT_PHASE_SET = new Set<string>(CHAT_PHASES);
 const TASK_PHASE_SET = new Set<string>(TASK_PHASES);
 const PLAN_PHASE_SET = new Set<string>(PLAN_PHASES);
+const DEBUG_PHASE_SET = new Set<string>(DEBUG_PHASES);
 const CHAT_BUSY_PHASES = new Set<ChatPhase>(['submitting', 'streaming', 'paused']);
 const TASK_BUSY_PHASES = new Set<TaskPhase>([
   'analyzing',
@@ -68,6 +91,15 @@ const TASK_BUSY_PHASES = new Set<TaskPhase>([
   'paused',
 ]);
 const PLAN_BUSY_PHASES = new Set<PlanPhase>(['analyzing', 'planning', 'executing']);
+const DEBUG_BUSY_PHASES = new Set<DebugPhase>([
+  'clarifying',
+  'gathering_signal',
+  'reproducing',
+  'testing_hypothesis',
+  'identifying_root_cause',
+  'patching',
+  'verifying',
+]);
 const TERMINAL_PHASES = new Set<string>(['idle', 'completed', 'failed', 'cancelled']);
 const CHAT_TERMINAL_PHASES = new Set<string>(['ready', 'failed', 'cancelled', 'interrupted']);
 
@@ -94,6 +126,11 @@ export function normalizePlanPhase(phase: string | null | undefined): Normalized
   return PLAN_PHASE_SET.has(normalized) ? (normalized as PlanPhase) : 'unknown';
 }
 
+export function normalizeDebugPhase(phase: string | null | undefined): NormalizedDebugPhase {
+  const normalized = normalizeRawPhase(phase);
+  return DEBUG_PHASE_SET.has(normalized) ? (normalized as DebugPhase) : 'unknown';
+}
+
 export function isChatPhaseTerminal(phase: string | null | undefined): boolean {
   const normalized = normalizeChatPhase(phase);
   if (normalized === 'unknown') return false;
@@ -110,6 +147,12 @@ export function isPlanPhaseTerminal(phase: string | null | undefined): boolean {
   const normalized = normalizePlanPhase(phase);
   if (normalized === 'unknown') return false;
   return TERMINAL_PHASES.has(normalized);
+}
+
+export function isDebugPhaseTerminal(phase: string | null | undefined): boolean {
+  const normalized = normalizeDebugPhase(phase);
+  if (normalized === 'unknown') return false;
+  return normalized === 'completed' || normalized === 'failed' || normalized === 'cancelled';
 }
 
 export function isTaskPhaseBusy(phase: string | null | undefined): boolean {
@@ -130,6 +173,12 @@ export function isPlanPhaseBusy(phase: string | null | undefined): boolean {
   return PLAN_BUSY_PHASES.has(normalized);
 }
 
+export function isDebugPhaseBusy(phase: string | null | undefined): boolean {
+  const normalized = normalizeDebugPhase(phase);
+  if (normalized === 'unknown') return true;
+  return DEBUG_BUSY_PHASES.has(normalized);
+}
+
 export function isKernelLifecyclePhaseTerminal(phase: string | null | undefined): boolean {
   const normalized = normalizeRawPhase(phase);
   if (CHAT_PHASE_SET.has(normalized) || normalized === 'running') {
@@ -148,6 +197,7 @@ export function isWorkflowModeActive(params: {
   if (!params.isKernelSessionActive) return false;
   if (params.mode === 'task') return !isTaskPhaseTerminal(params.phase);
   if (params.mode === 'plan') return !isPlanPhaseTerminal(params.phase);
+  if (params.mode === 'debug') return !isDebugPhaseTerminal(params.phase);
   return !isChatPhaseTerminal(params.phase);
 }
 
@@ -156,13 +206,27 @@ export function resolveModeSwitchBlockReasonFromKernel(params: {
   workflowMode: WorkflowMode;
   workflowPhase: string;
   planPhase: string;
+  debugPhase?: string;
   isTaskWorkflowActive: boolean;
   isPlanWorkflowActive: boolean;
+  isDebugWorkflowActive?: boolean;
   hasStructuredInterviewQuestion: boolean;
   hasPlanClarifyQuestion: boolean;
+  hasDebugPendingApproval?: boolean;
+  hasDebugActiveExperiment?: boolean;
+  hasDebugVerificationRunning?: boolean;
 }): ModeSwitchBlockReason {
   if (params.hasStructuredInterviewQuestion || params.hasPlanClarifyQuestion) {
     return 'structured_question_pending';
+  }
+  if (params.hasDebugPendingApproval) {
+    return 'approval_pending';
+  }
+  if (params.hasDebugActiveExperiment) {
+    return 'active_experiment';
+  }
+  if (params.hasDebugVerificationRunning) {
+    return 'verification_running';
   }
   if (params.isRunning) {
     return 'running_execution';
@@ -180,13 +244,27 @@ export function resolveModeSwitchBlockReasonFromKernel(params: {
     return 'plan_workflow_active';
   }
 
+  const debugActive =
+    params.isDebugWorkflowActive || (params.workflowMode === 'debug' && !isDebugPhaseTerminal(params.debugPhase));
+  if (debugActive) {
+    return 'debug_workflow_active';
+  }
+
   return null;
 }
 
-export function markUnknownPhaseForReporting(mode: 'task' | 'plan', rawPhase: string | null | undefined): boolean {
+export function markUnknownPhaseForReporting(
+  mode: 'task' | 'plan' | 'debug',
+  rawPhase: string | null | undefined,
+): boolean {
   const normalized = normalizeRawPhase(rawPhase);
   if (!normalized) return false;
-  const known = mode === 'task' ? TASK_PHASE_SET.has(normalized) : PLAN_PHASE_SET.has(normalized);
+  const known =
+    mode === 'task'
+      ? TASK_PHASE_SET.has(normalized)
+      : mode === 'plan'
+        ? PLAN_PHASE_SET.has(normalized)
+        : DEBUG_PHASE_SET.has(normalized);
   if (known) return false;
 
   const key = `${mode}:${normalized}`;

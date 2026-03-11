@@ -7,6 +7,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import i18n from '../i18n';
+import type { DebugEnvironment } from '../types/debugMode';
 
 export type Backend = 'claude-code' | 'claude-api' | 'openai' | 'deepseek' | 'glm' | 'qwen' | 'minimax' | 'ollama';
 export type Theme = 'system' | 'light' | 'dark';
@@ -18,6 +19,7 @@ export type MinimaxEndpoint = 'international' | 'china';
 export type QwenEndpoint = 'china' | 'singapore' | 'us';
 export type MemoryReviewMode = 'llm_review' | 'auto_approve' | 'manual_only';
 export type UpdateChannel = 'stable' | 'beta' | 'alpha';
+export type DebugBrowserProfile = 'desktop' | 'mobile';
 const SETTINGS_PERSIST_VERSION = 9;
 const PLAN_MODE_PHASE_IDS = [
   'plan_strategy',
@@ -159,6 +161,12 @@ interface SettingsState {
   // Search provider settings
   searchProvider: 'tavily' | 'brave' | 'duckduckgo';
 
+  // Debug mode settings
+  debugDefaultEnvironment: DebugEnvironment;
+  debugBrowserProfile: DebugBrowserProfile;
+  debugViewportPresets: string[];
+  debugProductionDiagnosticsAllowlist: string[];
+
   // Phase agent configs
   phaseConfigs: Record<string, PhaseAgentConfig>;
 
@@ -188,6 +196,10 @@ interface SettingsState {
   setQwenEndpoint: (endpoint: QwenEndpoint) => void;
   setMaxConcurrentSubagents: (value: number) => void;
   setSearchProvider: (provider: 'tavily' | 'brave' | 'duckduckgo') => void;
+  setDebugDefaultEnvironment: (environment: DebugEnvironment) => void;
+  setDebugBrowserProfile: (profile: DebugBrowserProfile) => void;
+  setDebugViewportPresets: (presets: string[]) => void;
+  setDebugProductionDiagnosticsAllowlist: (allowlist: string[]) => void;
 
   // Phase agent actions
   setPhaseConfigs: (configs: Record<string, PhaseAgentConfig>) => void;
@@ -328,6 +340,12 @@ const defaultSettings = {
 
   // Search provider
   searchProvider: 'duckduckgo' as const,
+
+  // Debug mode
+  debugDefaultEnvironment: 'dev' as DebugEnvironment,
+  debugBrowserProfile: 'desktop' as DebugBrowserProfile,
+  debugViewportPresets: ['desktop:1440x900', 'tablet:1024x768', 'mobile:390x844'],
+  debugProductionDiagnosticsAllowlist: [] as string[],
 
   // Phase agent configs
   phaseConfigs: {
@@ -492,6 +510,20 @@ function ensureUpdatePreferences(settings: Partial<SettingsState>): UpdatePrefer
   };
 }
 
+function ensureDebugViewportPresets(value: Partial<SettingsState>['debugViewportPresets']): string[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+    : [...defaultSettings.debugViewportPresets];
+}
+
+function ensureDebugProductionDiagnosticsAllowlist(
+  value: Partial<SettingsState>['debugProductionDiagnosticsAllowlist'],
+): string[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+    : [...defaultSettings.debugProductionDiagnosticsAllowlist];
+}
+
 export const useSettingsStore = create<SettingsState>()(
   persist(
     (set) => ({
@@ -581,6 +613,16 @@ export const useSettingsStore = create<SettingsState>()(
       setMinimaxEndpoint: (minimaxEndpoint) => set({ minimaxEndpoint }),
       setQwenEndpoint: (qwenEndpoint) => set({ qwenEndpoint }),
       setSearchProvider: (searchProvider) => set({ searchProvider }),
+      setDebugDefaultEnvironment: (debugDefaultEnvironment) => set({ debugDefaultEnvironment }),
+      setDebugBrowserProfile: (debugBrowserProfile) => set({ debugBrowserProfile }),
+      setDebugViewportPresets: (debugViewportPresets) =>
+        set({ debugViewportPresets: ensureDebugViewportPresets(debugViewportPresets) }),
+      setDebugProductionDiagnosticsAllowlist: (debugProductionDiagnosticsAllowlist) =>
+        set({
+          debugProductionDiagnosticsAllowlist: ensureDebugProductionDiagnosticsAllowlist(
+            debugProductionDiagnosticsAllowlist,
+          ),
+        }),
 
       setPhaseConfigs: (phaseConfigs) => set({ phaseConfigs }),
       updatePhaseConfig: (phaseId, config) =>
@@ -739,6 +781,16 @@ export const useSettingsStore = create<SettingsState>()(
           memorySettings: ensureMemorySettings(state),
           developerPanels: ensureDeveloperPanels(state),
           updatePreferences: ensureUpdatePreferences(state),
+          debugDefaultEnvironment:
+            state.debugDefaultEnvironment === 'staging' || state.debugDefaultEnvironment === 'prod'
+              ? state.debugDefaultEnvironment
+              : defaultSettings.debugDefaultEnvironment,
+          debugBrowserProfile:
+            state.debugBrowserProfile === 'mobile' ? state.debugBrowserProfile : defaultSettings.debugBrowserProfile,
+          debugViewportPresets: ensureDebugViewportPresets(state.debugViewportPresets),
+          debugProductionDiagnosticsAllowlist: ensureDebugProductionDiagnosticsAllowlist(
+            state.debugProductionDiagnosticsAllowlist,
+          ),
           developerSettingsInitialized:
             typeof state.developerSettingsInitialized === 'boolean' ? state.developerSettingsInitialized : false,
         };
@@ -766,6 +818,18 @@ export const useSettingsStore = create<SettingsState>()(
         mergedState.memorySettings = ensureMemorySettings(mergedState);
         mergedState.developerPanels = ensureDeveloperPanels(mergedState);
         mergedState.updatePreferences = ensureUpdatePreferences(mergedState);
+        mergedState.debugDefaultEnvironment =
+          mergedState.debugDefaultEnvironment === 'staging' || mergedState.debugDefaultEnvironment === 'prod'
+            ? mergedState.debugDefaultEnvironment
+            : defaultSettings.debugDefaultEnvironment;
+        mergedState.debugBrowserProfile =
+          mergedState.debugBrowserProfile === 'mobile'
+            ? mergedState.debugBrowserProfile
+            : defaultSettings.debugBrowserProfile;
+        mergedState.debugViewportPresets = ensureDebugViewportPresets(mergedState.debugViewportPresets);
+        mergedState.debugProductionDiagnosticsAllowlist = ensureDebugProductionDiagnosticsAllowlist(
+          mergedState.debugProductionDiagnosticsAllowlist,
+        );
         mergedState.developerSettingsInitialized =
           typeof mergedState.developerSettingsInitialized === 'boolean'
             ? mergedState.developerSettingsInitialized

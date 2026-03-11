@@ -8,6 +8,9 @@ import jaSimpleMode from '../locales/ja/simpleMode.json';
 import enPlanMode from '../locales/en/planMode.json';
 import zhPlanMode from '../locales/zh/planMode.json';
 import jaPlanMode from '../locales/ja/planMode.json';
+import enDebugMode from '../locales/en/debugMode.json';
+import zhDebugMode from '../locales/zh/debugMode.json';
+import jaDebugMode from '../locales/ja/debugMode.json';
 
 type LocaleTree = Record<string, unknown>;
 
@@ -122,6 +125,15 @@ describe('simple plan/task i18n parity', () => {
     });
   });
 
+  it('keeps debugMode locale keys and placeholders aligned', () => {
+    expectParityForNamespace({
+      namespace: 'debugMode',
+      en: enDebugMode as LocaleTree,
+      zh: zhDebugMode as LocaleTree,
+      ja: jaDebugMode as LocaleTree,
+    });
+  });
+
   it('prevents new raw UI strings in queue/plan editor components', () => {
     const currentDir = path.dirname(fileURLToPath(import.meta.url));
     const projectRoot = path.resolve(currentDir, '../../..');
@@ -145,19 +157,33 @@ describe('simple plan/task i18n parity', () => {
       { namespace: 'simpleMode', key: 'workflow.modeHandoffCard.summaryKinds.task_prd' },
       { namespace: 'planMode', key: 'plan.approveAndExecute' },
       { namespace: 'planMode', key: 'plan.validation.blockTitle' },
+      { namespace: 'debugMode', key: 'cards.patchReview.approve' },
+      { namespace: 'debugMode', key: 'cards.incidentSummary.defaultTitle' },
     ] as const;
 
     for (const sample of sampleKeys) {
       const en = getNestedString(
-        (sample.namespace === 'simpleMode' ? enSimpleMode : enPlanMode) as LocaleTree,
+        (sample.namespace === 'simpleMode'
+          ? enSimpleMode
+          : sample.namespace === 'planMode'
+            ? enPlanMode
+            : enDebugMode) as LocaleTree,
         sample.key,
       );
       const zh = getNestedString(
-        (sample.namespace === 'simpleMode' ? zhSimpleMode : zhPlanMode) as LocaleTree,
+        (sample.namespace === 'simpleMode'
+          ? zhSimpleMode
+          : sample.namespace === 'planMode'
+            ? zhPlanMode
+            : zhDebugMode) as LocaleTree,
         sample.key,
       );
       const ja = getNestedString(
-        (sample.namespace === 'simpleMode' ? jaSimpleMode : jaPlanMode) as LocaleTree,
+        (sample.namespace === 'simpleMode'
+          ? jaSimpleMode
+          : sample.namespace === 'planMode'
+            ? jaPlanMode
+            : jaDebugMode) as LocaleTree,
         sample.key,
       );
       expect(en.length, `[${sample.namespace}] missing en text for ${sample.key}`).toBeGreaterThan(0);

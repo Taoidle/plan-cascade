@@ -8,6 +8,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type {
   CommandResponse,
   ConnectedMcpToolDetail,
+  ConnectedMcpToolInvokeResult,
   ConnectedServerInfo,
   HealthCheckResult,
   ImportResult,
@@ -96,6 +97,18 @@ export const mcpApi = {
 
   getConnectedServerTools(serverId: string): Promise<CommandResponse<ConnectedMcpToolDetail[]>> {
     return invokeMcp('get_connected_mcp_server_tools', { serverId });
+  },
+
+  invokeConnectedTool(
+    serverId: string,
+    toolName: string,
+    argumentsValue?: Record<string, unknown> | null,
+  ): Promise<CommandResponse<ConnectedMcpToolInvokeResult>> {
+    return invokeMcp('invoke_connected_mcp_tool', {
+      serverId,
+      toolName,
+      arguments: argumentsValue ?? {},
+    });
   },
 
   getServerDetail(id: string, includeSecrets = true): Promise<CommandResponse<McpServer>> {

@@ -45,6 +45,22 @@ const TASK_PHASES = [
   'failed',
   'cancelled',
 ];
+const DEBUG_PHASES = [
+  'intaking',
+  'clarifying',
+  'gathering_signal',
+  'reproducing',
+  'hypothesizing',
+  'testing_hypothesis',
+  'identifying_root_cause',
+  'proposing_fix',
+  'patch_review',
+  'patching',
+  'verifying',
+  'completed',
+  'failed',
+  'cancelled',
+];
 
 function humanizeSnakeCase(value: string): string {
   const normalized = value.replace(/[_-]+/g, ' ').trim();
@@ -54,6 +70,7 @@ function humanizeSnakeCase(value: string): string {
 
 function getPhases(mode: WorkflowMode): string[] {
   if (mode === 'plan') return PLAN_PHASES;
+  if (mode === 'debug') return DEBUG_PHASES;
   if (mode === 'task') return TASK_PHASES;
   return CHAT_PHASES;
 }
@@ -153,7 +170,9 @@ export function WorkflowKernelProgressPanel({ workflowMode, workflowPhase }: Wor
       ? (session?.modeSnapshots.task?.phase ?? (workflowMode === 'task' ? workflowPhase : fallbackPhase))
       : activeMode === 'plan'
         ? (session?.modeSnapshots.plan?.phase ?? (workflowMode === 'plan' ? workflowPhase : fallbackPhase))
-        : (session?.modeSnapshots.chat?.phase ?? (workflowMode === 'chat' ? workflowPhase : fallbackPhase));
+        : activeMode === 'debug'
+          ? (session?.modeSnapshots.debug?.phase ?? (workflowMode === 'debug' ? workflowPhase : fallbackPhase))
+          : (session?.modeSnapshots.chat?.phase ?? (workflowMode === 'chat' ? workflowPhase : fallbackPhase));
 
   const phaseList = getPhases(activeMode);
   const sessionStatus = session?.status ?? 'active';

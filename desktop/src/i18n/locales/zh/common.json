@@ -115,6 +115,41 @@
     "loadFailed": "加载失败"
   },
 
+  "projects": {
+    "title": "项目",
+    "searchPlaceholder": "搜索项目...",
+    "sortBy": "排序方式",
+    "sort": {
+      "recentActivity": "最近活动",
+      "name": "名称 A-Z",
+      "sessionCount": "会话最多"
+    },
+    "sessions": "个会话",
+    "sessions_plural": "个会话",
+    "messages": "条消息",
+    "messages_plural": "条消息",
+    "checkpoints": "个检查点",
+    "checkpoints_plural": "个检查点",
+    "noProjects": "未找到项目",
+    "noSearchResults": "未找到结果",
+    "noSessions": "该项目中没有会话",
+    "noPreview": "没有可用预览",
+    "noDetails": "无法加载会话详情",
+    "selectProject": "选择一个项目以查看会话",
+    "searchSessions": "搜索会话...",
+    "resume": "继续",
+    "debugCasesTitle": "调试案例",
+    "debugCasesDescription": "当前工作区下活跃或被中断的 Debug 模式会话。",
+    "openDebugCase": "在 Simple 中打开",
+    "sessionDetails": "会话详情",
+    "messageType": {
+      "user": "用户",
+      "assistant": "助手",
+      "toolCall": "工具调用",
+      "toolResult": "工具结果"
+    }
+  },
+
   "indexing": {
     "idle": "未索引",
     "queued": "排队中",
@@ -158,7 +193,8 @@
     "justNow": "刚刚",
     "minutesAgo": "{{count}}分钟前",
     "hoursAgo": "{{count}}小时前",
-    "daysAgo": "{{count}}天前"
+    "daysAgo": "{{count}}天前",
+    "unknown": "未知"
   },
 
   "labels": {
@@ -176,6 +212,22 @@
     "cancel": "取消",
     "done": "完成",
     "adding": "添加中..."
+  },
+  "recoveryPrompt": {
+    "title": "检测到中断的恢复项",
+    "fallbackTaskTitle": "未命名执行",
+    "fallbackDebugTitle": "中断的调试案例",
+    "checkpoints_one": "{{count}} 个检查点",
+    "checkpoints_other": "{{count}} 个检查点",
+    "resuming": "恢复中...",
+    "recovering": "恢复中...",
+    "discard": "丢弃",
+    "confirmDiscard": "确认丢弃",
+    "dismiss": "关闭",
+    "recoverDebugCase": "恢复调试案例",
+    "interrupted": "已中断",
+    "debugDescription": "这个调试会话已被中断，可以从上次状态恢复。",
+    "footer": "这些任务或调试会话在之前的会话中被中断。你可以从最近的检查点恢复，或直接关闭。"
   },
 
   "mcp": {

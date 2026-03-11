@@ -141,7 +141,7 @@ pub struct PolicyDecision {
 }
 
 impl PolicyDecision {
-    fn allow(risk: ToolRisk, reason: impl Into<String>) -> Self {
+    pub(crate) fn allow(risk: ToolRisk, reason: impl Into<String>) -> Self {
         Self {
             action: PolicyAction::Allow,
             risk,
@@ -150,7 +150,11 @@ impl PolicyDecision {
         }
     }
 
-    fn prompt(risk: ToolRisk, reason: impl Into<String>, approval_scope_key: String) -> Self {
+    pub(crate) fn prompt(
+        risk: ToolRisk,
+        reason: impl Into<String>,
+        approval_scope_key: String,
+    ) -> Self {
         Self {
             action: PolicyAction::Prompt,
             risk,
@@ -159,7 +163,7 @@ impl PolicyDecision {
         }
     }
 
-    fn deny(risk: ToolRisk, reason: impl Into<String>) -> Self {
+    pub(crate) fn deny(risk: ToolRisk, reason: impl Into<String>) -> Self {
         Self {
             action: PolicyAction::Deny,
             risk,

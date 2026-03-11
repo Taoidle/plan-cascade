@@ -1,0 +1,91 @@
+{
+  "modeLabel": "Debug",
+  "intake": {
+    "defaultTitle": "新しいデバッグケース"
+  },
+  "cards": {
+    "browserRuntime": {
+      "title": "ブラウザブリッジ",
+      "installHint": "推奨 MCP カタログ項目: {{itemId}}"
+    },
+    "console": {
+      "title": "コンソール診断"
+    },
+    "network": {
+      "title": "ネットワーク診断",
+      "slowest": "最も遅いリクエスト",
+      "harCaptured": "ブラウザ通信から HAR 形式の要約を取得しました。"
+    },
+    "sourceMapping": {
+      "title": "ソースマッピングの手掛かり",
+      "summary": "これらのブラウザ側の手掛かりから、障害をフロントエンドのバンドルやルートにたどれます。",
+      "bundleScripts": "バンドルスクリプト",
+      "sourceMaps": "ソースマップ",
+      "resolvedSources": "解決済みソース",
+      "stackFrames": "スタックフレーム",
+      "matchedMaps": "一致したソースマップ",
+      "originalPositions": "元の位置候補"
+    },
+    "performance": {
+      "title": "パフォーマンス診断",
+      "longTasks": "最も長いタスク"
+    },
+    "reproduction": {
+      "missingUrl": "Debug がブラウザ証拠を自動収集できるように、ページ URL を指定してください。",
+      "bridgeOnly": "この端末では自動収集に使えるブラウザブリッジがまだ利用できません。Chrome DevTools MCP を接続するか、内蔵 Browser ツールを有効化してください。",
+      "captureFailed": "ブラウザ証拠の自動収集に失敗しました。ページ URL とブラウザ利用可否を確認してください。",
+      "captured": "対象ページからブラウザ証拠を収集しました。",
+      "screenshotCaptured": "スクリーンショット取得済み"
+    },
+    "patchReview": {
+      "title": "パッチレビューが必要です",
+      "approve": "パッチを承認",
+      "reject": "別の修正案を依頼"
+    },
+    "incidentSummary": {
+      "defaultTitle": "デバッグケース概要"
+    }
+  },
+  "palette": {
+    "switchToDebug": {
+      "title": "Debug モードに切り替える",
+      "description": "現在の Simple ワークフローを Debug モードへ切り替え、証拠主導の調査を開始します。"
+    },
+    "collectBrowserEvidence": {
+      "title": "ブラウザ証拠を収集",
+      "description": "現在のデバッグケースについて、console、network、DOM、source-map の手掛かりを収集します。",
+      "failure": "ブラウザ証拠の収集に失敗しました"
+    },
+    "approvePatch": {
+      "title": "デバッグパッチを承認",
+      "description": "現在のデバッグパッチ案を承認し、パッチ適用フェーズへ進みます。",
+      "failure": "デバッグパッチの承認に失敗しました"
+    },
+    "refreshAnalysis": {
+      "title": "デバッグ分析を更新",
+      "description": "現在のデバッグ証拠から仮説、根本原因、パッチ案を再計算します。",
+      "failure": "デバッグ分析の更新に失敗しました"
+    },
+    "rejectPatch": {
+      "title": "別のデバッグパッチを依頼",
+      "description": "現在のデバッグパッチ案を却下し、新しい修正候補を要求します。",
+      "failure": "デバッグパッチの却下に失敗しました"
+    },
+    "runVerification": {
+      "title": "デバッグ検証を実行",
+      "description": "現在のデバッグケースの検証を再実行し、検証カードを更新します。",
+      "failure": "デバッグ検証の実行に失敗しました"
+    }
+  },
+  "bridgeKinds": {
+    "devtools_mcp": "DevTools MCP 接続済み",
+    "builtin_browser": "内蔵ブラウザブリッジ",
+    "unavailable": "利用可能なブラウザブリッジなし"
+  },
+  "bridgeNotes": {
+    "devtoolsConnected": "Chrome DevTools MCP が接続済みで、Debug から直接ツールを呼び出せます。",
+    "installedNotConnected": "このワークスペースには Chrome DevTools MCP がインストール済みですが、まだ接続されていません。",
+    "catalogAvailable": "Chrome DevTools MCP は内蔵 MCP カタログで利用できますが、このワークスペースにはまだインストールされていません。",
+    "builtinFallback": "内蔵 Browser ツールは自動収集のフォールバックとして引き続き利用できます。"
+  }
+}

@@ -19,6 +19,10 @@ use serde_json::{json, Value};
 use tokio::sync::RwLock;
 
 use crate::commands::task_mode::{TaskConfigConfirmationState, TaskWorkflowConfig};
+use crate::services::debug_mode::{
+    runtime_capabilities_for_profile, DebugCapabilityProfile, DebugPendingApproval,
+    DebugRuntimeCapabilities, DebugState,
+};
 use crate::services::strategy::analyzer::TaskStrategyRecommendation;
 use crate::services::streaming::UnifiedStreamEvent;
 use crate::utils::paths::ensure_plan_cascade_dir;
@@ -29,6 +33,7 @@ pub enum WorkflowMode {
     Chat,
     Plan,
     Task,
+    Debug,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -339,6 +344,12 @@ pub struct ModeRuntimeMeta {
     pub control_capabilities: Option<ChatControlCapabilities>,
     #[serde(default)]
     pub block_reason: Option<String>,
+    #[serde(default)]
+    pub debug_capability_profile: Option<DebugCapabilityProfile>,
+    #[serde(default)]
+    pub debug_runtime_capabilities: Option<DebugRuntimeCapabilities>,
+    #[serde(default)]
+    pub pending_approval: Option<DebugPendingApproval>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -382,6 +393,7 @@ pub enum ModeState {
     Chat(ChatState),
     Plan(PlanState),
     Task(TaskState),
+    Debug(DebugState),
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -390,6 +402,7 @@ pub struct ModeSnapshots {
     pub chat: Option<ChatState>,
     pub plan: Option<PlanState>,
     pub task: Option<TaskState>,
+    pub debug: Option<DebugState>,
 }
 
 impl ModeSnapshots {
@@ -408,6 +421,11 @@ impl ModeSnapshots {
             WorkflowMode::Task => {
                 if self.task.is_none() {
                     self.task = Some(TaskState::default());
+                }
+            }
+            WorkflowMode::Debug => {
+                if self.debug.is_none() {
+                    self.debug = Some(DebugState::default());
                 }
             }
         }
@@ -438,6 +456,15 @@ impl ModeSnapshots {
         self.task
             .as_mut()
             .expect("task snapshot must exist after initialization")
+    }
+
+    fn debug_mut(&mut self) -> &mut DebugState {
+        if self.debug.is_none() {
+            self.debug = Some(DebugState::default());
+        }
+        self.debug
+            .as_mut()
+            .expect("debug snapshot must exist after initialization")
     }
 }
 
@@ -480,6 +507,11 @@ pub enum UserInputIntentType {
     TaskConfiguration,
     TaskInterviewAnswer,
     TaskPrdFeedback,
+    DebugIntake,
+    DebugClarification,
+    DebugHypothesisFeedback,
+    DebugPatchApproval,
+    DebugVerificationControl,
     ExecutionControl,
 }
 
@@ -755,6 +787,7 @@ impl WorkflowKernelState {
         mode_snapshots.ensure_mode(WorkflowMode::Chat);
         mode_snapshots.ensure_mode(WorkflowMode::Plan);
         mode_snapshots.ensure_mode(WorkflowMode::Task);
+        mode_snapshots.ensure_mode(WorkflowMode::Debug);
 
         let mut ledger_entries = Vec::new();
         if let Some(context) = initial_context.as_ref() {
@@ -1059,7 +1092,12 @@ impl WorkflowKernelState {
         });
         let mut results = Vec::new();
         for session in filtered {
-            for mode in [WorkflowMode::Chat, WorkflowMode::Plan, WorkflowMode::Task] {
+            for mode in [
+                WorkflowMode::Chat,
+                WorkflowMode::Plan,
+                WorkflowMode::Task,
+                WorkflowMode::Debug,
+            ] {
                 if self
                     .is_mode_runtime_attached(&session.session_id, mode)
                     .await
@@ -1071,7 +1109,7 @@ impl WorkflowKernelState {
                     WorkflowMode::Chat => {
                         matches!(phase, Some("submitting" | "streaming" | "paused"))
                     }
-                    WorkflowMode::Plan | WorkflowMode::Task => {
+                    WorkflowMode::Plan | WorkflowMode::Task | WorkflowMode::Debug => {
                         is_background_resume_candidate_for_mode(mode, phase.unwrap_or("idle"))
                     }
                 };
@@ -1213,6 +1251,9 @@ impl WorkflowKernelState {
                     backend_kind: Some(backend_kind.to_string()),
                     control_capabilities: Some(capabilities),
                     block_reason: None,
+                    debug_capability_profile: None,
+                    debug_runtime_capabilities: None,
+                    pending_approval: None,
                 },
             );
             session.updated_at = now_rfc3339();
@@ -1578,6 +1619,9 @@ impl WorkflowKernelState {
                     backend_kind: Some(backend_kind.to_string()),
                     control_capabilities: Some(capabilities),
                     block_reason: block_reason.clone(),
+                    debug_capability_profile: None,
+                    debug_runtime_capabilities: None,
+                    pending_approval: None,
                 },
             );
             session.updated_at = now_rfc3339();
@@ -2143,6 +2187,11 @@ impl WorkflowKernelState {
                 .task
                 .as_ref()
                 .map(|task| task.entry_handoff.clone()),
+            WorkflowMode::Debug => session
+                .mode_snapshots
+                .debug
+                .as_ref()
+                .map(|debug| debug.entry_handoff.clone()),
         }
     }
 
@@ -2458,6 +2507,9 @@ impl WorkflowKernelState {
                             backend_kind: Some("task_mode".to_string()),
                             control_capabilities: Some(capabilities),
                             block_reason: block_reason.clone(),
+                            debug_capability_profile: None,
+                            debug_runtime_capabilities: None,
+                            pending_approval: None,
                         },
                     );
                     session.updated_at = now_rfc3339();
@@ -2508,6 +2560,45 @@ impl WorkflowKernelState {
                     }
                     task.pending_interview = pending_interview.clone();
                     session.updated_at = now_rfc3339();
+                }
+            }
+        }
+
+        for kernel_session_id in &linked_kernel_sessions {
+            self.persist_session_record(kernel_session_id).await?;
+        }
+
+        Ok(linked_kernel_sessions)
+    }
+
+    pub async fn sync_debug_snapshot_by_linked_session(
+        &self,
+        debug_session_id: &str,
+        debug_state: DebugState,
+        status: Option<WorkflowStatus>,
+    ) -> Result<Vec<String>, String> {
+        let linked_kernel_sessions = self
+            .kernel_sessions_linked_to_mode_session(WorkflowMode::Debug, debug_session_id)
+            .await;
+        if linked_kernel_sessions.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        {
+            let active_session_id = self.active_session_id().await;
+            let mut sessions = self.sessions.write().await;
+            for kernel_session_id in &linked_kernel_sessions {
+                if let Some(session) = sessions.get_mut(kernel_session_id) {
+                    session.mode_snapshots.ensure_mode(WorkflowMode::Debug);
+                    *session.mode_snapshots.debug_mut() = debug_state.clone();
+                    if let Some(next_status) = status {
+                        session.status = next_status;
+                    }
+                    session.updated_at = now_rfc3339();
+                    self.refresh_session_derived_fields(
+                        session,
+                        active_session_id.as_deref(),
+                    );
                 }
             }
         }
@@ -2810,6 +2901,10 @@ impl WorkflowKernelState {
                     session.status = WorkflowStatus::Cancelled;
                     session.mode_snapshots.task_mut().phase = "cancelled".to_string()
                 }
+                WorkflowMode::Debug => {
+                    session.status = WorkflowStatus::Cancelled;
+                    session.mode_snapshots.debug_mut().phase = "cancelled".to_string()
+                }
             }
             session.clone()
         };
@@ -2898,6 +2993,10 @@ impl WorkflowKernelState {
             session.mode_snapshots.task = Some(TaskState::default());
             repaired.push("mode_snapshots.task".to_string());
         }
+        if session.mode_snapshots.debug.is_none() {
+            session.mode_snapshots.debug = Some(DebugState::default());
+            repaired.push("mode_snapshots.debug".to_string());
+        }
         if session.linked_mode_sessions.is_empty() {
             session.linked_mode_sessions = HashMap::new();
         }
@@ -2964,6 +3063,18 @@ impl WorkflowKernelState {
             }
             if task.last_checkpoint_id.is_none() {
                 task.last_checkpoint_id = session.last_checkpoint_id.clone();
+            }
+        }
+        if let Some(debug) = session.mode_snapshots.debug.as_mut() {
+            if debug.phase.trim().is_empty() {
+                debug.phase = "intaking".to_string();
+                repaired.push("mode_snapshots.debug.phase".to_string());
+            }
+            if debug.background_status.is_none() {
+                debug.background_status = Some("idle".to_string());
+            }
+            if debug.last_checkpoint_id.is_none() {
+                debug.last_checkpoint_id = session.last_checkpoint_id.clone();
             }
         }
         if let Some(meta) = session.mode_runtime_meta.get_mut(&WorkflowMode::Chat) {
@@ -3119,6 +3230,7 @@ impl WorkflowKernelState {
         session.mode_snapshots.ensure_mode(WorkflowMode::Chat);
         session.mode_snapshots.ensure_mode(WorkflowMode::Plan);
         session.mode_snapshots.ensure_mode(WorkflowMode::Task);
+        session.mode_snapshots.ensure_mode(WorkflowMode::Debug);
         session.mode_runtime_meta = build_mode_runtime_meta_map(
             session,
             active_session_id,
@@ -3506,6 +3618,9 @@ fn set_mode_entry_handoff(
         }
         WorkflowMode::Task => {
             session.mode_snapshots.task_mut().entry_handoff = handoff;
+        }
+        WorkflowMode::Debug => {
+            session.mode_snapshots.debug_mut().entry_handoff = handoff;
         }
     }
 }
@@ -3908,6 +4023,28 @@ fn apply_intent_to_mode_state(session: &mut WorkflowSession, intent: &UserInputI
                 _ => {}
             }
         }
+        WorkflowMode::Debug => {
+            let debug = session.mode_snapshots.debug_mut();
+            match intent.intent_type {
+                UserInputIntentType::ModeEntryPrompt | UserInputIntentType::DebugIntake => {
+                    debug.phase = "clarifying".to_string();
+                }
+                UserInputIntentType::DebugClarification => {
+                    debug.phase = "gathering_signal".to_string();
+                }
+                UserInputIntentType::DebugHypothesisFeedback => {
+                    debug.phase = "hypothesizing".to_string();
+                }
+                UserInputIntentType::DebugPatchApproval => {
+                    debug.phase = "patch_review".to_string();
+                }
+                UserInputIntentType::DebugVerificationControl
+                | UserInputIntentType::ExecutionControl => {
+                    debug.phase = "verifying".to_string();
+                }
+                _ => {}
+            }
+        }
     }
 }
 
@@ -3947,6 +4084,7 @@ fn derive_initial_display_title(
         WorkflowMode::Chat => "New chat".to_string(),
         WorkflowMode::Plan => "New plan".to_string(),
         WorkflowMode::Task => "New task".to_string(),
+        WorkflowMode::Debug => "New debug case".to_string(),
     }
 }
 
@@ -3955,7 +4093,7 @@ fn is_default_display_title(title: &str) -> bool {
     normalized.is_empty()
         || matches!(
             normalized.as_str(),
-            "new chat" | "new plan" | "new task" | "new session"
+            "new chat" | "new plan" | "new task" | "new debug case" | "new session"
         )
 }
 
@@ -4190,6 +4328,11 @@ fn phase_for_mode(session: &WorkflowSession, mode: WorkflowMode) -> Option<&str>
             .task
             .as_ref()
             .map(|state| state.phase.as_str()),
+        WorkflowMode::Debug => session
+            .mode_snapshots
+            .debug
+            .as_ref()
+            .map(|state| state.phase.as_str()),
     }
 }
 
@@ -4203,14 +4346,14 @@ fn is_terminal_phase(phase: &str) -> bool {
 fn is_background_resume_candidate_for_mode(mode: WorkflowMode, phase: &str) -> bool {
     match mode {
         WorkflowMode::Chat => !is_chat_terminal_phase(&normalize_chat_phase(phase)),
-        WorkflowMode::Plan | WorkflowMode::Task => !is_terminal_phase(phase),
+        WorkflowMode::Plan | WorkflowMode::Task | WorkflowMode::Debug => !is_terminal_phase(phase),
     }
 }
 
 fn is_interrupted_phase(mode: WorkflowMode, phase: &str) -> bool {
     match mode {
         WorkflowMode::Chat => phase == "interrupted",
-        WorkflowMode::Plan | WorkflowMode::Task => phase == "interrupted",
+        WorkflowMode::Plan | WorkflowMode::Task | WorkflowMode::Debug => phase == "interrupted",
     }
 }
 
@@ -4230,7 +4373,7 @@ fn mark_chat_runtime_interrupted(session: &mut WorkflowSession) -> bool {
 fn resume_policy_for_mode(mode: WorkflowMode) -> &'static str {
     match mode {
         WorkflowMode::Chat => "mark_interrupted_after_restart",
-        WorkflowMode::Plan | WorkflowMode::Task => "resume_from_checkpoint",
+        WorkflowMode::Plan | WorkflowMode::Task | WorkflowMode::Debug => "resume_from_checkpoint",
     }
 }
 
@@ -4240,13 +4383,19 @@ fn build_mode_runtime_meta_map(
     session_last_checkpoint_id: Option<String>,
 ) -> HashMap<WorkflowMode, ModeRuntimeMeta> {
     let is_foreground_session = active_session_id == Some(session.session_id.as_str());
-    [WorkflowMode::Chat, WorkflowMode::Plan, WorkflowMode::Task]
+    [
+        WorkflowMode::Chat,
+        WorkflowMode::Plan,
+        WorkflowMode::Task,
+        WorkflowMode::Debug,
+    ]
         .into_iter()
         .map(|mode| {
             let existing = session.mode_runtime_meta.get(&mode);
             let phase = phase_for_mode(session, mode).unwrap_or(match mode {
                 WorkflowMode::Chat => "ready",
                 WorkflowMode::Plan | WorkflowMode::Task => "idle",
+                WorkflowMode::Debug => "intaking",
             });
             let binding_session_id = session.linked_mode_sessions.get(&mode).cloned();
             let run_id = match mode {
@@ -4263,9 +4412,18 @@ fn build_mode_runtime_meta_map(
                     .as_ref()
                     .and_then(|state| state.run_id.clone())
                     .or_else(|| existing.and_then(|meta| meta.run_id.clone())),
+                WorkflowMode::Debug => None,
             };
             let backend_kind = existing.and_then(|meta| meta.backend_kind.clone());
-            let block_reason = existing.and_then(|meta| meta.block_reason.clone());
+            let block_reason = match mode {
+                WorkflowMode::Debug => session
+                    .mode_snapshots
+                    .debug
+                    .as_ref()
+                    .and_then(|state| state.tool_block_reason.clone())
+                    .or_else(|| existing.and_then(|meta| meta.block_reason.clone())),
+                _ => existing.and_then(|meta| meta.block_reason.clone()),
+            };
             let control_capabilities = if mode == WorkflowMode::Chat {
                 Some(chat_control_capabilities(
                     backend_kind.as_deref(),
@@ -4274,6 +4432,29 @@ fn build_mode_runtime_meta_map(
                 ))
             } else {
                 existing.and_then(|meta| meta.control_capabilities.clone())
+            };
+            let debug_capability_profile = if mode == WorkflowMode::Debug {
+                session
+                    .mode_snapshots
+                    .debug
+                    .as_ref()
+                    .map(|state| state.capability_profile)
+                    .or_else(|| existing.and_then(|meta| meta.debug_capability_profile))
+            } else {
+                None
+            };
+            let debug_runtime_capabilities = debug_capability_profile
+                .map(runtime_capabilities_for_profile)
+                .or_else(|| existing.and_then(|meta| meta.debug_runtime_capabilities.clone()));
+            let pending_approval = if mode == WorkflowMode::Debug {
+                session
+                    .mode_snapshots
+                    .debug
+                    .as_ref()
+                    .and_then(|state| state.pending_approval.clone())
+                    .or_else(|| existing.and_then(|meta| meta.pending_approval.clone()))
+            } else {
+                None
             };
             (
                 mode,
@@ -4292,6 +4473,9 @@ fn build_mode_runtime_meta_map(
                     backend_kind,
                     control_capabilities,
                     block_reason,
+                    debug_capability_profile,
+                    debug_runtime_capabilities,
+                    pending_approval,
                 },
             )
         })
@@ -4305,7 +4489,12 @@ fn derive_background_state(
     if is_foreground_session {
         return WorkflowBackgroundState::Foreground;
     }
-    let has_interrupted_mode = [WorkflowMode::Chat, WorkflowMode::Plan, WorkflowMode::Task]
+    let has_interrupted_mode = [
+        WorkflowMode::Chat,
+        WorkflowMode::Plan,
+        WorkflowMode::Task,
+        WorkflowMode::Debug,
+    ]
         .into_iter()
         .any(|mode| {
             phase_for_mode(session, mode)
@@ -4315,7 +4504,12 @@ fn derive_background_state(
     if has_interrupted_mode {
         return WorkflowBackgroundState::Interrupted;
     }
-    let is_running = [WorkflowMode::Chat, WorkflowMode::Plan, WorkflowMode::Task]
+    let is_running = [
+        WorkflowMode::Chat,
+        WorkflowMode::Plan,
+        WorkflowMode::Task,
+        WorkflowMode::Debug,
+    ]
         .into_iter()
         .any(|mode| {
             phase_for_mode(session, mode)
@@ -4382,6 +4576,7 @@ fn mode_storage_name(mode: WorkflowMode) -> &'static str {
         WorkflowMode::Chat => "chat",
         WorkflowMode::Plan => "plan",
         WorkflowMode::Task => "task",
+        WorkflowMode::Debug => "debug",
     }
 }
 

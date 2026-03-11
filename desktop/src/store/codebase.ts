@@ -56,7 +56,7 @@ export interface ContextPushSummary {
   appendedCount: number;
   contextRefIds: string[];
   sessionId: string;
-  targetMode: 'chat' | 'plan' | 'task';
+  targetMode: 'chat' | 'plan' | 'task' | 'debug';
 }
 
 export interface CodebaseState {
@@ -99,7 +99,7 @@ export interface CodebaseState {
   addContextItem: (item: ContextItem) => void;
   removeContextItem: (index: number) => void;
   clearContextItems: () => void;
-  pushContextToMode: (targetMode: 'chat' | 'plan' | 'task') => Promise<void>;
+  pushContextToMode: (targetMode: 'chat' | 'plan' | 'task' | 'debug') => Promise<void>;
   setError: (message: string | null) => void;
   clearSearch: () => void;
   clearError: () => void;
@@ -147,7 +147,7 @@ function toContextPushSummary(result: CodebaseContextAppendResult): ContextPushS
     appendedCount: result.appended_count,
     contextRefIds: result.context_ref_ids,
     sessionId: result.session_id,
-    targetMode: result.target_mode as 'chat' | 'plan' | 'task',
+    targetMode: result.target_mode as 'chat' | 'plan' | 'task' | 'debug',
   };
 }
 

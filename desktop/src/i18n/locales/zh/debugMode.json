@@ -1,0 +1,91 @@
+{
+  "modeLabel": "调试",
+  "intake": {
+    "defaultTitle": "新的调试案例"
+  },
+  "cards": {
+    "browserRuntime": {
+      "title": "浏览器桥接",
+      "installHint": "推荐安装的 MCP 目录项：{{itemId}}"
+    },
+    "console": {
+      "title": "控制台诊断"
+    },
+    "network": {
+      "title": "网络诊断",
+      "slowest": "最慢请求",
+      "harCaptured": "已从浏览器流量生成 HAR 风格摘要。"
+    },
+    "sourceMapping": {
+      "title": "源码映射线索",
+      "summary": "这些浏览器侧的源码线索可以帮助把故障回溯到前端 bundle、页面路由或资源文件。",
+      "bundleScripts": "Bundle 脚本",
+      "sourceMaps": "Source Map",
+      "resolvedSources": "解析出的源码",
+      "stackFrames": "堆栈帧",
+      "matchedMaps": "匹配到的 Source Map",
+      "originalPositions": "原始位置候选"
+    },
+    "performance": {
+      "title": "性能诊断",
+      "longTasks": "最长任务"
+    },
+    "reproduction": {
+      "missingUrl": "请提供页面 URL，这样 Debug 才能自动采集浏览器证据。",
+      "bridgeOnly": "当前机器上没有可用的自动浏览器取证桥接。请连接 Chrome DevTools MCP 或启用内置 Browser 工具。",
+      "captureFailed": "自动采集浏览器证据失败，请检查页面 URL 和浏览器可用性。",
+      "captured": "已从目标页面采集浏览器证据。",
+      "screenshotCaptured": "已采集截图"
+    },
+    "patchReview": {
+      "title": "需要审核补丁",
+      "approve": "批准补丁",
+      "reject": "要求其他修复方案"
+    },
+    "incidentSummary": {
+      "defaultTitle": "调试案例总结"
+    }
+  },
+  "palette": {
+    "switchToDebug": {
+      "title": "切换到 Debug 模式",
+      "description": "把当前 Simple 工作流切换到 Debug 模式，进入证据驱动的排障流程。"
+    },
+    "collectBrowserEvidence": {
+      "title": "采集浏览器证据",
+      "description": "为当前调试案例采集浏览器 console、network、DOM 和 source-map 线索。",
+      "failure": "采集浏览器证据失败"
+    },
+    "approvePatch": {
+      "title": "批准调试补丁",
+      "description": "批准当前调试补丁方案，并继续进入补丁应用阶段。",
+      "failure": "批准调试补丁失败"
+    },
+    "refreshAnalysis": {
+      "title": "刷新调试分析",
+      "description": "基于当前调试证据重新计算假设、根因和补丁方案。",
+      "failure": "刷新调试分析失败"
+    },
+    "rejectPatch": {
+      "title": "要求其他调试补丁",
+      "description": "拒绝当前调试补丁方案，并要求新的修复候选方案。",
+      "failure": "拒绝调试补丁失败"
+    },
+    "runVerification": {
+      "title": "运行调试验证",
+      "description": "重新执行当前调试案例的验证，并刷新验证卡片。",
+      "failure": "运行调试验证失败"
+    }
+  },
+  "bridgeKinds": {
+    "devtools_mcp": "已连接 DevTools MCP",
+    "builtin_browser": "内置浏览器桥接",
+    "unavailable": "没有可用的浏览器桥接"
+  },
+  "bridgeNotes": {
+    "devtoolsConnected": "Chrome DevTools MCP 已连接，Debug 可以直接调用它的工具。",
+    "installedNotConnected": "当前工作区已安装 Chrome DevTools MCP，但尚未连接。",
+    "catalogAvailable": "内置 MCP 目录里已经提供 Chrome DevTools MCP，但当前工作区尚未安装。",
+    "builtinFallback": "内置 Browser 工具仍可作为自动取证的后备方案。"
+  }
+}

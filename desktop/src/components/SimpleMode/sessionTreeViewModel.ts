@@ -1,4 +1,5 @@
 import i18n from '../../i18n';
+import { buildDebugStateChips, summarizeDebugCase } from '../../lib/debugLabels';
 import type { ExecutionHistoryItem } from '../../store/execution';
 import type { SessionPathSort } from '../../store/settings';
 import type {
@@ -22,6 +23,8 @@ export interface SessionTreeItem {
   isActive: boolean;
   sourceSessionId: string;
   badgeText: 'Live' | 'History' | 'Archived';
+  detailSummary: string | null;
+  detailChips: string[];
 }
 
 export interface PathGroup {
@@ -33,7 +36,7 @@ export interface PathGroup {
   children: SessionTreeItem[];
 }
 
-const DEFAULT_TITLE_SET = new Set(['new chat', 'new plan', 'new task', 'new session']);
+const DEFAULT_TITLE_SET = new Set(['new chat', 'new plan', 'new task', 'new debug case', 'new session']);
 const NO_WORKSPACE_KEY = '__no_workspace__';
 
 function normalizePath(path: string | null | undefined): string | null {
@@ -72,6 +75,9 @@ function localizeDefaultTitle(rawTitle: string): string {
   }
   if (normalized === 'new task') {
     return i18n.t('simpleMode:sidebar.placeholderTitles.task', { defaultValue: 'New task' });
+  }
+  if (normalized === 'new debug case') {
+    return i18n.t('simpleMode:sidebar.placeholderTitles.debug', { defaultValue: 'New debug case' });
   }
   return i18n.t('simpleMode:sidebar.placeholderTitles.session', { defaultValue: 'New session' });
 }
@@ -121,6 +127,24 @@ function isChatBusy(phase: ChatState['phase'] | string | null | undefined): bool
   return phase === 'submitting' || phase === 'streaming' || phase === 'paused';
 }
 
+function deriveDebugDetails(session: WorkflowSessionCatalogItem): {
+  detailSummary: string | null;
+  detailChips: string[];
+} {
+  const debug = session.modeSnapshots.debug;
+  if (!debug) {
+    return { detailSummary: null, detailChips: [] };
+  }
+
+  const detailChips = buildDebugStateChips(debug, { max: 4 });
+  const detailSummary = summarizeDebugCase(debug, debug.pendingPrompt);
+
+  return {
+    detailSummary,
+    detailChips,
+  };
+}
+
 export function deriveSidebarSessionStatus(params: {
   modeSnapshots: ModeSnapshots;
   backgroundState: WorkflowBackgroundState;
@@ -134,8 +158,13 @@ export function deriveSidebarSessionStatus(params: {
     backgroundState === 'interrupted' ||
     modeSnapshots.chat?.phase === 'failed' ||
     modeSnapshots.plan?.phase === 'failed' ||
-    modeSnapshots.task?.phase === 'failed'
+    modeSnapshots.task?.phase === 'failed' ||
+    modeSnapshots.debug?.phase === 'failed'
   ) {
+    return 'attention';
+  }
+
+  if (modeSnapshots.debug?.pendingApproval) {
     return 'attention';
   }
 
@@ -143,6 +172,11 @@ export function deriveSidebarSessionStatus(params: {
     backgroundState === 'background_running' ||
     modeSnapshots.plan?.phase === 'executing' ||
     modeSnapshots.task?.phase === 'executing' ||
+    modeSnapshots.debug?.phase === 'gathering_signal' ||
+    modeSnapshots.debug?.phase === 'hypothesizing' ||
+    modeSnapshots.debug?.phase === 'identifying_root_cause' ||
+    modeSnapshots.debug?.phase === 'verifying' ||
+    modeSnapshots.debug?.phase === 'patching' ||
     isChatBusy(modeSnapshots.chat?.phase)
   ) {
     return 'running';
@@ -180,6 +214,8 @@ function createPathGroup(path: string | null, normalizedPath: string): PathGroup
 
 function toLiveItem(session: WorkflowSessionCatalogItem, activeSessionId: string | null | undefined): SessionTreeItem {
   const kind = session.status === 'archived' ? 'archived' : 'live';
+  const debugDetails =
+    session.activeMode === 'debug' ? deriveDebugDetails(session) : { detailSummary: null, detailChips: [] };
   return {
     id: `${kind}:${session.sessionId}`,
     kind,
@@ -199,6 +235,8 @@ function toLiveItem(session: WorkflowSessionCatalogItem, activeSessionId: string
     isActive: activeSessionId === session.sessionId,
     sourceSessionId: session.sessionId,
     badgeText: kind === 'archived' ? 'Archived' : 'Live',
+    detailSummary: debugDetails.detailSummary,
+    detailChips: debugDetails.detailChips,
   };
 }
 
@@ -216,6 +254,8 @@ function toHistoryItem(item: ExecutionHistoryItem): SessionTreeItem {
     isActive: false,
     sourceSessionId: item.id,
     badgeText: 'History',
+    detailSummary: null,
+    detailChips: [],
   };
 }
 

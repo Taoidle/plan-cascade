@@ -22,6 +22,7 @@ import { useExecutionStore, type ExecutionStatus, type StreamLine } from '../../
 import { useSettingsStore } from '../../store/settings';
 import { useWorkflowOrchestratorStore } from '../../store/workflowOrchestrator';
 import { usePlanOrchestratorStore } from '../../store/planOrchestrator';
+import { useDebugOrchestratorStore } from '../../store/debugOrchestrator';
 import { useWorkflowKernelStore } from '../../store/workflowKernel';
 import { useGitStore } from '../../store/git';
 import { useFileChangesStore } from '../../store/fileChanges';
@@ -34,6 +35,15 @@ import { useContextOpsStore } from '../../store/contextOps';
 import { createFileChangeCardBridge } from '../../lib/fileChangeCardBridge';
 import { listenOpenAIChanges } from '../../lib/simpleModeNavigation';
 import { useToast } from '../shared/Toast';
+import {
+  useGlobalCommandPalette,
+  type Command,
+  LightningBoltIcon,
+  PlayIcon,
+  StopIcon,
+  CheckCircledIcon,
+} from '../shared/CommandPalette';
+import { ReloadIcon } from '@radix-ui/react-icons';
 import { useContextSourcesStore } from '../../store/contextSources';
 import { ChatTranscript } from './ChatTranscript';
 import {
@@ -65,11 +75,13 @@ import { forkKernelChatSessionAtTurn } from '../../store/execution/kernelTranscr
 import type { WorkflowMode } from '../../types/workflowKernel';
 import {
   selectKernelChatRuntime,
+  selectKernelDebugRuntime,
   selectKernelPlanRuntime,
   selectKernelRuntimeStatus,
   selectKernelTaskRuntime,
 } from '../../store/workflowKernelSelectors';
 import {
+  isDebugPhaseBusy,
   isPlanPhaseBusy,
   isTaskPhaseBusy,
   isTaskPhaseTerminal,
@@ -165,7 +177,9 @@ function selectModeTranscriptDetailCount(
 
 export function SimpleModeShell() {
   const { t } = useTranslation('simpleMode');
+  const { t: tDebug } = useTranslation('debugMode');
   const { showToast } = useToast();
+  const { registerCommands, unregisterCommands } = useGlobalCommandPalette();
   const status = useExecutionStore((s) => s.status);
   const activeExecutionId = useExecutionStore((s) => s.activeExecutionId);
   const executionIsCancelling = useExecutionStore((s) => s.isCancelling);
@@ -384,12 +398,25 @@ export function SimpleModeShell() {
   const ensurePlanTerminalCompletionCard = usePlanOrchestratorStore((s) => s.ensureTerminalCompletionCardFromKernel);
   const planWorkflowCancelling = usePlanOrchestratorStore((s) => s.isCancelling);
   const resetPlanWorkflow = usePlanOrchestratorStore((s) => s.resetWorkflow);
+  const startDebugWorkflow = useDebugOrchestratorStore((s) => s.startDebugWorkflow);
+  const submitDebugClarification = useDebugOrchestratorStore((s) => s.submitClarification);
+  const approveDebugPatch = useDebugOrchestratorStore((s) => s.approvePatch);
+  const rejectDebugPatch = useDebugOrchestratorStore((s) => s.rejectPatch);
+  const collectDebugBrowserEvidence = useDebugOrchestratorStore((s) => s.collectBrowserEvidence);
+  const refreshDebugAnalysis = useDebugOrchestratorStore((s) => s.refreshAnalysis);
+  const runDebugVerification = useDebugOrchestratorStore((s) => s.runVerification);
+  const cancelDebugWorkflow = useDebugOrchestratorStore((s) => s.cancelWorkflow);
+  const ensureDebugTerminalSummaryCard = useDebugOrchestratorStore((s) => s.ensureTerminalSummaryCardFromKernel);
+  const debugWorkflowCancelling = useDebugOrchestratorStore((s) => s.isCancelling);
+  const resetDebugWorkflow = useDebugOrchestratorStore((s) => s.resetWorkflow);
   const kernelChatRuntime = useMemo(() => selectKernelChatRuntime(workflowKernelSession), [workflowKernelSession]);
   const kernelTaskRuntime = useMemo(() => selectKernelTaskRuntime(workflowKernelSession), [workflowKernelSession]);
   const kernelPlanRuntime = useMemo(() => selectKernelPlanRuntime(workflowKernelSession), [workflowKernelSession]);
+  const kernelDebugRuntime = useMemo(() => selectKernelDebugRuntime(workflowKernelSession), [workflowKernelSession]);
   const kernelRuntimeStatus = useMemo(() => selectKernelRuntimeStatus(workflowKernelSession), [workflowKernelSession]);
   const workflowKernelTaskPhase = kernelTaskRuntime.phase;
   const workflowKernelPlanPhase = kernelPlanRuntime.phase;
+  const workflowKernelDebugPhase = kernelDebugRuntime.phase;
   const workflowKernelChatPhase = kernelChatRuntime.phase;
   const workflowKernelPendingInterview = kernelTaskRuntime.pendingInterview;
   const workflowKernelPendingClarification = kernelPlanRuntime.pendingClarification;
@@ -400,10 +427,19 @@ export function SimpleModeShell() {
   );
   const workflowPhase = workflowKernelTaskPhase;
   const planPhase = workflowKernelPlanPhase;
+  const debugPhase = workflowKernelDebugPhase;
   const chatPhase = workflowKernelChatPhase;
-  const rightPanelPhase = workflowMode === 'task' ? workflowPhase : workflowMode === 'plan' ? planPhase : chatPhase;
+  const rightPanelPhase =
+    workflowMode === 'task'
+      ? workflowPhase
+      : workflowMode === 'plan'
+        ? planPhase
+        : workflowMode === 'debug'
+          ? debugPhase
+          : chatPhase;
   const taskInterviewingPhase = workflowMode === 'task' && workflowPhase === 'interviewing';
   const planClarifyingPhase = workflowMode === 'plan' && planPhase === 'clarifying';
+  const debugClarifyingPhase = workflowMode === 'debug' && debugPhase === 'clarifying';
 
   const hasStructuredInterviewQuestion =
     taskInterviewingPhase &&
@@ -416,9 +452,16 @@ export function SimpleModeShell() {
   const hasPlanClarifyQuestion = planClarifyingPhase && !!planPendingQuestion;
   const isTaskWorkflowActiveForSwitchGuard = workflowMode === 'task' && kernelRuntimeStatus.isTaskActive;
   const isPlanWorkflowActiveForSwitchGuard = workflowMode === 'plan' && kernelRuntimeStatus.isPlanActive;
+  const isDebugWorkflowActiveForSwitchGuard = workflowMode === 'debug' && kernelRuntimeStatus.isDebugActive;
   const effectiveTaskPhaseForInput = taskInterviewingPhase ? 'interviewing' : workflowPhase;
   const effectivePlanPhaseForInput = planClarifyingPhase ? 'clarifying' : planPhase;
+  const effectiveDebugPhaseForInput = debugClarifyingPhase ? 'clarifying' : debugPhase;
   const isInterviewSubmitting = taskInterviewingPhase && taskPendingQuestion === null;
+  const hasDebugPendingApproval =
+    workflowMode === 'debug' && !!workflowKernelSession?.modeSnapshots.debug?.pendingApproval;
+  const hasDebugActiveExperiment =
+    workflowMode === 'debug' && (debugPhase === 'reproducing' || debugPhase === 'testing_hypothesis');
+  const hasDebugVerificationRunning = workflowMode === 'debug' && debugPhase === 'verifying';
   const recordInteractiveActionFailure = useWorkflowObservabilityStore((s) => s.recordInteractiveActionFailure);
 
   useEffect(() => {
@@ -465,7 +508,30 @@ export function SimpleModeShell() {
         phaseAfter: planPhase,
       });
     }
+    if (
+      markUnknownPhaseForReporting('debug', debugPhase) &&
+      isWorkflowModeActive({
+        mode: 'debug',
+        currentMode: workflowKernelSession.activeMode,
+        isKernelSessionActive: workflowKernelSession.status === 'active',
+        phase: debugPhase,
+      })
+    ) {
+      void recordInteractiveActionFailure({
+        card: 'workflow_phase',
+        action: 'unknown_phase_detected',
+        errorCode: 'unknown_debug_phase',
+        message: `Unknown debug phase: ${debugPhase}`,
+        mode: 'debug',
+        kernelSessionId: workflowKernelSession.sessionId,
+        modeSessionId: kernelDebugRuntime.linkedSessionId,
+        phaseBefore: debugPhase,
+        phaseAfter: debugPhase,
+      });
+    }
   }, [
+    debugPhase,
+    kernelDebugRuntime.linkedSessionId,
     workflowKernelSession,
     workflowPhase,
     planPhase,
@@ -486,7 +552,9 @@ export function SimpleModeShell() {
   const permissionSessionId =
     (workflowMode === 'task'
       ? kernelTaskRuntime.linkedSessionId
-      : kernelChatBinding?.rawSessionId || standaloneSessionId || activeExecutionId) || '';
+      : workflowMode === 'debug'
+        ? kernelDebugRuntime.linkedSessionId
+        : kernelChatBinding?.rawSessionId || standaloneSessionId || activeExecutionId) || '';
   const permissionRequest =
     pendingPermissionRequest && pendingPermissionRequest.sessionId === permissionSessionId
       ? pendingPermissionRequest
@@ -522,6 +590,15 @@ export function SimpleModeShell() {
     }
   }, [kernelTaskRuntime.linkedSessionId, kernelTaskRuntime.phase, workflowMode]);
 
+  useEffect(() => {
+    if (workflowMode !== 'debug') return;
+    const sessionId = kernelDebugRuntime.linkedSessionId?.trim();
+    if (!sessionId) return;
+    if (debugPhase === 'completed' || debugPhase === 'failed' || debugPhase === 'cancelled') {
+      useToolPermissionStore.getState().clearSessionRequests(sessionId);
+    }
+  }, [debugPhase, kernelDebugRuntime.linkedSessionId, workflowMode]);
+
   const {
     handleStart,
     handleFollowUp,
@@ -536,12 +613,14 @@ export function SimpleModeShell() {
     workflowMode,
     workflowPhase,
     planPhase,
+    debugPhase,
     isSubmitting,
     isAnalyzingStrategy,
     start,
     sendFollowUp,
     startWorkflow,
     startPlanWorkflow,
+    startDebugWorkflow,
     overrideConfigNatural,
     addPrdFeedback,
     submitPlanClarification,
@@ -552,6 +631,8 @@ export function SimpleModeShell() {
     taskPendingQuestion,
     planClarifyingPhase,
     planPendingQuestion,
+    debugClarifyingPhase,
+    submitDebugClarification,
     hasStructuredInterviewQuestion,
     hasStructuredPlanClarifyQuestion,
     linkWorkflowKernelModeSession,
@@ -628,10 +709,15 @@ export function SimpleModeShell() {
     isRunning: chatExecutionUiActive,
     workflowPhase,
     planPhase,
+    debugPhase,
     isTaskWorkflowActive: isTaskWorkflowActiveForSwitchGuard,
     isPlanWorkflowActive: isPlanWorkflowActiveForSwitchGuard,
+    isDebugWorkflowActive: isDebugWorkflowActiveForSwitchGuard,
     hasStructuredInterviewQuestion,
     hasPlanClarifyQuestion,
+    hasDebugPendingApproval,
+    hasDebugActiveExperiment,
+    hasDebugVerificationRunning,
     setWorkflowMode,
     transitionWorkflowKernelMode,
     showToast,
@@ -659,6 +745,172 @@ export function SimpleModeShell() {
     if (!workflowKernelSessionId) return;
     setModeReferences(workflowKernelSessionId, workflowMode, workspaceReferences);
   }, [setModeReferences, workflowKernelSessionId, workflowMode, workspaceReferences]);
+
+  const simpleDebugCommands = useMemo<Command[]>(
+    () => [
+      {
+        id: 'simple-debug-switch',
+        title: tDebug('palette.switchToDebug.title', { defaultValue: 'Switch to Debug mode' }),
+        description: tDebug('palette.switchToDebug.description', {
+          defaultValue: 'Switch the active Simple workflow to Debug mode for evidence-driven troubleshooting.',
+        }),
+        category: 'chat',
+        icon: LightningBoltIcon,
+        action: () => {
+          void handleWorkflowModeChange('debug');
+        },
+        keywords: ['debug', 'incident', 'browser', 'troubleshoot', 'mode'],
+        priority: 95,
+        contexts: ['simple', 'global'],
+        disabled: workflowMode === 'debug',
+      },
+      {
+        id: 'simple-debug-collect-browser-evidence',
+        title: tDebug('palette.collectBrowserEvidence.title', { defaultValue: 'Collect browser evidence' }),
+        description: tDebug('palette.collectBrowserEvidence.description', {
+          defaultValue: 'Capture browser console, network, DOM, and source-map hints for the active debug case.',
+        }),
+        category: 'chat',
+        icon: PlayIcon,
+        action: () => {
+          void collectDebugBrowserEvidence().then((result) => {
+            if (!result.ok) {
+              showToast(
+                tDebug('palette.collectBrowserEvidence.failure', {
+                  defaultValue: 'Failed to collect browser evidence',
+                }),
+                'error',
+              );
+            }
+          });
+        },
+        keywords: ['debug', 'browser', 'evidence', 'console', 'network', 'source map'],
+        priority: 92,
+        contexts: ['simple', 'global'],
+        disabled: workflowMode !== 'debug' || !kernelDebugRuntime.linkedSessionId,
+      },
+      {
+        id: 'simple-debug-approve-patch',
+        title: tDebug('palette.approvePatch.title', { defaultValue: 'Approve debug patch' }),
+        description: tDebug('palette.approvePatch.description', {
+          defaultValue: 'Approve the current debug patch proposal and continue into patching.',
+        }),
+        category: 'chat',
+        icon: CheckCircledIcon,
+        action: () => {
+          void approveDebugPatch().then((result) => {
+            if (!result.ok) {
+              showToast(
+                tDebug('palette.approvePatch.failure', {
+                  defaultValue: 'Failed to approve the debug patch',
+                }),
+                'error',
+              );
+            }
+          });
+        },
+        keywords: ['debug', 'patch', 'approve', 'fix', 'review'],
+        priority: 88,
+        contexts: ['simple', 'global'],
+        disabled: workflowMode !== 'debug' || !hasDebugPendingApproval,
+      },
+      {
+        id: 'simple-debug-refresh-analysis',
+        title: tDebug('palette.refreshAnalysis.title', { defaultValue: 'Refresh debug analysis' }),
+        description: tDebug('palette.refreshAnalysis.description', {
+          defaultValue: 'Recompute hypotheses, root cause, and patch proposal from the current debug evidence.',
+        }),
+        category: 'chat',
+        icon: ReloadIcon,
+        action: () => {
+          void refreshDebugAnalysis().then((result) => {
+            if (!result.ok) {
+              showToast(
+                tDebug('palette.refreshAnalysis.failure', {
+                  defaultValue: 'Failed to refresh debug analysis',
+                }),
+                'error',
+              );
+            }
+          });
+        },
+        keywords: ['debug', 'analysis', 'hypothesis', 'root cause', 'refresh'],
+        priority: 86,
+        contexts: ['simple', 'global'],
+        disabled: workflowMode !== 'debug' || !kernelDebugRuntime.linkedSessionId,
+      },
+      {
+        id: 'simple-debug-reject-patch',
+        title: tDebug('palette.rejectPatch.title', { defaultValue: 'Request another debug patch' }),
+        description: tDebug('palette.rejectPatch.description', {
+          defaultValue: 'Reject the current debug patch proposal and ask for another fix candidate.',
+        }),
+        category: 'chat',
+        icon: StopIcon,
+        action: () => {
+          void rejectDebugPatch().then((result) => {
+            if (!result.ok) {
+              showToast(
+                tDebug('palette.rejectPatch.failure', {
+                  defaultValue: 'Failed to reject the debug patch',
+                }),
+                'error',
+              );
+            }
+          });
+        },
+        keywords: ['debug', 'patch', 'reject', 'fix', 'review'],
+        priority: 84,
+        contexts: ['simple', 'global'],
+        disabled: workflowMode !== 'debug' || !hasDebugPendingApproval,
+      },
+      {
+        id: 'simple-debug-run-verification',
+        title: tDebug('palette.runVerification.title', { defaultValue: 'Run debug verification' }),
+        description: tDebug('palette.runVerification.description', {
+          defaultValue: 'Re-run verification for the active debug case and refresh the verification card.',
+        }),
+        category: 'chat',
+        icon: CheckCircledIcon,
+        action: () => {
+          void runDebugVerification().then((result) => {
+            if (!result.ok) {
+              showToast(
+                tDebug('palette.runVerification.failure', {
+                  defaultValue: 'Failed to run debug verification',
+                }),
+                'error',
+              );
+            }
+          });
+        },
+        keywords: ['debug', 'verification', 'verify', 'retest', 'qa'],
+        priority: 82,
+        contexts: ['simple', 'global'],
+        disabled: workflowMode !== 'debug' || !kernelDebugRuntime.linkedSessionId,
+      },
+    ],
+    [
+      approveDebugPatch,
+      collectDebugBrowserEvidence,
+      handleWorkflowModeChange,
+      hasDebugPendingApproval,
+      kernelDebugRuntime.linkedSessionId,
+      rejectDebugPatch,
+      refreshDebugAnalysis,
+      runDebugVerification,
+      showToast,
+      tDebug,
+      workflowMode,
+    ],
+  );
+
+  useEffect(() => {
+    registerCommands(simpleDebugCommands);
+    return () => {
+      unregisterCommands(simpleDebugCommands.map((command) => command.id));
+    };
+  }, [registerCommands, simpleDebugCommands, unregisterCommands]);
 
   const restoreComposerArtifacts = useCallback(
     (sessionId: string, mode: WorkflowMode) => {
@@ -828,22 +1080,34 @@ export function SimpleModeShell() {
       workflowPhase !== 'cancelled';
     const planWorkflowActive =
       planPhase !== 'idle' && planPhase !== 'completed' && planPhase !== 'failed' && planPhase !== 'cancelled';
+    const debugWorkflowActive =
+      debugPhase !== 'intaking' && debugPhase !== 'completed' && debugPhase !== 'failed' && debugPhase !== 'cancelled';
 
     const submitAsFollowUp =
       isChatSession ||
       (workflowMode === 'task' && taskWorkflowActive) ||
-      (workflowMode === 'plan' && planWorkflowActive);
+      (workflowMode === 'plan' && planWorkflowActive) ||
+      (workflowMode === 'debug' && debugWorkflowActive);
 
     const queueableExecution =
       !executionIsCancelling &&
       !isAnalyzingStrategy &&
       !taskWorkflowCancelling &&
       !planWorkflowCancelling &&
+      !debugWorkflowCancelling &&
       !hasStructuredInterviewQuestion &&
       !hasStructuredPlanClarifyQuestion &&
       ((workflowMode === 'chat' && kernelChatRuntime.canQueue) ||
         (workflowMode === 'task' && workflowPhase === 'executing') ||
         (workflowMode === 'plan' && planPhase === 'executing'));
+    const queuedPhase =
+      workflowMode === 'task'
+        ? workflowPhase
+        : workflowMode === 'debug'
+          ? debugPhase
+          : workflowMode === 'plan'
+            ? planPhase
+            : null;
 
     if (queueableExecution) {
       const submitted = await submitWorkflowInputWithTracking({
@@ -857,7 +1121,7 @@ export function SimpleModeShell() {
             queued: true,
             source: 'simple_mode_follow_up_queue',
             queueDepthBeforeEnqueue: queuedChatMessages.length,
-            phase: workflowMode === 'task' ? workflowPhase : workflowMode === 'plan' ? planPhase : null,
+            phase: queuedPhase,
             attachmentCount: attachments.length,
           },
         },
@@ -887,11 +1151,13 @@ export function SimpleModeShell() {
     workflowMode,
     workflowPhase,
     planPhase,
+    debugPhase,
     kernelChatRuntime.canQueue,
     executionIsCancelling,
     isAnalyzingStrategy,
     taskWorkflowCancelling,
     planWorkflowCancelling,
+    debugWorkflowCancelling,
     hasStructuredInterviewQuestion,
     hasStructuredPlanClarifyQuestion,
     transitionAndSubmitWorkflowKernelInput,
@@ -913,6 +1179,7 @@ export function SimpleModeShell() {
     persistForegroundModeView(workflowKernelSessionId, workflowMode);
     resetWorkflow();
     resetPlanWorkflow();
+    resetDebugWorkflow();
     reset();
     clearStrategyAnalysis();
     clearWorkspaceReferences();
@@ -937,6 +1204,7 @@ export function SimpleModeShell() {
     clearWorkspaceReferences,
     resetWorkflow,
     resetPlanWorkflow,
+    resetDebugWorkflow,
     openWorkflowKernelSession,
     persistForegroundModeView,
     getCachedWorkflowKernelModeTranscript,
@@ -986,10 +1254,12 @@ export function SimpleModeShell() {
 
       resetWorkflow();
       resetPlanWorkflow();
+      resetDebugWorkflow();
       clearStrategyAnalysis();
     },
     [
       clearStrategyAnalysis,
+      resetDebugWorkflow,
       resetPlanWorkflow,
       resetWorkflow,
       showToast,
@@ -1011,6 +1281,7 @@ export function SimpleModeShell() {
       persistForegroundModeView(workflowKernelSessionId, workflowMode);
       resetWorkflow();
       resetPlanWorkflow();
+      resetDebugWorkflow();
       restoreFromHistory(historyId);
       setRightPanelOpen(false);
       setWorkflowMode('chat');
@@ -1035,6 +1306,7 @@ export function SimpleModeShell() {
       restoreFromHistory,
       resetWorkflow,
       resetPlanWorkflow,
+      resetDebugWorkflow,
       clearWorkspaceReferences,
       openWorkflowKernelSession,
       setRightPanelOpen,
@@ -1047,6 +1319,7 @@ export function SimpleModeShell() {
       persistForegroundModeView(workflowKernelSessionId, workflowMode);
       resetWorkflow();
       resetPlanWorkflow();
+      resetDebugWorkflow();
       const activated = await activateWorkflowKernelSession(sessionId);
       if (activated?.session.workspacePath) {
         setWorkspacePath(activated.session.workspacePath);
@@ -1063,6 +1336,7 @@ export function SimpleModeShell() {
       restoreForegroundModeView,
       resetWorkflow,
       resetPlanWorkflow,
+      resetDebugWorkflow,
       workflowKernelSessionId,
       workflowMode,
       setWorkspacePath,
@@ -1096,6 +1370,7 @@ export function SimpleModeShell() {
 
       resetWorkflow();
       resetPlanWorkflow();
+      resetDebugWorkflow();
       reset();
       clearStrategyAnalysis();
       clearWorkspaceReferences();
@@ -1118,6 +1393,7 @@ export function SimpleModeShell() {
       openWorkflowKernelSession,
       persistForegroundModeView,
       reset,
+      resetDebugWorkflow,
       resetPlanWorkflow,
       resetWorkflow,
       restoreComposerArtifacts,
@@ -1134,6 +1410,7 @@ export function SimpleModeShell() {
       persistForegroundModeView(workflowKernelSessionId, workflowMode);
       resetWorkflow();
       resetPlanWorkflow();
+      resetDebugWorkflow();
       const restored = await restoreWorkflowKernelSession(sessionId);
       if (!restored) return;
 
@@ -1147,6 +1424,7 @@ export function SimpleModeShell() {
     },
     [
       persistForegroundModeView,
+      resetDebugWorkflow,
       resetPlanWorkflow,
       resetWorkflow,
       restoreComposerArtifacts,
@@ -1178,6 +1456,7 @@ export function SimpleModeShell() {
 
       resetWorkflow();
       resetPlanWorkflow();
+      resetDebugWorkflow();
       reset();
       clearStrategyAnalysis();
       clearAttachments();
@@ -1201,6 +1480,7 @@ export function SimpleModeShell() {
       deleteWorkflowKernelSession,
       openWorkflowKernelSession,
       persistForegroundModeView,
+      resetDebugWorkflow,
       reset,
       resetPlanWorkflow,
       resetWorkflow,
@@ -1229,6 +1509,7 @@ export function SimpleModeShell() {
     clearHistory();
     resetWorkflow();
     resetPlanWorkflow();
+    resetDebugWorkflow();
     reset();
     clearStrategyAnalysis();
     clearAttachments();
@@ -1252,6 +1533,7 @@ export function SimpleModeShell() {
     deleteWorkflowKernelSession,
     openWorkflowKernelSession,
     persistForegroundModeView,
+    resetDebugWorkflow,
     reset,
     resetPlanWorkflow,
     resetWorkflow,
@@ -1289,11 +1571,14 @@ export function SimpleModeShell() {
         workflowMode,
         taskWorkflowCancelling,
         planWorkflowCancelling,
+        debugWorkflowCancelling,
         isTaskExecuting: kernelTaskRuntime.isBusy,
         isPlanExecuting: workflowKernelPlanPhase === 'executing',
+        isDebugExecuting: debugPhase === 'patching' || debugPhase === 'verifying',
         cancelKernelOperation: cancelWorkflowKernelOperation,
         cancelTaskWorkflow: cancelWorkflow,
         cancelPlanWorkflow: cancelPlanWorkflow,
+        cancelDebugWorkflow,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1303,11 +1588,14 @@ export function SimpleModeShell() {
     cancelWorkflowKernelOperation,
     workflowMode,
     cancelPlanWorkflow,
+    cancelDebugWorkflow,
     cancelWorkflow,
     kernelTaskRuntime.isBusy,
     taskWorkflowCancelling,
     planWorkflowCancelling,
+    debugWorkflowCancelling,
     workflowKernelPlanPhase,
+    debugPhase,
     showToast,
     t,
   ]);
@@ -1438,12 +1726,22 @@ export function SimpleModeShell() {
     isKernelSessionActive: hasActiveKernelSession,
     phase: planPhase,
   });
+  const isDebugWorkflowActive = isWorkflowModeActive({
+    mode: 'debug',
+    currentMode: kernelSessionMode,
+    isKernelSessionActive: hasActiveKernelSession,
+    phase: debugPhase,
+  });
   const isTaskWorkflowBusy =
     workflowMode === 'task' && isTaskWorkflowActive && isTaskPhaseBusy(effectiveTaskPhaseForInput);
   const isPlanWorkflowBusy =
     workflowMode === 'plan' && isPlanWorkflowActive && isPlanPhaseBusy(effectivePlanPhaseForInput);
+  const isDebugWorkflowBusy =
+    workflowMode === 'debug' && isDebugWorkflowActive && isDebugPhaseBusy(effectiveDebugPhaseForInput);
   const isStructuredWorkflowCancelling =
-    (workflowMode === 'task' && taskWorkflowCancelling) || (workflowMode === 'plan' && planWorkflowCancelling);
+    (workflowMode === 'task' && taskWorkflowCancelling) ||
+    (workflowMode === 'plan' && planWorkflowCancelling) ||
+    (workflowMode === 'debug' && debugWorkflowCancelling);
   const canQueueWhileRunning =
     !executionIsCancelling &&
     !isAnalyzingStrategy &&
@@ -1458,6 +1756,7 @@ export function SimpleModeShell() {
     isAnalyzingStrategy ||
     isTaskWorkflowBusy ||
     isPlanWorkflowBusy ||
+    isDebugWorkflowBusy ||
     (workflowMode === 'chat'
       ? kernelChatRuntime.isBusy && !kernelChatRuntime.canQueue
       : isSubmitting && !canQueueWhileRunning);
@@ -1524,6 +1823,12 @@ export function SimpleModeShell() {
     if (planPhase !== 'completed' && planPhase !== 'failed' && planPhase !== 'cancelled') return;
     void ensurePlanTerminalCompletionCard();
   }, [workflowMode, planPhase, ensurePlanTerminalCompletionCard]);
+
+  useEffect(() => {
+    if (workflowMode !== 'debug') return;
+    if (debugPhase !== 'completed' && debugPhase !== 'failed' && debugPhase !== 'cancelled') return;
+    void ensureDebugTerminalSummaryCard();
+  }, [workflowMode, debugPhase, ensureDebugTerminalSummaryCard]);
 
   useEffect(() => {
     if (hoverPanelsEnabled) return;
@@ -1763,6 +2068,7 @@ export function SimpleModeShell() {
               onCancel={handleCancelChatExecution}
               taskWorkflowActive={isTaskWorkflowActive}
               planWorkflowActive={isPlanWorkflowActive}
+              debugWorkflowActive={isDebugWorkflowBusy}
               isWorkflowCancelling={isStructuredWorkflowCancelling}
               onCancelWorkflow={handleCancelStructuredWorkflow}
               onExportImage={handleExportImage}
@@ -1845,6 +2151,7 @@ export function SimpleModeShell() {
                 executionStatus={executionStatusForUi}
                 workspacePath={workspacePath}
                 contextSessionId={contextSessionId}
+                debugSessionId={kernelDebugRuntime.linkedSessionId}
               />
             </div>
           </>
@@ -1917,16 +2224,18 @@ function KernelTranscriptRightPanel({
   executionStatus,
   workspacePath,
   contextSessionId,
+  debugSessionId,
 }: {
   sessionId: string | null;
   mode: WorkflowMode;
-  activeTab: 'output' | 'git' | 'context';
-  onTabChange: (tab: 'output' | 'git' | 'context') => void;
-  workflowMode: 'chat' | 'plan' | 'task';
+  activeTab: 'output' | 'git' | 'context' | 'artifacts';
+  onTabChange: (tab: 'output' | 'git' | 'context' | 'artifacts') => void;
+  workflowMode: 'chat' | 'plan' | 'task' | 'debug';
   workflowPhase: string;
   executionStatus: ExecutionStatus;
   workspacePath: string | null;
   contextSessionId: string | null;
+  debugSessionId: string | null;
 }) {
   const lines = useWorkflowKernelStore(
     useCallback(
@@ -1948,6 +2257,7 @@ function KernelTranscriptRightPanel({
       modeTranscriptLines={lines}
       workspacePath={workspacePath}
       contextSessionId={contextSessionId}
+      debugSessionId={debugSessionId}
     />
   );
 }

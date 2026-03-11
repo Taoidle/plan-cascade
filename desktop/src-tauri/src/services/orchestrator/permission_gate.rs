@@ -12,9 +12,14 @@ use uuid::Uuid;
 
 use super::permissions::{
     evaluate_policy, PermissionLevel, PermissionPolicyConfig, PermissionResponse, PolicyAction,
-    PolicyInput,
+    PolicyDecision, PolicyInput,
+};
+use crate::services::debug_mode::{
+    evaluate_debug_tool_access, runtime_capabilities_for_profile, DebugCapabilityProfile,
+    DebugRuntimeCapabilities,
 };
 use crate::services::streaming::UnifiedStreamEvent;
+use crate::services::tools::runtime_tools;
 
 /// Max time to wait for a frontend permission decision before auto-deny.
 const PERMISSION_RESPONSE_TIMEOUT_SECS: u64 = 300;
@@ -39,6 +44,8 @@ pub struct PermissionGate {
     pending_requests: Mutex<HashMap<String, PendingPermissionRequest>>,
     /// Policy v2 runtime config (domain allowlist etc.).
     policy_config: RwLock<PermissionPolicyConfig>,
+    /// Optional per-session debug capability ceilings.
+    session_debug_capabilities: RwLock<HashMap<String, DebugRuntimeCapabilities>>,
     /// Event sender connected to the agentic loop's stream channel.
     /// Set at the start of each execution via `set_event_tx`.
     event_tx: RwLock<Option<mpsc::Sender<UnifiedStreamEvent>>>,
@@ -52,6 +59,7 @@ impl PermissionGate {
             session_allow_rules: RwLock::new(HashMap::new()),
             pending_requests: Mutex::new(HashMap::new()),
             policy_config: RwLock::new(PermissionPolicyConfig::default()),
+            session_debug_capabilities: RwLock::new(HashMap::new()),
             event_tx: RwLock::new(None),
         }
     }
@@ -101,6 +109,32 @@ impl PermissionGate {
         self.policy_config.read().await.clone()
     }
 
+    /// Attach or clear a debug capability profile for a session.
+    pub async fn set_debug_capability_profile(
+        &self,
+        session_id: &str,
+        profile: Option<DebugCapabilityProfile>,
+    ) {
+        let mut capabilities = self.session_debug_capabilities.write().await;
+        if let Some(profile) = profile {
+            capabilities.insert(session_id.to_string(), runtime_capabilities_for_profile(profile));
+        } else {
+            capabilities.remove(session_id);
+        }
+    }
+
+    /// Get the debug capability snapshot for a session if one is configured.
+    pub async fn get_debug_runtime_capabilities(
+        &self,
+        session_id: &str,
+    ) -> Option<DebugRuntimeCapabilities> {
+        self.session_debug_capabilities
+            .read()
+            .await
+            .get(session_id)
+            .cloned()
+    }
+
     /// Core permission check.
     ///
     /// Uses Policy v2 (`deny > prompt > allow`) and applies session-level
@@ -135,7 +169,7 @@ impl PermissionGate {
     ) -> Result<(), String> {
         let level = self.get_session_level(session_id).await;
         let config = self.get_policy_config().await;
-        let decision = evaluate_policy(
+        let mut decision = evaluate_policy(
             PolicyInput {
                 tool_name,
                 args,
@@ -145,6 +179,51 @@ impl PermissionGate {
             },
             &config,
         );
+
+        if let Some(debug_capabilities) = self.get_debug_runtime_capabilities(session_id).await {
+            let runtime_metadata = runtime_tools::metadata_for(tool_name);
+            let access = evaluate_debug_tool_access(
+                &debug_capabilities,
+                tool_name,
+                None,
+                args,
+                runtime_metadata.as_ref(),
+            );
+            if !access.allowed {
+                return Err(access.blocked_reason.unwrap_or_else(|| {
+                    format!(
+                        "Debug capability profile blocked tool '{tool_name}' for session '{session_id}'."
+                    )
+                }));
+            }
+
+            if access.requires_approval && decision.action == PolicyAction::Allow {
+                let scope_key = format!(
+                    "debug:{}:{}:{}",
+                    tool_name.to_ascii_lowercase(),
+                    match access.classification.capability_class {
+                        crate::services::debug_mode::DebugCapabilityClass::Observe => "observe",
+                        crate::services::debug_mode::DebugCapabilityClass::Experiment => {
+                            "experiment"
+                        }
+                        crate::services::debug_mode::DebugCapabilityClass::Mutate => "mutate",
+                    },
+                    access
+                        .classification
+                        .tool_category
+                        .as_deref()
+                        .unwrap_or("generic")
+                );
+                decision = PolicyDecision::prompt(
+                    decision.risk,
+                    format!(
+                        "Debug mode requires approval: {}",
+                        access.classification.rationale
+                    ),
+                    scope_key,
+                );
+            }
+        }
 
         if decision.action == PolicyAction::Allow {
             return Ok(());
@@ -279,6 +358,10 @@ impl PermissionGate {
         {
             let mut rules = self.session_allow_rules.write().await;
             rules.remove(session_id);
+        }
+        {
+            let mut capabilities = self.session_debug_capabilities.write().await;
+            capabilities.remove(session_id);
         }
         // Cancel any pending requests
         self.cancel_session_requests(session_id).await;
@@ -618,8 +701,68 @@ mod tests {
                 &serde_json::json!({"command": "curl https://api.example.com/v1"}),
                 &cwd,
                 &cwd,
-            )
-            .await;
+        )
+        .await;
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_debug_profile_blocks_mutating_tool_in_prod() {
+        let gate = PermissionGate::new();
+        gate.set_session_level("session-1", PermissionLevel::Permissive)
+            .await;
+        gate.set_debug_capability_profile(
+            "session-1",
+            Some(DebugCapabilityProfile::ProdObserveOnly),
+        )
+        .await;
+
+        let result = gate
+            .check("session-1", "Edit", &serde_json::json!({ "file_path": "src/app.ts" }))
+            .await;
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("blocks Mutate tools"));
+    }
+
+    #[tokio::test]
+    async fn test_debug_profile_prompts_for_experiment_in_staging() {
+        let gate = Arc::new(PermissionGate::new());
+        gate.set_session_level("session-1", PermissionLevel::Permissive)
+            .await;
+        gate.set_debug_capability_profile(
+            "session-1",
+            Some(DebugCapabilityProfile::StagingLimited),
+        )
+        .await;
+        let (tx, mut rx) = mpsc::channel::<UnifiedStreamEvent>(16);
+        gate.set_event_tx(tx).await;
+
+        let gate_clone = Arc::clone(&gate);
+        let check_handle = tokio::spawn(async move {
+            gate_clone
+                .check("session-1", "Browser", &serde_json::json!({ "action": "navigate" }))
+                .await
+        });
+
+        let event = rx.recv().await.unwrap();
+        let request_id = if let UnifiedStreamEvent::ToolPermissionRequest { request_id, .. } = event
+        {
+            request_id
+        } else {
+            panic!("Expected ToolPermissionRequest");
+        };
+        gate.resolve(
+            &request_id,
+            PermissionResponse {
+                request_id: request_id.clone(),
+                allowed: true,
+                always_allow: false,
+            },
+        )
+        .await;
+
+        assert!(check_handle.await.unwrap().is_ok());
     }
 }

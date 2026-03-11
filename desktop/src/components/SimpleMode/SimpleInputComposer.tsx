@@ -9,7 +9,7 @@ import type { QueuePriority, QueuedChatMessage } from './queuePersistence';
 
 export interface SimpleInputComposerProps {
   t: (key: string, opts?: { defaultValue?: string; [key: string]: unknown }) => string;
-  workflowMode: 'chat' | 'plan' | 'task';
+  workflowMode: 'chat' | 'plan' | 'task' | 'debug';
   workflowPhase: string;
   isRunning: boolean;
   taskInterviewingPhase: boolean;
@@ -198,17 +198,22 @@ export function SimpleInputComposer({
                     ? t('workflow.input.taskPlaceholder', {
                         defaultValue: 'Describe a task (implementation / analysis / refactor)...',
                       })
-                    : workflowMode === 'plan'
-                      ? t('workflow.input.planPlaceholder', {
-                          defaultValue: 'Describe a task to decompose and execute (writing, research, etc.)...',
+                    : workflowMode === 'debug'
+                      ? t('workflow.input.debugPlaceholder', {
+                          defaultValue:
+                            'Describe the bug, environment, repro steps, logs, and target URL or entrypoint...',
                         })
-                      : isRunning
-                        ? t('workflow.queue.placeholder', {
-                            defaultValue: 'Execution in progress. Your message will be queued...',
+                      : workflowMode === 'plan'
+                        ? t('workflow.input.planPlaceholder', {
+                            defaultValue: 'Describe a task to decompose and execute (writing, research, etc.)...',
                           })
-                        : t('input.followUpPlaceholder', {
-                            defaultValue: 'Type a normal chat message...',
-                          })
+                        : isRunning
+                          ? t('workflow.queue.placeholder', {
+                              defaultValue: 'Execution in progress. Your message will be queued...',
+                            })
+                          : t('input.followUpPlaceholder', {
+                              defaultValue: 'Type a normal chat message...',
+                            })
         }
         isLoading={inputLoading}
         allowSubmitWhileLoading={canQueueWhileRunning}

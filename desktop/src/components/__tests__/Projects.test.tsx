@@ -8,16 +8,21 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { Projects } from '../Projects/index';
 import { createMockProject, createMockSession } from './test-utils';
 import type { Project, Session } from '../../types/project';
+import type { WorkflowSessionCatalogItem } from '../../types/workflowKernel';
 
 // --------------------------------------------------------------------------
 // Mocks
 // --------------------------------------------------------------------------
 
 vi.mock('react-i18next', () => ({
+  initReactI18next: {
+    type: '3rdParty',
+    init: () => {},
+  },
   useTranslation: () => ({
     t: (key: string, opts?: { count?: number }) => {
       const translations: Record<string, string> = {
@@ -33,6 +38,9 @@ vi.mock('react-i18next', () => ({
         'projects.sessions': `${opts?.count || 0} sessions`,
         'projects.searchSessions': 'Search sessions...',
         'projects.noSessions': 'No sessions',
+        'projects.debugCasesTitle': 'Debug Cases',
+        'projects.debugCasesDescription': 'Active or interrupted Debug mode sessions for this workspace.',
+        'projects.openDebugCase': 'Open in Simple',
         'common.retry': 'Retry',
       };
       return translations[key] || key;
@@ -50,6 +58,9 @@ const mockSearchSessions = vi.fn();
 const mockSetSortBy = vi.fn();
 const mockSetSearchQuery = vi.fn();
 const mockResumeSession = vi.fn();
+const mockActivateWorkflowSession = vi.fn();
+const mockSetMode = vi.fn();
+let mockWorkflowSessionCatalog: WorkflowSessionCatalogItem[] = [];
 
 let mockProjectsState: {
   projects: Project[];
@@ -97,6 +108,26 @@ function resetMockProjectsState() {
 
 vi.mock('../../store/projects', () => ({
   useProjectsStore: () => mockProjectsState,
+}));
+
+vi.mock('../../store/workflowKernel', () => ({
+  useWorkflowKernelStore: (
+    selector: (state: {
+      sessionCatalog: WorkflowSessionCatalogItem[];
+      activateSession: typeof mockActivateWorkflowSession;
+    }) => unknown,
+  ) =>
+    selector({
+      sessionCatalog: mockWorkflowSessionCatalog,
+      activateSession: mockActivateWorkflowSession,
+    }),
+}));
+
+vi.mock('../../store/mode', () => ({
+  useModeStore: (selector: (state: { setMode: typeof mockSetMode }) => unknown) =>
+    selector({
+      setMode: mockSetMode,
+    }),
 }));
 
 // Mock Radix Select to avoid portal issues
@@ -172,6 +203,7 @@ describe('Projects', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetMockProjectsState();
+    mockWorkflowSessionCatalog = [];
   });
 
   it('renders the two-panel layout with project browser', () => {
@@ -274,5 +306,78 @@ describe('Projects', () => {
     render(<Projects />);
 
     expect(screen.getByPlaceholderText('Search projects...')).toBeInTheDocument();
+  });
+
+  it('renders project-scoped debug cases and opens them in Simple mode', async () => {
+    const project = createMockProject({ id: 'proj-1', name: 'My Project', path: '/repo/app' });
+    mockProjectsState.selectedProject = project;
+    mockWorkflowSessionCatalog = [
+      {
+        sessionId: 'debug-1',
+        sessionKind: 'simple_root',
+        displayTitle: 'Checkout debug',
+        workspacePath: '/repo/app',
+        activeMode: 'debug',
+        status: 'active',
+        backgroundState: 'interrupted',
+        updatedAt: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+        lastError: null,
+        contextLedger: {
+          conversationTurnCount: 0,
+          artifactRefCount: 0,
+          contextSourceKinds: [],
+          lastCompactionAt: null,
+          ledgerVersion: 1,
+        },
+        modeSnapshots: {
+          chat: null,
+          plan: null,
+          task: null,
+          debug: {
+            caseId: 'case-1',
+            phase: 'patch_review',
+            severity: 'high',
+            environment: 'staging',
+            symptomSummary: 'Checkout fails after clicking Pay now',
+            title: 'Checkout debug',
+            expectedBehavior: null,
+            actualBehavior: null,
+            reproSteps: [],
+            affectedSurface: ['checkout'],
+            recentChanges: null,
+            targetUrlOrEntry: null,
+            evidenceRefs: [],
+            activeHypotheses: [],
+            selectedRootCause: null,
+            fixProposal: null,
+            pendingApproval: null,
+            verificationReport: null,
+            pendingPrompt: null,
+            capabilityProfile: 'staging_limited',
+            toolBlockReason: null,
+          },
+        },
+        modeRuntimeMeta: {},
+      },
+    ];
+    mockActivateWorkflowSession.mockResolvedValue({
+      session: {} as never,
+      events: [],
+      checkpoints: [],
+    });
+
+    render(<Projects />);
+
+    expect(screen.getByText('Debug Cases')).toBeInTheDocument();
+    expect(screen.getByText('Checkout debug')).toBeInTheDocument();
+    expect(screen.getByText('Open in Simple')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Open in Simple'));
+
+    expect(mockActivateWorkflowSession).toHaveBeenCalledWith('debug-1');
+    await waitFor(() => {
+      expect(mockSetMode).toHaveBeenCalledWith('simple');
+    });
   });
 });

@@ -115,6 +115,41 @@
     "loadFailed": "読み込みに失敗しました"
   },
 
+  "projects": {
+    "title": "プロジェクト",
+    "searchPlaceholder": "プロジェクトを検索...",
+    "sortBy": "並び順",
+    "sort": {
+      "recentActivity": "最近のアクティビティ",
+      "name": "名前 A-Z",
+      "sessionCount": "セッション数順"
+    },
+    "sessions": "セッション",
+    "sessions_plural": "セッション",
+    "messages": "メッセージ",
+    "messages_plural": "メッセージ",
+    "checkpoints": "チェックポイント",
+    "checkpoints_plural": "チェックポイント",
+    "noProjects": "プロジェクトが見つかりません",
+    "noSearchResults": "結果が見つかりません",
+    "noSessions": "このプロジェクトにはセッションがありません",
+    "noPreview": "プレビューはありません",
+    "noDetails": "セッション詳細を読み込めませんでした",
+    "selectProject": "プロジェクトを選択してセッションを表示",
+    "searchSessions": "セッションを検索...",
+    "resume": "再開",
+    "debugCasesTitle": "デバッグケース",
+    "debugCasesDescription": "このワークスペースに属する、進行中または中断した Debug モードセッションです。",
+    "openDebugCase": "Simple で開く",
+    "sessionDetails": "セッション詳細",
+    "messageType": {
+      "user": "ユーザー",
+      "assistant": "アシスタント",
+      "toolCall": "ツール呼び出し",
+      "toolResult": "ツール結果"
+    }
+  },
+
   "indexing": {
     "idle": "未インデックス",
     "queued": "キュー待機中",
@@ -155,7 +190,8 @@
     "justNow": "たった今",
     "minutesAgo": "{{count}}分前",
     "hoursAgo": "{{count}}時間前",
-    "daysAgo": "{{count}}日前"
+    "daysAgo": "{{count}}日前",
+    "unknown": "不明"
   },
 
   "labels": {
@@ -173,6 +209,22 @@
     "cancel": "キャンセル",
     "done": "完了",
     "adding": "追加中..."
+  },
+  "recoveryPrompt": {
+    "title": "中断された回復項目が見つかりました",
+    "fallbackTaskTitle": "無題の実行",
+    "fallbackDebugTitle": "中断されたデバッグケース",
+    "checkpoints_one": "{{count}} チェックポイント",
+    "checkpoints_other": "{{count}} チェックポイント",
+    "resuming": "再開中...",
+    "recovering": "復旧中...",
+    "discard": "破棄",
+    "confirmDiscard": "破棄を確認",
+    "dismiss": "閉じる",
+    "recoverDebugCase": "デバッグケースを復旧",
+    "interrupted": "中断",
+    "debugDescription": "このデバッグセッションは中断されました。前回の状態から復旧できます。",
+    "footer": "これらのタスクまたはデバッグセッションは前回のセッション中に中断されました。最新のチェックポイントから再開するか、閉じることができます。"
   },
 
   "mcp": {

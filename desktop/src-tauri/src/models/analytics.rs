@@ -511,6 +511,7 @@ pub enum AnalyticsWorkflowMode {
     Chat,
     Plan,
     Task,
+    Debug,
 }
 
 impl AnalyticsWorkflowMode {
@@ -519,6 +520,7 @@ impl AnalyticsWorkflowMode {
             AnalyticsWorkflowMode::Chat => "chat",
             AnalyticsWorkflowMode::Plan => "plan",
             AnalyticsWorkflowMode::Task => "task",
+            AnalyticsWorkflowMode::Debug => "debug",
         }
     }
 }

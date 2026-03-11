@@ -11,10 +11,15 @@ interface UseWorkflowModeSwitchGuardParams {
   isRunning: boolean;
   workflowPhase: string;
   planPhase: string;
+  debugPhase?: string;
   isTaskWorkflowActive: boolean;
   isPlanWorkflowActive: boolean;
+  isDebugWorkflowActive?: boolean;
   hasStructuredInterviewQuestion: boolean;
   hasPlanClarifyQuestion: boolean;
+  hasDebugPendingApproval?: boolean;
+  hasDebugActiveExperiment?: boolean;
+  hasDebugVerificationRunning?: boolean;
   setWorkflowMode: (mode: WorkflowMode) => void;
   transitionWorkflowKernelMode: (
     targetMode: WorkflowMode,
@@ -41,10 +46,15 @@ export function resolveModeSwitchBlockReason(params: {
   workflowMode: WorkflowMode;
   workflowPhase: string;
   planPhase: string;
+  debugPhase?: string;
   isTaskWorkflowActive: boolean;
   isPlanWorkflowActive: boolean;
+  isDebugWorkflowActive?: boolean;
   hasStructuredInterviewQuestion: boolean;
   hasPlanClarifyQuestion: boolean;
+  hasDebugPendingApproval?: boolean;
+  hasDebugActiveExperiment?: boolean;
+  hasDebugVerificationRunning?: boolean;
 }): ModeSwitchBlockReason {
   return resolveModeSwitchBlockReasonFromKernel(params);
 }
@@ -54,10 +64,15 @@ export function useWorkflowModeSwitchGuard({
   isRunning,
   workflowPhase,
   planPhase,
+  debugPhase,
   isTaskWorkflowActive,
   isPlanWorkflowActive,
+  isDebugWorkflowActive = false,
   hasStructuredInterviewQuestion,
   hasPlanClarifyQuestion,
+  hasDebugPendingApproval = false,
+  hasDebugActiveExperiment = false,
+  hasDebugVerificationRunning = false,
   setWorkflowMode,
   transitionWorkflowKernelMode,
   showToast,
@@ -74,14 +89,24 @@ export function useWorkflowModeSwitchGuard({
         workflowMode,
         workflowPhase,
         planPhase,
+        debugPhase,
         isTaskWorkflowActive,
         isPlanWorkflowActive,
+        isDebugWorkflowActive,
         hasStructuredInterviewQuestion,
         hasPlanClarifyQuestion,
+        hasDebugPendingApproval,
+        hasDebugActiveExperiment,
+        hasDebugVerificationRunning,
       }),
     [
+      debugPhase,
+      hasDebugActiveExperiment,
+      hasDebugPendingApproval,
+      hasDebugVerificationRunning,
       hasPlanClarifyQuestion,
       hasStructuredInterviewQuestion,
+      isDebugWorkflowActive,
       isPlanWorkflowActive,
       isRunning,
       isTaskWorkflowActive,
@@ -102,6 +127,13 @@ export function useWorkflowModeSwitchGuard({
       } else if (newMode === 'plan') {
         showToast(
           t('contextBridge.switchToPlanWithContext', { defaultValue: 'Switching to Plan mode with chat context' }),
+          'info',
+        );
+      } else if (newMode === 'debug') {
+        showToast(
+          t('contextBridge.switchToDebugWithContext', {
+            defaultValue: 'Switching to Debug mode with current context',
+          }),
           'info',
         );
       } else if (newMode === 'chat') {

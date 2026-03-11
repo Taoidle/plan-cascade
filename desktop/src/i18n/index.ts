@@ -20,6 +20,7 @@ import enUpdates from './locales/en/updates.json';
 import enAgents from './locales/en/agents.json';
 import enTaskMode from './locales/en/taskMode.json';
 import enPlanMode from './locales/en/planMode.json';
+import enDebugMode from './locales/en/debugMode.json';
 import enKnowledge from './locales/en/knowledge.json';
 import enCodebase from './locales/en/codebase.json';
 import enArtifacts from './locales/en/artifacts.json';
@@ -37,6 +38,7 @@ import zhUpdates from './locales/zh/updates.json';
 import zhAgents from './locales/zh/agents.json';
 import zhTaskMode from './locales/zh/taskMode.json';
 import zhPlanMode from './locales/zh/planMode.json';
+import zhDebugMode from './locales/zh/debugMode.json';
 import zhKnowledge from './locales/zh/knowledge.json';
 import zhCodebase from './locales/zh/codebase.json';
 import zhArtifacts from './locales/zh/artifacts.json';
@@ -54,6 +56,7 @@ import jaUpdates from './locales/ja/updates.json';
 import jaAgents from './locales/ja/agents.json';
 import jaTaskMode from './locales/ja/taskMode.json';
 import jaPlanMode from './locales/ja/planMode.json';
+import jaDebugMode from './locales/ja/debugMode.json';
 import jaKnowledge from './locales/ja/knowledge.json';
 import jaCodebase from './locales/ja/codebase.json';
 import jaGit from './locales/ja/git.json';
@@ -71,6 +74,7 @@ export const resources = {
     agents: enAgents,
     taskMode: enTaskMode,
     planMode: enPlanMode,
+    debugMode: enDebugMode,
     knowledge: enKnowledge,
     codebase: enCodebase,
     artifacts: enArtifacts,
@@ -88,6 +92,7 @@ export const resources = {
     agents: zhAgents,
     taskMode: zhTaskMode,
     planMode: zhPlanMode,
+    debugMode: zhDebugMode,
     knowledge: zhKnowledge,
     codebase: zhCodebase,
     artifacts: zhArtifacts,
@@ -105,6 +110,7 @@ export const resources = {
     agents: jaAgents,
     taskMode: jaTaskMode,
     planMode: jaPlanMode,
+    debugMode: jaDebugMode,
     knowledge: jaKnowledge,
     codebase: jaCodebase,
     artifacts: enArtifacts,
@@ -140,6 +146,7 @@ i18n
       'agents',
       'taskMode',
       'planMode',
+      'debugMode',
       'knowledge',
       'codebase',
       'artifacts',

@@ -42,6 +42,25 @@
       "dark": "Dark",
       "description": "Choose your preferred color scheme. System follows your OS preference."
     },
+    "debug": {
+      "title": "Debug Mode Defaults",
+      "description": "Configure the default environment and browser diagnostics profile used when starting Debug mode.",
+      "defaultEnvironment": "Default Debug Environment",
+      "browserProfile": "Default Browser Profile",
+      "viewportPresets": "Viewport Presets",
+      "viewportPresetsHelp": "One preset per line, for example: desktop:1440x900 or mobile:390x844",
+      "prodDiagnosticsAllowlist": "Production Diagnostics Allowlist",
+      "prodDiagnosticsAllowlistHelp": "One tool/category hint per line. These entries document which diagnostics are approved for production read-only debugging.",
+      "environments": {
+        "dev": "Development",
+        "staging": "Staging",
+        "prod": "Production"
+      },
+      "browserProfiles": {
+        "desktop": "Desktop",
+        "mobile": "Mobile"
+      }
+    },
 
     "panelHover": {
       "title": "Panel Interaction",

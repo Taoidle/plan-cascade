@@ -158,7 +158,8 @@
     "justNow": "Just now",
     "minutesAgo": "{{count}}m ago",
     "hoursAgo": "{{count}}h ago",
-    "daysAgo": "{{count}}d ago"
+    "daysAgo": "{{count}}d ago",
+    "unknown": "Unknown"
   },
 
   "labels": {
@@ -201,6 +202,9 @@
     "selectProject": "Select a project to view sessions",
     "searchSessions": "Search sessions...",
     "resume": "Resume",
+    "debugCasesTitle": "Debug Cases",
+    "debugCasesDescription": "Active or interrupted Debug mode sessions for this workspace.",
+    "openDebugCase": "Open in Simple",
     "sessionDetails": "Session Details",
     "messageType": {
       "user": "User",
@@ -208,6 +212,22 @@
       "toolCall": "Tool Call",
       "toolResult": "Tool Result"
     }
+  },
+  "recoveryPrompt": {
+    "title": "Interrupted Recovery Items Detected",
+    "fallbackTaskTitle": "Untitled execution",
+    "fallbackDebugTitle": "Interrupted debug case",
+    "checkpoints_one": "{{count}} checkpoint",
+    "checkpoints_other": "{{count}} checkpoints",
+    "resuming": "Resuming...",
+    "recovering": "Recovering...",
+    "discard": "Discard",
+    "confirmDiscard": "Confirm Discard",
+    "dismiss": "Dismiss",
+    "recoverDebugCase": "Recover Debug Case",
+    "interrupted": "Interrupted",
+    "debugDescription": "This debug session was interrupted and can be recovered.",
+    "footer": "These tasks or debug sessions were interrupted during a previous session. You can resume them from their last checkpoint or dismiss them."
   },
 
   "timeline": {

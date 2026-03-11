@@ -14,6 +14,7 @@ pub mod context;
 pub mod core;
 pub mod dependency;
 pub mod design;
+pub mod debug_mode;
 pub mod fallback;
 pub mod file_change_tracker;
 pub mod git;

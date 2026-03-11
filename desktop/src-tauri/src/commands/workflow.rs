@@ -2,6 +2,7 @@
 //!
 //! Unified command surface for Chat/Plan/Task workflow sessions.
 
+use crate::commands::debug_mode::DebugModeState;
 use crate::commands::plan_mode::{ApprovePlanRequest, PlanExecutionResumePayload};
 use crate::commands::task_mode::{ApproveTaskPrdRequest, TaskExecutionResumePayload};
 use crate::models::CommandResponse;
@@ -22,7 +23,6 @@ use crate::services::workflow_kernel::{
 use crate::{commands::plan_mode::PlanModeState, commands::spec_interview::SpecInterviewState};
 use crate::{commands::task_mode::TaskModeState, state::AppState};
 use serde::Deserialize;
-use serde_json::json;
 use tauri::Emitter;
 
 pub(crate) fn build_kernel_update(
@@ -100,6 +100,7 @@ fn workflow_mode_label(mode: WorkflowMode) -> &'static str {
         WorkflowMode::Chat => "chat",
         WorkflowMode::Plan => "plan",
         WorkflowMode::Task => "task",
+        WorkflowMode::Debug => "debug",
     }
 }
 
@@ -120,6 +121,11 @@ fn session_phase_for_mode(session: &WorkflowSession, mode: WorkflowMode) -> Opti
             .task
             .as_ref()
             .map(|task| task.phase.clone()),
+        WorkflowMode::Debug => session
+            .mode_snapshots
+            .debug
+            .as_ref()
+            .map(|debug| debug.phase.clone()),
     }
 }
 
@@ -157,6 +163,7 @@ async fn link_mode_session_and_rehydrate(
     state: &WorkflowKernelState,
     plan_mode_state: &PlanModeState,
     task_mode_state: &TaskModeState,
+    debug_mode_state: &DebugModeState,
     interview_context: Option<(&SpecInterviewState, &AppState)>,
 ) -> Result<WorkflowSession, String> {
     let linked_session = state
@@ -274,6 +281,38 @@ async fn link_mode_session_and_rehydrate(
                     })?;
             }
         }
+        WorkflowMode::Debug => {
+            let debug_session = debug_mode_state
+                .get_or_load_session_snapshot(mode_session_id)
+                .await
+                .map_err(|error| {
+                    format!(
+                        "Failed to load linked debug session '{}': {}",
+                        mode_session_id, error
+                    )
+                })?
+                .ok_or_else(|| {
+                    format!(
+                        "Linked debug session '{}' not found for rehydrate",
+                        mode_session_id
+                    )
+                })?;
+            state
+                .sync_debug_snapshot_by_linked_session(
+                    mode_session_id,
+                    debug_session.state.clone(),
+                    Some(map_debug_phase_to_kernel_status(
+                        debug_session.state.phase.as_str(),
+                    )),
+                )
+                .await
+                .map_err(|error| {
+                    format!(
+                        "Failed to sync linked debug snapshot '{}': {}",
+                        mode_session_id, error
+                    )
+                })?;
+        }
         WorkflowMode::Chat => {}
     }
 
@@ -334,6 +373,15 @@ fn map_plan_session_to_rehydrate(session: &PlanModeSession) -> PlanSnapshotRehyd
         phase: Some(plan_phase_to_kernel_phase(session.phase).to_string()),
         running_step_id,
         pending_clarification,
+    }
+}
+
+fn map_debug_phase_to_kernel_status(phase: &str) -> WorkflowStatus {
+    match phase.trim() {
+        "completed" => WorkflowStatus::Completed,
+        "failed" => WorkflowStatus::Failed,
+        "cancelled" => WorkflowStatus::Cancelled,
+        _ => WorkflowStatus::Active,
     }
 }
 
@@ -633,6 +681,7 @@ pub async fn workflow_resume_background_runs(
     state: tauri::State<'_, WorkflowKernelState>,
     plan_mode_state: tauri::State<'_, PlanModeState>,
     task_mode_state: tauri::State<'_, TaskModeState>,
+    debug_mode_state: tauri::State<'_, DebugModeState>,
     file_changes_state: tauri::State<'_, crate::commands::file_changes::FileChangesState>,
     app_state: tauri::State<'_, AppState>,
     knowledge_state: tauri::State<'_, crate::commands::knowledge::KnowledgeState>,
@@ -873,6 +922,57 @@ pub async fn workflow_resume_background_runs(
                             Err(error) => {
                                 next.resumed = false;
                                 next.reason = format!("task_resume_failed:{error}");
+                            }
+                        }
+                    }
+                    WorkflowMode::Debug => {
+                        let Some(debug_session_id) = recovered_session
+                            .linked_mode_sessions
+                            .get(&WorkflowMode::Debug)
+                            .cloned()
+                        else {
+                            next.resumed = false;
+                            next.reason = "missing_linked_debug_session".to_string();
+                            resumed_results.push(next);
+                            continue;
+                        };
+
+                        let debug_session = match debug_mode_state
+                            .get_or_load_session_snapshot(&debug_session_id)
+                            .await
+                        {
+                            Ok(Some(session)) => session,
+                            Ok(None) => {
+                                next.resumed = false;
+                                next.reason = "missing_debug_session_snapshot".to_string();
+                                resumed_results.push(next);
+                                continue;
+                            }
+                            Err(error) => {
+                                next.resumed = false;
+                                next.reason = format!("load_debug_session_failed:{error}");
+                                resumed_results.push(next);
+                                continue;
+                            }
+                        };
+
+                        match state
+                            .sync_debug_snapshot_by_linked_session(
+                                &debug_session_id,
+                                debug_session.state.clone(),
+                                Some(map_debug_phase_to_kernel_status(
+                                    debug_session.state.phase.as_str(),
+                                )),
+                            )
+                            .await
+                        {
+                            Ok(_) => {
+                                next.resumed = false;
+                                next.reason = "debug_snapshot_rehydrated".to_string();
+                            }
+                            Err(error) => {
+                                next.resumed = false;
+                                next.reason = format!("debug_resume_failed:{error}");
                             }
                         }
                     }
@@ -1218,6 +1318,7 @@ pub async fn workflow_recover_session(
     state: tauri::State<'_, WorkflowKernelState>,
     plan_mode_state: tauri::State<'_, PlanModeState>,
     task_mode_state: tauri::State<'_, TaskModeState>,
+    debug_mode_state: tauri::State<'_, DebugModeState>,
     spec_interview_state: tauri::State<'_, SpecInterviewState>,
     app_state: tauri::State<'_, AppState>,
     app: tauri::AppHandle,
@@ -1354,6 +1455,34 @@ pub async fn workflow_recover_session(
         }
     }
 
+    if let Some(debug_session_id) = recovered_session
+        .linked_mode_sessions
+        .get(&WorkflowMode::Debug)
+    {
+        let loaded_debug_session = match debug_mode_state
+            .get_or_load_session_snapshot(debug_session_id)
+            .await
+        {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                recovery_warnings.push(error);
+                None
+            }
+        };
+
+        if let Some(debug_session) = loaded_debug_session {
+            let _ = state
+                .sync_debug_snapshot_by_linked_session(
+                    debug_session_id,
+                    debug_session.state.clone(),
+                    Some(map_debug_phase_to_kernel_status(
+                        debug_session.state.phase.as_str(),
+                    )),
+                )
+                .await;
+        }
+    }
+
     if !recovery_warnings.is_empty() {
         eprintln!(
             "[workflow_recover_session] recovered with warnings: {}",
@@ -1417,6 +1546,7 @@ pub async fn workflow_link_mode_session(
     state: tauri::State<'_, WorkflowKernelState>,
     plan_mode_state: tauri::State<'_, PlanModeState>,
     task_mode_state: tauri::State<'_, TaskModeState>,
+    debug_mode_state: tauri::State<'_, DebugModeState>,
     spec_interview_state: tauri::State<'_, SpecInterviewState>,
     app_state: tauri::State<'_, AppState>,
     app: tauri::AppHandle,
@@ -1443,6 +1573,7 @@ pub async fn workflow_link_mode_session(
         state.inner(),
         plan_mode_state.inner(),
         task_mode_state.inner(),
+        debug_mode_state.inner(),
         Some((spec_interview_state.inner(), app_state.inner())),
     )
     .await;
@@ -1663,6 +1794,7 @@ mod tests {
         let kernel = WorkflowKernelState::new_with_storage_dir(temp_dir.path().join("kernel"));
         let plan_state = PlanModeState::new_with_storage_dir(temp_dir.path().join("plan"));
         let task_state = TaskModeState::new_with_storage_dir(temp_dir.path().join("task"));
+        let debug_state = DebugModeState::new_with_storage_dir(temp_dir.path().join("debug"));
 
         let session = kernel
             .open_session(Some(WorkflowMode::Plan), None)
@@ -1684,6 +1816,7 @@ mod tests {
             &kernel,
             &plan_state,
             &task_state,
+            &debug_state,
             None,
         )
         .await
@@ -1708,6 +1841,7 @@ mod tests {
         let kernel = WorkflowKernelState::new_with_storage_dir(temp_dir.path().join("kernel"));
         let plan_state = PlanModeState::new_with_storage_dir(temp_dir.path().join("plan"));
         let task_state = TaskModeState::new_with_storage_dir(temp_dir.path().join("task"));
+        let debug_state = DebugModeState::new_with_storage_dir(temp_dir.path().join("debug"));
 
         let session = kernel
             .open_session(Some(WorkflowMode::Task), None)
@@ -1729,6 +1863,7 @@ mod tests {
             &kernel,
             &plan_state,
             &task_state,
+            &debug_state,
             None,
         )
         .await

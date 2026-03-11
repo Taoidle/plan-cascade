@@ -13,7 +13,7 @@ import { useTranslation } from 'react-i18next';
 import { FilePlusIcon, PauseIcon, PlayIcon, Cross2Icon, CameraIcon } from '@radix-ui/react-icons';
 import { ContextSourceBar } from '../shared/ContextSourceBar';
 
-type WorkflowMode = 'chat' | 'plan' | 'task';
+type WorkflowMode = 'chat' | 'plan' | 'task' | 'debug';
 
 interface ChatToolbarProps {
   // Mode toggle
@@ -36,6 +36,7 @@ interface ChatToolbarProps {
   // Task workflow controls
   taskWorkflowActive?: boolean;
   planWorkflowActive?: boolean;
+  debugWorkflowActive?: boolean;
   isWorkflowCancelling?: boolean;
   onCancelWorkflow?: () => void;
   // Export image
@@ -44,7 +45,7 @@ interface ChatToolbarProps {
   isCapturing: boolean;
   // Right panel
   rightPanelOpen: boolean;
-  rightPanelTab: 'output' | 'git' | 'context';
+  rightPanelTab: 'output' | 'git' | 'context' | 'artifacts';
   onToggleOutput: () => void;
   detailLineCount: number;
 }
@@ -66,6 +67,7 @@ export const ChatToolbar = memo(function ChatToolbar({
   onCancel,
   taskWorkflowActive,
   planWorkflowActive,
+  debugWorkflowActive,
   isWorkflowCancelling = false,
   onCancelWorkflow,
   onExportImage,
@@ -121,6 +123,19 @@ export const ChatToolbar = memo(function ChatToolbar({
             {t('workflowMode.plan', { defaultValue: 'Plan' })}
           </button>
           <button
+            onClick={() => onWorkflowModeChange('debug')}
+            disabled={modeSwitchLocked && workflowMode !== 'debug'}
+            className={clsx(
+              'px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-60 disabled:cursor-not-allowed',
+              workflowMode === 'debug'
+                ? 'bg-primary-600 text-white'
+                : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800',
+            )}
+            title={modeSwitchTitle}
+          >
+            {t('workflowMode.debug', { defaultValue: 'Debug' })}
+          </button>
+          <button
             onClick={() => onWorkflowModeChange('task')}
             disabled={modeSwitchLocked && workflowMode !== 'task'}
             className={clsx(
@@ -157,7 +172,7 @@ export const ChatToolbar = memo(function ChatToolbar({
       </div>
 
       {/* Center group: execution controls (chat running/paused OR task workflow active) */}
-      {(isExecuting || taskWorkflowActive || planWorkflowActive) && (
+      {(isExecuting || taskWorkflowActive || planWorkflowActive || debugWorkflowActive) && (
         <div className="flex items-center gap-1">
           {isExecuting && executionStatus === 'running' && canPause && (
             <button
@@ -210,7 +225,7 @@ export const ChatToolbar = memo(function ChatToolbar({
               <Cross2Icon className="w-4 h-4" />
             </button>
           )}
-          {(taskWorkflowActive || planWorkflowActive) && !isExecuting && onCancelWorkflow && (
+          {(taskWorkflowActive || planWorkflowActive || debugWorkflowActive) && !isExecuting && onCancelWorkflow && (
             <button
               onClick={onCancelWorkflow}
               disabled={isWorkflowCancelling}

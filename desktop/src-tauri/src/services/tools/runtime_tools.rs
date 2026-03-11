@@ -4,6 +4,7 @@
 //! process-wide snapshot so orchestrator tool definition discovery and
 //! tool execution can see the same runtime tool set.
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
 
@@ -15,6 +16,21 @@ use super::trait_def::{Tool, ToolRegistry};
 struct RuntimeToolsStore {
     tools: HashMap<String, Arc<dyn Tool>>,
     order: Vec<String>,
+    metadata: HashMap<String, RuntimeToolMetadata>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeToolMetadata {
+    #[serde(default)]
+    pub source: String,
+    pub capability_class: Option<String>,
+    #[serde(default)]
+    pub debug_categories: Vec<String>,
+    #[serde(default)]
+    pub environment_allowlist: Vec<String>,
+    pub write_behavior: Option<String>,
+    pub approval_required: Option<bool>,
 }
 
 static RUNTIME_TOOLS: OnceLock<RwLock<RuntimeToolsStore>> = OnceLock::new();
@@ -28,6 +44,14 @@ fn store() -> &'static RwLock<RuntimeToolsStore> {
 /// This is called by MCP connect/disconnect flows after mutating their
 /// runtime registry so all orchestrator paths observe the same tool set.
 pub fn replace_from_registry(registry: &ToolRegistry) {
+    replace_from_registry_with_metadata(registry, HashMap::new());
+}
+
+/// Replace the runtime snapshot from a source registry and an optional metadata map.
+pub fn replace_from_registry_with_metadata(
+    registry: &ToolRegistry,
+    metadata: HashMap<String, RuntimeToolMetadata>,
+) {
     let mut tools = HashMap::new();
     let mut order = Vec::new();
 
@@ -41,6 +65,7 @@ pub fn replace_from_registry(registry: &ToolRegistry) {
     if let Ok(mut guard) = store().write() {
         guard.tools = tools;
         guard.order = order;
+        guard.metadata = metadata;
     }
 }
 
@@ -49,6 +74,7 @@ pub fn clear() {
     if let Ok(mut guard) = store().write() {
         guard.tools.clear();
         guard.order.clear();
+        guard.metadata.clear();
     }
 }
 
@@ -81,6 +107,14 @@ pub fn names() -> Vec<String> {
 pub fn get(name: &str) -> Option<Arc<dyn Tool>> {
     if let Ok(guard) = store().read() {
         return guard.tools.get(name).cloned();
+    }
+    None
+}
+
+/// Get runtime tool metadata by name.
+pub fn metadata_for(name: &str) -> Option<RuntimeToolMetadata> {
+    if let Ok(guard) = store().read() {
+        return guard.metadata.get(name).cloned();
     }
     None
 }

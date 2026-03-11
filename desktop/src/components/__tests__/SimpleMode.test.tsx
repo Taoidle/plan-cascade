@@ -306,14 +306,20 @@ vi.mock('../SimpleMode/ChatToolbar', () => ({
     onToggleOutput,
     onExportImage,
     executionStatus,
+    debugWorkflowActive,
   }: {
     workflowMode: string;
     onWorkflowModeChange: (mode: 'chat' | 'plan' | 'task') => void;
     onToggleOutput: () => void;
     onExportImage: () => void;
     executionStatus?: string;
+    debugWorkflowActive?: boolean;
   }) => (
-    <div data-testid="chat-toolbar" data-execution-status={executionStatus}>
+    <div
+      data-testid="chat-toolbar"
+      data-execution-status={executionStatus}
+      data-debug-workflow-active={debugWorkflowActive ? 'true' : 'false'}
+    >
       <div data-testid="toolbar-workflow-mode">{workflowMode}</div>
       <button data-testid="mode-chat" onClick={() => onWorkflowModeChange('chat')}>
         mode-chat

@@ -131,6 +131,12 @@ function normalizeSession(session: WorkflowSession): WorkflowSession {
             entryHandoff: normalizeHandoff(session.modeSnapshots.task.entryHandoff),
           }
         : null,
+      debug: session.modeSnapshots.debug
+        ? {
+            ...session.modeSnapshots.debug,
+            entryHandoff: normalizeHandoff(session.modeSnapshots.debug.entryHandoff),
+          }
+        : null,
     },
   };
 }

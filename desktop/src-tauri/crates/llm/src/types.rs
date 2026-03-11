@@ -374,6 +374,19 @@ impl ParameterSchema {
         }
     }
 
+    /// Create a number schema
+    pub fn number(description: Option<&str>) -> Self {
+        Self {
+            schema_type: "number".to_string(),
+            description: description.map(|s| s.to_string()),
+            properties: None,
+            required: None,
+            items: None,
+            enum_values: None,
+            default: None,
+        }
+    }
+
     /// Create a boolean schema
     pub fn boolean(description: Option<&str>) -> Self {
         Self {

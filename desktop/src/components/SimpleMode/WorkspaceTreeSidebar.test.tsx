@@ -515,6 +515,98 @@ describe('WorkspaceTreeSidebar', () => {
     expect(onRestoreWorkflowSession).toHaveBeenCalledWith('root-archived');
   });
 
+  it('renders debug session metadata in the sidebar tree', () => {
+    render(
+      <WorkspaceTreeSidebar
+        {...defaultProps}
+        workflowSessions={[
+          createWorkflowSession({
+            sessionId: 'debug-1',
+            displayTitle: 'Checkout debug',
+            activeMode: 'debug',
+            backgroundState: 'background_idle',
+            modeSnapshots: {
+              chat: {
+                phase: 'ready',
+                pendingInput: '',
+                activeTurnId: null,
+                turnCount: 0,
+                lastUserMessage: null,
+                lastAssistantMessage: null,
+              },
+              plan: {
+                phase: 'idle',
+                planId: null,
+                runningStepId: null,
+                pendingClarification: null,
+                retryableSteps: [],
+                planRevision: 0,
+                lastEditOperation: null,
+              },
+              task: {
+                phase: 'idle',
+                prdId: null,
+                currentStoryId: null,
+                interviewSessionId: null,
+                pendingInterview: null,
+                completedStories: 0,
+                failedStories: 0,
+              },
+              debug: {
+                caseId: 'case-1',
+                phase: 'patch_review',
+                severity: 'high',
+                environment: 'staging',
+                symptomSummary: 'Checkout fails after clicking Pay now',
+                title: 'Checkout debug',
+                expectedBehavior: 'Payment finishes',
+                actualBehavior: 'Page crashes',
+                reproSteps: ['Open checkout', 'Click Pay now'],
+                affectedSurface: ['checkout'],
+                recentChanges: 'Payment form refactor',
+                targetUrlOrEntry: 'https://app.example.com/checkout',
+                evidenceRefs: [],
+                activeHypotheses: [],
+                selectedRootCause: {
+                  conclusion: 'A null payment intent reaches the submit handler.',
+                  supportingEvidenceIds: ['ev-1'],
+                  contradictions: [],
+                  confidence: 0.82,
+                  impactScope: ['checkout'],
+                  recommendedDirection: 'Guard missing intent before submit.',
+                },
+                fixProposal: {
+                  summary: 'Guard null payment intent before submit.',
+                  changeScope: ['frontend'],
+                  riskLevel: 'medium',
+                  filesOrSystemsTouched: ['src/pages/Checkout.tsx'],
+                  manualApprovalsRequired: ['code_patch'],
+                  verificationPlan: ['Retry checkout flow'],
+                  patchPreviewRef: null,
+                },
+                pendingApproval: {
+                  kind: 'patch_review',
+                  title: 'Apply checkout guard',
+                  description: 'Guard null payment intent before payment submission.',
+                  requiredActions: ['Review patch'],
+                },
+                verificationReport: null,
+                pendingPrompt: null,
+                capabilityProfile: 'staging_limited',
+                toolBlockReason: null,
+              },
+            },
+          }),
+        ]}
+        activeWorkflowSessionId="debug-1"
+      />,
+    );
+
+    expect(screen.getByText('Checkout debug')).toBeInTheDocument();
+    expect(screen.getByTitle('debug')).toBeInTheDocument();
+    expect(screen.getByText(/null payment intent reaches the submit handler/i)).toBeInTheDocument();
+  });
+
   it('exposes icon-based path sorting controls through settings actions', () => {
     render(<WorkspaceTreeSidebar {...defaultProps} />);
 

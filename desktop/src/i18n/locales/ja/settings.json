@@ -42,6 +42,25 @@
       "dark": "ダーク",
       "description": "お好みの配色を選択してください。システムはOSの設定に従います。"
     },
+    "debug": {
+      "title": "Debug モード既定値",
+      "description": "Debug モード開始時に使う既定の環境とブラウザ診断プロファイルを設定します。",
+      "defaultEnvironment": "既定の Debug 環境",
+      "browserProfile": "既定のブラウザプロファイル",
+      "viewportPresets": "ビューポートプリセット",
+      "viewportPresetsHelp": "1 行に 1 つのプリセットを記入します。例: desktop:1440x900 / mobile:390x844",
+      "prodDiagnosticsAllowlist": "本番診断許可リスト",
+      "prodDiagnosticsAllowlistHelp": "1 行に 1 つのツールまたはカテゴリのヒントを記入します。本番の読み取り専用デバッグで許可する診断内容を記録します。",
+      "environments": {
+        "dev": "開発",
+        "staging": "ステージング",
+        "prod": "本番"
+      },
+      "browserProfiles": {
+        "desktop": "デスクトップ",
+        "mobile": "モバイル"
+      }
+    },
 
     "panelHover": {
       "title": "パネル操作",

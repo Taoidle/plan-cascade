@@ -109,6 +109,7 @@ pub use commands::{
     get_checkpoint,
     get_checkpoint_diff,
     get_claude_md_metadata,
+    invoke_connected_mcp_tool,
     get_connected_mcp_server_tools,
     get_analytics_summary,
     get_dashboard_summary_v2,

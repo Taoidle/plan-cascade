@@ -47,7 +47,7 @@ export interface AnalyticsBreakdownRow {
 }
 
 export type CostStatus = 'exact' | 'estimated' | 'missing';
-export type AnalyticsWorkflowMode = 'chat' | 'plan' | 'task';
+export type AnalyticsWorkflowMode = 'chat' | 'plan' | 'task' | 'debug';
 export type AnalyticsExecutionScope = 'root_agent' | 'sub_agent' | 'direct_llm' | 'quality_gate';
 
 export interface AnalyticsSummary {

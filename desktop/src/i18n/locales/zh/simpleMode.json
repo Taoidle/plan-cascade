@@ -143,6 +143,44 @@
       "running": "运行中",
       "attention": "需处理"
     },
+    "mode": {
+      "chat": "聊天",
+      "plan": "规划",
+      "task": "任务",
+      "debug": "调试"
+    },
+    "debug": {
+      "pendingApproval": "待审批",
+      "rootCauseReady": "根因已确认",
+      "verified": "已验证",
+      "environment": {
+        "dev": "开发",
+        "staging": "预发",
+        "prod": "生产"
+      },
+      "severity": {
+        "low": "低",
+        "medium": "中",
+        "high": "高",
+        "critical": "严重"
+      },
+      "phase": {
+        "intaking": "问题录入",
+        "clarifying": "澄清中",
+        "gathering_signal": "收集信号",
+        "reproducing": "复现中",
+        "hypothesizing": "生成假设",
+        "testing_hypothesis": "验证假设",
+        "identifying_root_cause": "定位根因",
+        "proposing_fix": "生成修复方案",
+        "patch_review": "补丁评审",
+        "patching": "应用补丁",
+        "verifying": "验证中",
+        "completed": "已完成",
+        "failed": "失败",
+        "cancelled": "已取消"
+      }
+    },
     "time": {
       "justNow": "刚刚",
       "minutesAgo": "{{count}} 分钟前",
@@ -152,6 +190,7 @@
     "placeholderTitles": {
       "chat": "新对话",
       "plan": "新计划",
+      "debug": "新调试案例",
       "task": "新任务",
       "session": "新会话"
     }
@@ -524,6 +563,7 @@
   "workflowMode": {
     "chat": "对话",
     "plan": "计划",
+    "debug": "调试",
     "task": "任务"
   },
   "output": {
@@ -617,6 +657,7 @@
     "contextCleared": "上下文已清除",
     "historyCleared": "对话历史已清除",
     "switchToPlanWithContext": "切换到计划模式，携带对话上下文",
+    "switchToDebugWithContext": "切换到调试模式，携带当前上下文",
     "switchToTaskWithContext": "切换到任务模式，携带对话上下文",
     "switchToChatWithTaskContext": "切换到对话模式，携带任务上下文",
     "contextReset": "已为新任务清除上下文"
@@ -629,6 +670,10 @@
       "running_execution": "当前正在执行，请先暂停或取消后再切换模式。",
       "task_workflow_active": "Task 工作流仍在进行，请先取消后再切换。",
       "plan_workflow_active": "Plan 工作流仍在进行，请先取消后再切换。",
+      "debug_workflow_active": "Debug 工作流仍在进行，请先取消后再切换。",
+      "approval_pending": "仍有调试审批待处理，请先处理后再切换模式。",
+      "active_experiment": "调试实验仍在运行，请等待完成后再切换模式。",
+      "verification_running": "验证仍在执行，请等待完成后再切换模式。",
       "structured_question_pending": "仍有结构化访谈/澄清问题待处理，请先回答或跳过。"
     },
     "modeSwitchFailed": "切换工作流模式失败，请重试。",
@@ -1028,6 +1073,7 @@
     },
     "input": {
       "taskPlaceholder": "描述一个任务（实现 / 分析 / 重构）...",
+      "debugPlaceholder": "描述 bug、环境、复现步骤、日志以及目标 URL 或入口...",
       "configuringPlaceholder": "输入配置（如\"6个并行，启用TDD\"）或点击上方的继续按钮...",
       "interviewPlaceholder": "输入你的回答...",
       "prdFeedbackPlaceholder": "添加反馈或在 PRD 卡片上点击批准...",
@@ -1311,6 +1357,7 @@
     "outputTab": "输出",
     "gitTab": "Git",
     "contextTab": "上下文",
+    "artifactsTab": "工件",
     "resize": "调整面板宽度",
     "workflowFailures": {
       "title": "工作流可靠性",
@@ -1400,6 +1447,18 @@
       "meta": {
         "projectSession": "项目：{{project}} | 会话：{{session}}"
       }
+    },
+    "debugArtifacts": {
+      "title": "调试工件",
+      "count": "个工件",
+      "loading": "正在加载工件...",
+      "loadFailed": "加载调试工件失败。",
+      "previewFailed": "加载工件预览失败。",
+      "loadingPreview": "正在加载预览...",
+      "empty": "当前还没有调试工件。",
+      "noSession": "启动一个 Debug case 后即可查看工件。",
+      "selectArtifact": "选择一个工件以查看内容。",
+      "binary": "这个工件是二进制内容，或暂不支持文本预览。"
     },
     "errors": {
       "summary": "{{count}} 条问题",

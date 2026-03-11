@@ -8,6 +8,17 @@
 
 import type { GateResult, DimensionScore, GateStatus } from '../store/taskMode';
 import type { HandoffSummaryItem, WorkflowMode } from './workflowKernel';
+import type {
+  DebugCapabilityClass,
+  DebugEnvironment,
+  DebugHypothesis,
+  DebugPatchOperation,
+  DebugSeverity,
+  DebugToolCategory,
+  FixProposal,
+  RootCauseReport,
+  VerificationReport,
+} from './debugMode';
 
 // ============================================================================
 // Phase & Card Type Enums
@@ -51,6 +62,21 @@ export type CardType =
   | 'architecture_review_card'
   | 'persona_indicator'
   | 'mode_handoff_card'
+  | 'debug_intake_card'
+  | 'signal_summary_card'
+  | 'reproduction_status_card'
+  | 'browser_runtime_card'
+  | 'evidence_card'
+  | 'console_error_card'
+  | 'network_trace_card'
+  | 'source_mapping_card'
+  | 'performance_trace_card'
+  | 'hypothesis_card'
+  | 'root_cause_card'
+  | 'fix_candidate_card'
+  | 'patch_review_card'
+  | 'verification_card'
+  | 'incident_summary_card'
   // Plan Mode card types
   | 'plan_analysis_card'
   | 'plan_clarify_question'
@@ -94,6 +120,21 @@ export interface CardDataMap {
   architecture_review_card: ArchitectureReviewCardData;
   persona_indicator: PersonaIndicatorData;
   mode_handoff_card: ModeHandoffCardData;
+  debug_intake_card: DebugIntakeCardData;
+  signal_summary_card: SignalSummaryCardData;
+  reproduction_status_card: ReproductionStatusCardData;
+  browser_runtime_card: BrowserRuntimeCardData;
+  evidence_card: EvidenceCardData;
+  console_error_card: ConsoleErrorCardData;
+  network_trace_card: NetworkTraceCardData;
+  source_mapping_card: SourceMappingCardData;
+  performance_trace_card: PerformanceTraceCardData;
+  hypothesis_card: HypothesisCardData;
+  root_cause_card: RootCauseCardData;
+  fix_candidate_card: FixCandidateCardData;
+  patch_review_card: PatchReviewCardData;
+  verification_card: VerificationCardData;
+  incident_summary_card: IncidentSummaryCardData;
   // Plan Mode card data (uses types from planModeCard.ts)
   plan_analysis_card: import('../types/planModeCard').PlanAnalysisCardData;
   plan_clarify_question: import('../types/planModeCard').PlanClarifyQuestionCardData;
@@ -229,6 +270,128 @@ export interface CompletionReportCardData {
   failed: number;
   duration: number;
   agentAssignments: Record<string, string>;
+}
+
+export interface DebugIntakeCardData {
+  title: string;
+  symptomSummary: string;
+  expectedBehavior: string;
+  actualBehavior: string;
+  reproSteps: string[];
+  environment: DebugEnvironment;
+  severity: DebugSeverity;
+  affectedSurface: string[];
+  recentChanges: string | null;
+  targetUrlOrEntry: string | null;
+}
+
+export interface SignalSummaryCardData {
+  summary: string;
+  environment: DebugEnvironment;
+  severity: DebugSeverity;
+  toolCategories: DebugToolCategory[];
+  evidenceCount: number;
+  highlights: string[];
+}
+
+export interface ReproductionStatusCardData {
+  status: 'pending' | 'partial' | 'confirmed' | 'failed';
+  summary: string;
+  reproductionSteps: string[];
+  browserArtifacts: string[];
+}
+
+export interface BrowserRuntimeCardData {
+  bridgeKind: 'devtools_mcp' | 'builtin_browser' | 'unavailable';
+  targetUrl: string | null;
+  serverName: string | null;
+  capabilities: string[];
+  notes: string[];
+  recommendedCatalogItemId: string | null;
+}
+
+export interface EvidenceCardData {
+  title: string;
+  summary: string;
+  source: string;
+  collectedAt: string;
+  tags: string[];
+}
+
+export interface ConsoleErrorCardData {
+  currentUrl: string | null;
+  collectedAt: string;
+  entries: Array<{
+    level: string;
+    message: string;
+    timestamp?: string | null;
+  }>;
+}
+
+export interface NetworkTraceCardData {
+  currentUrl: string | null;
+  collectedAt: string;
+  totalEvents: number;
+  failedEvents: number;
+  highlights: string[];
+  slowestRequests?: string[];
+  harCaptured?: boolean;
+}
+
+export interface SourceMappingCardData {
+  source: string;
+  summary: string;
+  candidateFiles: string[];
+  bundleScripts?: string[];
+  sourceMapUrls?: string[];
+  resolvedSources?: string[];
+  stackFrames?: string[];
+  matchedSourceMaps?: string[];
+  originalPositionHints?: string[];
+}
+
+export interface PerformanceTraceCardData {
+  currentUrl: string | null;
+  collectedAt: string;
+  summary: string;
+  metrics: string[];
+  longTasks?: string[];
+}
+
+export interface HypothesisCardData {
+  hypotheses: DebugHypothesis[];
+  recommendedNextChecks: string[];
+}
+
+export type RootCauseCardData = RootCauseReport;
+
+export interface FixCandidateCardData extends FixProposal {
+  requiresApproval: boolean;
+}
+
+export interface PatchReviewCardData {
+  title: string;
+  summary: string;
+  riskLevel: DebugSeverity;
+  filesOrSystemsTouched: string[];
+  verificationPlan: string[];
+  patchPreviewRef?: string | null;
+  patchOperations?: DebugPatchOperation[];
+  requiredCapabilityClass: DebugCapabilityClass;
+  approvalDescription: string;
+}
+
+export type VerificationCardData = VerificationReport;
+
+export interface IncidentSummaryCardData {
+  title: string;
+  environment: DebugEnvironment;
+  severity: DebugSeverity;
+  summary: string;
+  rootCauseConclusion: string | null;
+  fixApplied: boolean;
+  verificationSummary: string | null;
+  residualRisks: string[];
 }
 
 /** Informational workflow message */

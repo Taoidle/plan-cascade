@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { GitPanel } from './GitPanel';
 import { ContextOpsPanel } from './ContextOpsPanel';
+import { DebugArtifactsPanel } from './DebugArtifactsPanel';
 import { WorkflowKernelProgressPanel } from './WorkflowKernelProgressPanel';
 import { StreamingOutput, ErrorState } from '../shared';
 import type { ExecutionStatus, StreamLine } from '../../store/execution';
@@ -19,13 +20,13 @@ import { useContextOpsStore } from '../../store/contextOps';
 import { useWorkflowObservabilityStore } from '../../store/workflowObservability';
 import { useSettingsStore } from '../../store/settings';
 
-export type RightPanelTab = 'output' | 'git' | 'context';
+export type RightPanelTab = 'output' | 'git' | 'context' | 'artifacts';
 
 interface TabbedRightPanelProps {
   activeTab: RightPanelTab;
   onTabChange: (tab: RightPanelTab) => void;
   // Output tab props
-  workflowMode: 'chat' | 'plan' | 'task';
+  workflowMode: 'chat' | 'plan' | 'task' | 'debug';
   workflowPhase: string;
   logs: string[];
   analysisCoverage: AnalysisCoverageSnapshot | null;
@@ -34,6 +35,7 @@ interface TabbedRightPanelProps {
   // Git tab props
   workspacePath: string | null;
   contextSessionId: string | null;
+  debugSessionId?: string | null;
 }
 
 export function TabbedRightPanel({
@@ -47,6 +49,7 @@ export function TabbedRightPanel({
   modeTranscriptLines,
   workspacePath,
   contextSessionId,
+  debugSessionId,
 }: TabbedRightPanelProps) {
   const { t } = useTranslation('simpleMode');
   const contextInspectorEnabled = useContextOpsStore((s) => s.policy.context_inspector_ui);
@@ -56,7 +59,13 @@ export function TabbedRightPanel({
   const developerModeEnabled = useSettingsStore((s) => s.developerModeEnabled);
   const developerPanels = useSettingsStore((s) => s.developerPanels);
   const showContextTab = contextInspectorEnabled && developerModeEnabled && developerPanels.contextInspector;
-  const effectiveActiveTab: RightPanelTab = !showContextTab && activeTab === 'context' ? 'output' : activeTab;
+  const showDebugArtifactsTab = workflowMode === 'debug' && !!debugSessionId;
+  const effectiveActiveTab: RightPanelTab =
+    !showContextTab && activeTab === 'context'
+      ? 'output'
+      : !showDebugArtifactsTab && activeTab === 'artifacts'
+        ? 'output'
+        : activeTab;
   const showWorkflowReliability = developerModeEnabled && developerPanels.workflowReliability;
   const showExecutionLogs = developerModeEnabled && developerPanels.executionLogs;
   const showStreamingOutput = developerModeEnabled && developerPanels.streamingOutput;
@@ -79,8 +88,13 @@ export function TabbedRightPanel({
     { id: 'output', label: t('rightPanel.outputTab', { defaultValue: 'Output' }) },
     { id: 'git', label: t('rightPanel.gitTab', { defaultValue: 'Git' }) },
     { id: 'context', label: t('rightPanel.contextTab', { defaultValue: 'Context' }) },
+    { id: 'artifacts', label: t('rightPanel.artifactsTab', { defaultValue: 'Artifacts' }) },
   ];
-  const tabs = showContextTab ? allTabs : allTabs.filter((tab) => tab.id !== 'context');
+  const tabs = allTabs.filter((tab) => {
+    if (tab.id === 'context') return showContextTab;
+    if (tab.id === 'artifacts') return showDebugArtifactsTab;
+    return true;
+  });
 
   return (
     <div className="h-full flex flex-col rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
@@ -138,6 +152,8 @@ export function TabbedRightPanel({
           </div>
         ) : effectiveActiveTab === 'git' ? (
           <GitPanel streamingOutput={modeTranscriptLines} workspacePath={workspacePath} />
+        ) : effectiveActiveTab === 'artifacts' ? (
+          <DebugArtifactsPanel sessionId={debugSessionId ?? null} />
         ) : (
           <ContextOpsPanel projectPath={workspacePath} sessionId={contextSessionId} />
         )}

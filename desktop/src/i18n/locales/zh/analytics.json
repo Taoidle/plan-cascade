@@ -157,6 +157,7 @@
   "workflow": {
     "chat": "聊天",
     "plan": "计划",
+    "debug": "调试",
     "task": "任务"
   },
   "scope": {
@@ -184,7 +185,21 @@
     "task_story": "任务故事",
     "task_ai_verify": "AI 验证",
     "task_code_review": "代码评审",
-    "task_dod": "完成定义"
+    "task_dod": "完成定义",
+    "intaking": "调试录入",
+    "clarifying": "调试澄清",
+    "gathering_signal": "收集信号",
+    "reproducing": "问题复现",
+    "hypothesizing": "生成假设",
+    "testing_hypothesis": "验证假设",
+    "identifying_root_cause": "根因分析",
+    "proposing_fix": "修复方案",
+    "patch_review": "补丁评审",
+    "patching": "应用补丁",
+    "verifying": "验证",
+    "completed": "已完成",
+    "failed": "失败",
+    "cancelled": "已取消"
   },
   "pricing": {
     "title": "价格规则",
