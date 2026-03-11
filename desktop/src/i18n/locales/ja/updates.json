@@ -1,0 +1,38 @@
+{
+  "channel": {
+    "stable": "安定版",
+    "beta": "ベータ版",
+    "alpha": "アルファ版"
+  },
+  "settings": {
+    "title": "アップデート",
+    "description": "更新チャネル、自動チェック、手動インストールを設定します。",
+    "currentVersion": "現在のバージョン",
+    "updateChannel": "更新チャネル",
+    "autoCheck": "アップデートを自動確認する",
+    "autoCheckDescription": "起動後、24時間に1回まで自動で更新を確認します。",
+    "checkNow": "アップデートを確認",
+    "checkNowBusy": "確認中..."
+  },
+  "dialog": {
+    "title": "更新があります",
+    "readyTitle": "更新を適用できます",
+    "currentVersion": "現在のバージョン",
+    "newVersion": "新しいバージョン",
+    "publishedAt": "公開日時",
+    "releaseNotes": "リリースノート",
+    "downloading": "更新をダウンロード中",
+    "verifying": "パッケージを検証してインストールを準備中",
+    "preparing": "更新パッケージを準備中"
+  },
+  "actions": {
+    "later": "後で",
+    "skipVersion": "このバージョンをスキップ",
+    "downloadAndInstall": "ダウンロードしてインストール",
+    "installing": "インストール中...",
+    "restartToUpdate": "再起動して更新"
+  },
+  "toasts": {
+    "upToDate": "すでに最新バージョンです。"
+  }
+}

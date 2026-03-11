@@ -16,6 +16,7 @@ import enClaudeCode from './locales/en/claudeCode.json';
 import enSettings from './locales/en/settings.json';
 import enWizard from './locales/en/wizard.json';
 import enAnalytics from './locales/en/analytics.json';
+import enUpdates from './locales/en/updates.json';
 import enAgents from './locales/en/agents.json';
 import enTaskMode from './locales/en/taskMode.json';
 import enPlanMode from './locales/en/planMode.json';
@@ -32,6 +33,7 @@ import zhClaudeCode from './locales/zh/claudeCode.json';
 import zhSettings from './locales/zh/settings.json';
 import zhWizard from './locales/zh/wizard.json';
 import zhAnalytics from './locales/zh/analytics.json';
+import zhUpdates from './locales/zh/updates.json';
 import zhAgents from './locales/zh/agents.json';
 import zhTaskMode from './locales/zh/taskMode.json';
 import zhPlanMode from './locales/zh/planMode.json';
@@ -48,6 +50,7 @@ import jaClaudeCode from './locales/ja/claudeCode.json';
 import jaSettings from './locales/ja/settings.json';
 import jaWizard from './locales/ja/wizard.json';
 import jaAnalytics from './locales/ja/analytics.json';
+import jaUpdates from './locales/ja/updates.json';
 import jaAgents from './locales/ja/agents.json';
 import jaTaskMode from './locales/ja/taskMode.json';
 import jaPlanMode from './locales/ja/planMode.json';
@@ -64,6 +67,7 @@ export const resources = {
     settings: enSettings,
     wizard: enWizard,
     analytics: enAnalytics,
+    updates: enUpdates,
     agents: enAgents,
     taskMode: enTaskMode,
     planMode: enPlanMode,
@@ -80,6 +84,7 @@ export const resources = {
     settings: zhSettings,
     wizard: zhWizard,
     analytics: zhAnalytics,
+    updates: zhUpdates,
     agents: zhAgents,
     taskMode: zhTaskMode,
     planMode: zhPlanMode,
@@ -96,6 +101,7 @@ export const resources = {
     settings: jaSettings,
     wizard: jaWizard,
     analytics: jaAnalytics,
+    updates: jaUpdates,
     agents: jaAgents,
     taskMode: jaTaskMode,
     planMode: jaPlanMode,
@@ -130,6 +136,7 @@ i18n
       'settings',
       'wizard',
       'analytics',
+      'updates',
       'agents',
       'taskMode',
       'planMode',

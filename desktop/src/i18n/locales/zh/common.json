@@ -465,5 +465,11 @@
       "scanFailed": "扫描文件失败",
       "createFailed": "创建文件失败"
     }
+  },
+  "commands": {
+    "settings": {
+      "checkUpdates": "检查更新",
+      "checkUpdatesDesc": "检查 GitHub Release 中是否有新的桌面版本"
+    }
   }
 }

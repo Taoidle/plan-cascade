@@ -26,6 +26,7 @@ import { ArtifactBrowserPanel } from './components/ArtifactBrowser';
 import { ServerRegistry } from './components/MCP';
 import { SetupWizard } from './components/Settings';
 import { FeatureTour } from './components/shared/FeatureTour';
+import { AppUpdateDialog } from './components/shared/AppUpdateDialog';
 import { GlobalCommandPaletteProvider, useGlobalCommandPalette } from './components/shared/CommandPalette';
 import { ShortcutOverlay } from './components/shared/ShortcutOverlay';
 import { RecoveryPrompt } from './components/shared/RecoveryPrompt';
@@ -37,6 +38,8 @@ import { useOnboardingStore } from './store/onboarding';
 import { useRecoveryStore } from './store/recovery';
 import { usePermissionPolicyStore } from './store/permissionPolicy';
 import { useSettingsStore } from './store/settings';
+import { useUpdateStore } from './store/update';
+import { listenForAppUpdateProgress } from './lib/updateApi';
 import { isTauriAvailable } from './lib/settingsApi';
 
 const STARTUP_MIN_DURATION_MS = 3000;
@@ -111,12 +114,19 @@ function StartupSplash({
 
 function AppContent() {
   const { t } = useTranslation('common');
+  const { t: tUpdates } = useTranslation('updates');
   const { mode } = useModeStore();
   const { showToast } = useToast();
   const closeToBackgroundEnabled = useSettingsStore((state) => state.closeToBackgroundEnabled);
   const { open: openCommandPalette } = useGlobalCommandPalette();
 
   const { detectIncompleteTasks, initializeListener, cleanupListener } = useRecoveryStore();
+  const hydrateCurrentVersion = useUpdateStore((s) => s.hydrateCurrentVersion);
+  const autoCheckIfDue = useUpdateStore((s) => s.autoCheckIfDue);
+  const applyUpdateProgress = useUpdateStore((s) => s.applyProgressEvent);
+  const updateToastMessage = useUpdateStore((s) => s.toastMessage);
+  const updateToastType = useUpdateStore((s) => s.toastType);
+  const clearUpdateToast = useUpdateStore((s) => s.clearToast);
 
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showStartupSplash, setShowStartupSplash] = useState(true);
@@ -211,6 +221,7 @@ function AppContent() {
 
         // Apply persisted permission policy config to backend runtime.
         void usePermissionPolicyStore.getState().initializePolicy();
+        void autoCheckIfDue();
       }
       backendReady = true;
       tryFinishStartupTransition();
@@ -232,8 +243,7 @@ function AppContent() {
       }
       cleanupListener();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [autoCheckIfDue, cleanupListener, detectIncompleteTasks, initializeListener]);
 
   // Callback for showing shortcuts (settings is handled by TopNavBar)
   const handleOpenSettings = useCallback(() => {
@@ -245,11 +255,45 @@ function AppContent() {
     setShowShortcuts(true);
   }, []);
 
+  const handleCheckForUpdates = useCallback(async () => {
+    const result = await useUpdateStore.getState().checkForUpdates(true);
+    if (result && !result.available) {
+      showToast(tUpdates('toasts.upToDate'), 'info');
+    }
+  }, [showToast, tUpdates]);
+
   // Register global commands
   useGlobalCommands({
     onOpenSettings: handleOpenSettings,
     onShowShortcuts: handleShowShortcuts,
+    onCheckForUpdates: handleCheckForUpdates,
   });
+
+  useEffect(() => {
+    void hydrateCurrentVersion();
+  }, [hydrateCurrentVersion]);
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    void listenForAppUpdateProgress((payload) => {
+      if (!disposed) {
+        applyUpdateProgress(payload);
+      }
+    }).then((cleanup) => {
+      unlisten = cleanup;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [applyUpdateProgress]);
+
+  useEffect(() => {
+    if (!updateToastMessage) return;
+    showToast(updateToastMessage, updateToastType);
+    clearUpdateToast();
+  }, [clearUpdateToast, showToast, updateToastMessage, updateToastType]);
 
   useEffect(() => {
     if (!isTauriAvailable() || !closeToBackgroundEnabled) return;
@@ -283,6 +327,7 @@ function AppContent() {
     <div className="relative h-screen flex flex-col bg-gray-100 dark:bg-gray-950">
       {/* Recovery Prompt - shows when interrupted executions are detected (Story-004) */}
       <RecoveryPrompt />
+      <AppUpdateDialog />
 
       {/* First-time Setup Wizard */}
       <SetupWizard

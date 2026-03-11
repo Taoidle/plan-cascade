@@ -34,6 +34,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(shell_state)
         .manage(AppState::new())
         .manage(ClaudeCodeState::new())
@@ -66,6 +67,9 @@ fn main() {
             // Initialization commands
             plan_cascade_desktop::commands::init::init_app,
             plan_cascade_desktop::commands::init::get_version,
+            plan_cascade_desktop::commands::update::check_app_update,
+            plan_cascade_desktop::commands::update::download_and_install_app_update,
+            plan_cascade_desktop::commands::update::restart_app_for_update,
             // Health commands
             plan_cascade_desktop::commands::health::get_health,
             // Settings commands

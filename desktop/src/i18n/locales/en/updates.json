@@ -1,0 +1,38 @@
+{
+  "channel": {
+    "stable": "Stable",
+    "beta": "Beta",
+    "alpha": "Alpha"
+  },
+  "settings": {
+    "title": "Updates",
+    "description": "Control update channel, automatic checks, and manual installation.",
+    "currentVersion": "Current version",
+    "updateChannel": "Update channel",
+    "autoCheck": "Automatically check for updates",
+    "autoCheckDescription": "Check for updates on startup at most once every 24 hours.",
+    "checkNow": "Check for Updates",
+    "checkNowBusy": "Checking..."
+  },
+  "dialog": {
+    "title": "Update Available",
+    "readyTitle": "Update Ready to Apply",
+    "currentVersion": "Current version",
+    "newVersion": "New version",
+    "publishedAt": "Published",
+    "releaseNotes": "Release notes",
+    "downloading": "Downloading update",
+    "verifying": "Verifying package and preparing install",
+    "preparing": "Preparing update package"
+  },
+  "actions": {
+    "later": "Later",
+    "skipVersion": "Skip This Version",
+    "downloadAndInstall": "Download and Install",
+    "installing": "Installing...",
+    "restartToUpdate": "Restart to Update"
+  },
+  "toasts": {
+    "upToDate": "You're already on the latest version."
+  }
+}

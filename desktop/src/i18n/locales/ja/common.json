@@ -462,5 +462,11 @@
       "scanFailed": "ファイルのスキャンに失敗しました",
       "createFailed": "ファイルの作成に失敗しました"
     }
+  },
+  "commands": {
+    "settings": {
+      "checkUpdates": "アップデートを確認",
+      "checkUpdatesDesc": "GitHub Release から新しいデスクトップ版を確認します"
+    }
   }
 }

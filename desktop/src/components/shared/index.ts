@@ -46,3 +46,4 @@ export { ContextSourceBar } from './ContextSourceBar';
 export { KnowledgeSourcePicker } from './KnowledgeSourcePicker';
 export { MemorySourcePicker } from './MemorySourcePicker';
 export { SkillsSourcePicker } from './SkillsSourcePicker';
+export { AppUpdateDialog } from './AppUpdateDialog';

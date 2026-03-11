@@ -647,6 +647,8 @@
     "settings": {
       "open": "Open Settings",
       "openDesc": "Open application settings",
+      "checkUpdates": "Check for Updates",
+      "checkUpdatesDesc": "Check GitHub releases for a new desktop version",
       "themeLight": "Light Theme",
       "themeLightDesc": "Switch to light color theme",
       "themeDark": "Dark Theme",

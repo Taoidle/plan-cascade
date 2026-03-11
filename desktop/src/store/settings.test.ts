@@ -88,7 +88,7 @@ describe('settings store migration', () => {
     expect(state.developerSettingsInitialized).toBe(false);
 
     const persisted = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-    expect(persisted.version).toBe(8);
+    expect(persisted.version).toBe(9);
   });
 
   it('does not keep forcing values after migration has completed', async () => {

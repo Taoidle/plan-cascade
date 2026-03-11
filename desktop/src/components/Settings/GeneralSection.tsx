@@ -9,7 +9,9 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ResetIcon, RocketIcon } from '@radix-ui/react-icons';
 import { useSettingsStore } from '../../store/settings';
+import { useUpdateStore } from '../../store/update';
 import { useOnboardingStore } from '../../store/onboarding';
+import { useToast } from '../shared/Toast';
 import { LanguageSelector } from './LanguageSelector';
 import { getContextPolicy, setContextPolicy, type ContextPolicy } from '../../lib/contextApi';
 
@@ -22,6 +24,8 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
   const { t } = useTranslation('settings');
   const { t: tCommon } = useTranslation();
   const { t: tWizard } = useTranslation('wizard');
+  const { t: tUpdates } = useTranslation('updates');
+  const { showToast } = useToast();
   const {
     defaultMode,
     setDefaultMode,
@@ -45,8 +49,15 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
     setDeveloperPanels,
     developerSettingsInitialized,
     setDeveloperSettingsInitialized,
+    updatePreferences,
+    setUpdateChannel,
+    setAutoCheckForUpdates,
   } = useSettingsStore();
   const { triggerWizard, startTour } = useOnboardingStore();
+  const currentVersion = useUpdateStore((s) => s.currentVersion);
+  const checkingForUpdates = useUpdateStore((s) => s.checking);
+  const hydrateCurrentVersion = useUpdateStore((s) => s.hydrateCurrentVersion);
+  const checkForUpdates = useUpdateStore((s) => s.checkForUpdates);
   const [contextPolicy, setContextPolicyState] = useState<ContextPolicy | null>(null);
 
   const backgroundBehaviorDescriptionKey = (() => {
@@ -55,6 +66,10 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
     if (platform.includes('win')) return 'general.backgroundRun.descriptionWindows';
     return 'general.backgroundRun.descriptionLinux';
   })();
+
+  useEffect(() => {
+    void hydrateCurrentVersion();
+  }, [hydrateCurrentVersion]);
 
   useEffect(() => {
     let cancelled = false;
@@ -243,6 +258,83 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
             <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">{t(backgroundBehaviorDescriptionKey)}</div>
           </div>
         </label>
+      </section>
+
+      {/* Updates Section */}
+      <section className="space-y-4">
+        <h3 className="text-sm font-medium text-gray-900 dark:text-white">{tUpdates('settings.title')}</h3>
+        <div
+          className={clsx(
+            'rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800',
+            'space-y-4',
+          )}
+        >
+          <div>
+            <div className="text-sm font-medium text-gray-900 dark:text-white">
+              {tUpdates('settings.currentVersion')}
+            </div>
+            <div className="mt-1 text-sm text-gray-500 dark:text-gray-400">{currentVersion ?? tCommon('version')}</div>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-900 dark:text-white">
+              {tUpdates('settings.updateChannel')}
+            </label>
+            <select
+              value={updatePreferences.updateChannel}
+              onChange={(e) => setUpdateChannel(e.target.value as 'stable' | 'beta' | 'alpha')}
+              className={clsx(
+                'w-full max-w-xs rounded-lg border px-3 py-2',
+                'border-gray-200 bg-white text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-white',
+                'focus:outline-none focus:ring-2 focus:ring-primary-500',
+              )}
+            >
+              <option value="stable">{tUpdates('channel.stable')}</option>
+              <option value="beta">{tUpdates('channel.beta')}</option>
+              <option value="alpha">{tUpdates('channel.alpha')}</option>
+            </select>
+          </div>
+
+          <label
+            className={clsx(
+              'flex items-start gap-4 rounded-lg border p-4 transition-colors',
+              'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-900/40',
+            )}
+          >
+            <input
+              type="checkbox"
+              checked={updatePreferences.autoCheckForUpdates}
+              onChange={(e) => setAutoCheckForUpdates(e.target.checked)}
+              className="mt-1 text-primary-600"
+            />
+            <div>
+              <div className="font-medium text-gray-900 dark:text-white text-sm">{tUpdates('settings.autoCheck')}</div>
+              <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                {tUpdates('settings.autoCheckDescription')}
+              </div>
+            </div>
+          </label>
+
+          <div className="flex items-center justify-end">
+            <button
+              type="button"
+              onClick={() =>
+                void checkForUpdates(true).then((result) => {
+                  if (result && !result.available) {
+                    showToast(tUpdates('toasts.upToDate'), 'info');
+                  }
+                })
+              }
+              disabled={checkingForUpdates}
+              className={clsx(
+                'rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white transition-colors',
+                'hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60',
+              )}
+            >
+              {checkingForUpdates ? tUpdates('settings.checkNowBusy') : tUpdates('settings.checkNow')}
+            </button>
+          </div>
+        </div>
       </section>
 
       {/* Knowledge Base Section */}

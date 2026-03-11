@@ -27,6 +27,7 @@ type TranslateFn = (key: string, options?: Record<string, unknown>) => string;
 export interface GlobalCommandOptions {
   onOpenSettings?: () => void;
   onShowShortcuts?: () => void;
+  onCheckForUpdates?: () => void;
   onToggleTheme?: () => void;
   onExportData?: () => void;
   onClaudeCodeClear?: () => void;
@@ -327,6 +328,19 @@ export function createSettingsCommands({
       },
       keywords: ['settings', 'preferences', 'config', 'options'],
       priority: 100,
+      contexts: ['global'],
+    },
+    {
+      id: 'settings-check-updates',
+      title: t('commands.settings.checkUpdates'),
+      description: t('commands.settings.checkUpdatesDesc'),
+      category: 'settings' as CommandCategory,
+      icon: DownloadIcon,
+      action: () => {
+        options.onCheckForUpdates?.();
+      },
+      keywords: ['update', 'updates', 'release', 'version', 'download'],
+      priority: 85,
       contexts: ['global'],
     },
     {

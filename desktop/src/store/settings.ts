@@ -17,7 +17,8 @@ export type GlmEndpoint = 'standard' | 'coding' | 'international' | 'internation
 export type MinimaxEndpoint = 'international' | 'china';
 export type QwenEndpoint = 'china' | 'singapore' | 'us';
 export type MemoryReviewMode = 'llm_review' | 'auto_approve' | 'manual_only';
-const SETTINGS_PERSIST_VERSION = 8;
+export type UpdateChannel = 'stable' | 'beta' | 'alpha';
+const SETTINGS_PERSIST_VERSION = 9;
 const PLAN_MODE_PHASE_IDS = [
   'plan_strategy',
   'plan_clarification',
@@ -72,6 +73,13 @@ export interface DeveloperPanels {
   workflowReliability: boolean;
   executionLogs: boolean;
   streamingOutput: boolean;
+}
+
+export interface UpdatePreferences {
+  updateChannel: UpdateChannel;
+  autoCheckForUpdates: boolean;
+  ignoredUpdateVersionByChannel: Record<UpdateChannel, string | null>;
+  lastUpdateCheckAt: string | null;
 }
 
 interface SettingsState {
@@ -129,6 +137,9 @@ interface SettingsState {
   developerModeEnabled: boolean;
   developerPanels: DeveloperPanels;
   developerSettingsInitialized: boolean;
+
+  // Update preferences
+  updatePreferences: UpdatePreferences;
 
   // Context compaction
   enableContextCompaction: boolean;
@@ -210,6 +221,10 @@ interface SettingsState {
   setDeveloperModeEnabled: (enabled: boolean) => void;
   setDeveloperPanels: (patch: Partial<DeveloperPanels>) => void;
   setDeveloperSettingsInitialized: (initialized: boolean) => void;
+  setUpdateChannel: (channel: UpdateChannel) => void;
+  setAutoCheckForUpdates: (enabled: boolean) => void;
+  setIgnoredUpdateVersion: (channel: UpdateChannel, version: string | null) => void;
+  setLastUpdateCheckAt: (timestamp: string | null) => void;
 }
 
 const defaultSettings = {
@@ -283,6 +298,18 @@ const defaultSettings = {
     streamingOutput: true,
   } as DeveloperPanels,
   developerSettingsInitialized: false,
+
+  // Updates
+  updatePreferences: {
+    updateChannel: 'stable' as UpdateChannel,
+    autoCheckForUpdates: true,
+    ignoredUpdateVersionByChannel: {
+      stable: null,
+      beta: null,
+      alpha: null,
+    },
+    lastUpdateCheckAt: null,
+  } as UpdatePreferences,
 
   // Context compaction
   enableContextCompaction: true,
@@ -438,6 +465,30 @@ function ensureDeveloperPanels(settings: Partial<SettingsState>): DeveloperPanel
       typeof current.streamingOutput === 'boolean'
         ? current.streamingOutput
         : defaultSettings.developerPanels.streamingOutput,
+  };
+}
+
+function ensureUpdatePreferences(settings: Partial<SettingsState>): UpdatePreferences {
+  const current = (settings.updatePreferences ?? {}) as Partial<UpdatePreferences>;
+  const ignored = (current.ignoredUpdateVersionByChannel ?? {}) as Partial<Record<UpdateChannel, string | null>>;
+  return {
+    updateChannel:
+      current.updateChannel === 'stable' || current.updateChannel === 'beta' || current.updateChannel === 'alpha'
+        ? current.updateChannel
+        : defaultSettings.updatePreferences.updateChannel,
+    autoCheckForUpdates:
+      typeof current.autoCheckForUpdates === 'boolean'
+        ? current.autoCheckForUpdates
+        : defaultSettings.updatePreferences.autoCheckForUpdates,
+    ignoredUpdateVersionByChannel: {
+      stable: typeof ignored.stable === 'string' || ignored.stable === null ? (ignored.stable ?? null) : null,
+      beta: typeof ignored.beta === 'string' || ignored.beta === null ? (ignored.beta ?? null) : null,
+      alpha: typeof ignored.alpha === 'string' || ignored.alpha === null ? (ignored.alpha ?? null) : null,
+    },
+    lastUpdateCheckAt:
+      typeof current.lastUpdateCheckAt === 'string' || current.lastUpdateCheckAt === null
+        ? (current.lastUpdateCheckAt ?? null)
+        : null,
   };
 }
 
@@ -613,6 +664,45 @@ export const useSettingsStore = create<SettingsState>()(
           }),
         })),
       setDeveloperSettingsInitialized: (developerSettingsInitialized) => set({ developerSettingsInitialized }),
+      setUpdateChannel: (updateChannel) =>
+        set((state) => ({
+          updatePreferences: ensureUpdatePreferences({
+            updatePreferences: {
+              ...state.updatePreferences,
+              updateChannel,
+            },
+          }),
+        })),
+      setAutoCheckForUpdates: (autoCheckForUpdates) =>
+        set((state) => ({
+          updatePreferences: ensureUpdatePreferences({
+            updatePreferences: {
+              ...state.updatePreferences,
+              autoCheckForUpdates,
+            },
+          }),
+        })),
+      setIgnoredUpdateVersion: (channel, version) =>
+        set((state) => ({
+          updatePreferences: ensureUpdatePreferences({
+            updatePreferences: {
+              ...state.updatePreferences,
+              ignoredUpdateVersionByChannel: {
+                ...state.updatePreferences.ignoredUpdateVersionByChannel,
+                [channel]: version,
+              },
+            },
+          }),
+        })),
+      setLastUpdateCheckAt: (lastUpdateCheckAt) =>
+        set((state) => ({
+          updatePreferences: ensureUpdatePreferences({
+            updatePreferences: {
+              ...state.updatePreferences,
+              lastUpdateCheckAt,
+            },
+          }),
+        })),
     }),
     {
       name: 'plan-cascade-settings',
@@ -648,6 +738,7 @@ export const useSettingsStore = create<SettingsState>()(
           phaseConfigs,
           memorySettings: ensureMemorySettings(state),
           developerPanels: ensureDeveloperPanels(state),
+          updatePreferences: ensureUpdatePreferences(state),
           developerSettingsInitialized:
             typeof state.developerSettingsInitialized === 'boolean' ? state.developerSettingsInitialized : false,
         };
@@ -674,6 +765,7 @@ export const useSettingsStore = create<SettingsState>()(
         mergedState.phaseConfigs = ensurePhaseConfigs(mergedState.phaseConfigs);
         mergedState.memorySettings = ensureMemorySettings(mergedState);
         mergedState.developerPanels = ensureDeveloperPanels(mergedState);
+        mergedState.updatePreferences = ensureUpdatePreferences(mergedState);
         mergedState.developerSettingsInitialized =
           typeof mergedState.developerSettingsInitialized === 'boolean'
             ? mergedState.developerSettingsInitialized
