@@ -16,6 +16,7 @@ use crate::models::quality_gates::{
     CustomGateConfig, GateResult, GatesSummary, ProjectType, QualityGate, StoredGateResult,
 };
 use crate::services::quality_gates::{detect_project_type, ValidatorRegistry};
+use crate::utils::configure_background_process;
 use crate::utils::error::{AppError, AppResult};
 
 /// Quality gate runner configuration
@@ -167,6 +168,7 @@ impl QualityGateRunner {
             .current_dir(&working_dir)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        configure_background_process(&mut cmd);
 
         // Add environment variables
         for (key, value) in &self.config.env {
@@ -204,12 +206,12 @@ impl QualityGateRunner {
         // On Windows, try with .exe and .cmd extensions
         #[cfg(windows)]
         {
-            let check = Command::new("where")
-                .arg(command)
+            let mut cmd = Command::new("where");
+            cmd.arg(command)
                 .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .await;
+                .stderr(Stdio::null());
+            configure_background_process(&mut cmd);
+            let check = cmd.status().await;
             check.map(|s| s.success()).unwrap_or(false)
         }
 

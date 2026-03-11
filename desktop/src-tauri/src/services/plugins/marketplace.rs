@@ -13,6 +13,7 @@ use std::path::PathBuf;
 use crate::services::plugins::models::{
     MarketplaceConfig, MarketplaceManifest, MarketplacePluginEntry, MarketplaceSourceType,
 };
+use crate::utils::configure_background_process;
 
 /// Cache directory for marketplace manifests.
 fn cache_dir() -> Option<PathBuf> {
@@ -86,16 +87,18 @@ async fn fetch_git_marketplace(url: &str) -> Result<MarketplaceManifest, String>
         tempfile::tempdir().map_err(|e| format!("Failed to create temp directory: {}", e))?;
     let clone_path = temp_dir.path().join("marketplace");
 
-    let output = tokio::process::Command::new("git")
-        .args([
-            "clone",
-            "--depth",
-            "1",
-            "--filter=blob:none",
-            "--sparse",
-            url,
-            clone_path.to_str().unwrap_or("marketplace"),
-        ])
+    let mut clone_cmd = tokio::process::Command::new("git");
+    clone_cmd.args([
+        "clone",
+        "--depth",
+        "1",
+        "--filter=blob:none",
+        "--sparse",
+        url,
+        clone_path.to_str().unwrap_or("marketplace"),
+    ]);
+    configure_background_process(&mut clone_cmd);
+    let output = clone_cmd
         .output()
         .await
         .map_err(|e| format!("Failed to execute git clone: {}", e))?;
@@ -106,11 +109,12 @@ async fn fetch_git_marketplace(url: &str) -> Result<MarketplaceManifest, String>
     }
 
     // Try to sparse checkout just .claude-plugin/
-    let _ = tokio::process::Command::new("git")
+    let mut sparse_cmd = tokio::process::Command::new("git");
+    sparse_cmd
         .args(["sparse-checkout", "set", ".claude-plugin"])
-        .current_dir(&clone_path)
-        .output()
-        .await;
+        .current_dir(&clone_path);
+    configure_background_process(&mut sparse_cmd);
+    let _ = sparse_cmd.output().await;
 
     let manifest_path = clone_path.join(".claude-plugin").join("marketplace.json");
     if !manifest_path.exists() {

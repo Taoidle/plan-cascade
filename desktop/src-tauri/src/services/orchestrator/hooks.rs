@@ -42,6 +42,7 @@ use crate::services::skills::generator::SkillGeneratorStore;
 use crate::services::skills::model::GeneratedSkill;
 use crate::services::skills::model::{InjectionPhase, SelectionPolicy, SkillIndex, SkillMatch};
 use crate::services::skills::select::select_skills_for_session;
+use crate::utils::configure_background_process;
 
 /// Context provided to all hooks, describing the current session state.
 #[derive(Debug, Clone)]
@@ -653,6 +654,7 @@ async fn run_hook_command(
     if let Some(payload) = payload {
         cmd.env("PLAN_CASCADE_HOOK_PAYLOAD", payload);
     }
+    configure_background_process(&mut cmd);
 
     let output = cmd.output().await.map_err(|error| {
         format!(

@@ -19,6 +19,8 @@ use tokio::time::{timeout, Duration};
 use tracing::{debug, warn};
 use url::Url;
 
+use crate::utils::configure_background_process;
+
 /// Default timeout for LSP requests (30 seconds).
 const REQUEST_TIMEOUT_SECS: u64 = 30;
 
@@ -90,12 +92,15 @@ impl LspClient {
     /// 3. Waits for the `initialize` response
     /// 4. Sends `initialized` notification
     pub async fn start(command: &str, args: &[&str], root_uri: &str) -> anyhow::Result<Self> {
-        let mut child = Command::new(command)
-            .args(args)
+        let mut cmd = Command::new(command);
+        cmd.args(args)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null())
-            .kill_on_drop(true)
+            .kill_on_drop(true);
+        configure_background_process(&mut cmd);
+
+        let mut child = cmd
             .spawn()
             .map_err(|e| anyhow::anyhow!("Failed to spawn LSP server '{}': {}", command, e))?;
 

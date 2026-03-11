@@ -22,6 +22,7 @@ use crate::services::mcp_catalog::McpCatalogService;
 use crate::services::mcp_runtime_manager::McpRuntimeManager;
 use crate::storage::database::Database;
 use crate::utils::error::{AppError, AppResult};
+use crate::utils::configure_background_process;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct McpInstallProgressEvent {
@@ -995,6 +996,7 @@ async fn run_command(
             command.env(key, value);
         }
     }
+    configure_background_process(&mut command);
 
     let output = tokio::time::timeout(Duration::from_secs(timeout_secs), command.output())
         .await

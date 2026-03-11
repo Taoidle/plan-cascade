@@ -17,6 +17,7 @@ use crate::services::orchestrator::index_store::{IndexStore, LspServerInfo};
 use crate::services::orchestrator::lsp_enricher::{EnrichmentReport, LspEnricher};
 use crate::services::orchestrator::lsp_registry::{DetectedServer, LspServerRegistry};
 use crate::state::AppState;
+use crate::utils::configure_background_process;
 
 const LSP_PREFERENCES_KEY: &str = "lsp_preferences_v1";
 const DEFAULT_ENRICHMENT_DEBOUNCE_MS: u64 = 3000;
@@ -388,6 +389,7 @@ async fn probe_server_version(server: &DetectedServer) -> Option<String> {
     for args in candidates {
         let mut cmd = tokio::process::Command::new(&server.command);
         cmd.args(args);
+        configure_background_process(&mut cmd);
 
         let output = match tokio::time::timeout(Duration::from_secs(2), cmd.output()).await {
             Ok(Ok(output)) => output,

@@ -30,7 +30,7 @@ export function SimplePanelLayout({
 }: SimplePanelLayoutProps) {
   return (
     <div className="flex-1 min-h-0 px-4 py-2">
-      <div className="relative h-full max-w-[2200px] mx-auto w-full flex">
+      <div className="relative h-full w-full flex">
         {hoverPanelsEnabled && (
           <>
             <div

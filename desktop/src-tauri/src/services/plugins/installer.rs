@@ -12,6 +12,7 @@ use crate::services::plugins::models::{
     InstallProgress, MarketplaceConfig, MarketplacePluginEntry, MarketplaceSourceType,
     PluginManifest,
 };
+use crate::utils::configure_background_process;
 
 /// Get the managed plugins directory.
 ///
@@ -42,14 +43,16 @@ pub async fn install_from_git(git_url: &str, app: &AppHandle) -> Result<PluginMa
         tempfile::tempdir().map_err(|e| format!("Failed to create temp directory: {}", e))?;
     let clone_path = temp_dir.path().join("plugin");
 
-    let output = tokio::process::Command::new("git")
-        .args([
-            "clone",
-            "--depth",
-            "1",
-            git_url,
-            clone_path.to_str().unwrap_or("plugin"),
-        ])
+    let mut clone_cmd = tokio::process::Command::new("git");
+    clone_cmd.args([
+        "clone",
+        "--depth",
+        "1",
+        git_url,
+        clone_path.to_str().unwrap_or("plugin"),
+    ]);
+    configure_background_process(&mut clone_cmd);
+    let output = clone_cmd
         .output()
         .await
         .map_err(|e| {
@@ -205,14 +208,16 @@ async fn install_relative_from_marketplace(
         tempfile::tempdir().map_err(|e| format!("Failed to create temp directory: {}", e))?;
     let clone_path = temp_dir.path().join("marketplace");
 
-    let output = tokio::process::Command::new("git")
-        .args([
-            "clone",
-            "--depth",
-            "1",
-            &git_url,
-            clone_path.to_str().unwrap_or("marketplace"),
-        ])
+    let mut clone_cmd = tokio::process::Command::new("git");
+    clone_cmd.args([
+        "clone",
+        "--depth",
+        "1",
+        &git_url,
+        clone_path.to_str().unwrap_or("marketplace"),
+    ]);
+    configure_background_process(&mut clone_cmd);
+    let output = clone_cmd
         .output()
         .await
         .map_err(|e| format!("Failed to execute git clone: {}", e))?;

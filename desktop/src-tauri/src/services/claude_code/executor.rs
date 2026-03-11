@@ -10,6 +10,7 @@ use tokio::sync::mpsc;
 
 use crate::services::proxy::ProxyConfig;
 use crate::utils::error::{AppError, AppResult};
+use crate::utils::configure_background_process;
 
 /// Handle to a running Claude Code CLI process
 pub struct ClaudeCodeProcess {
@@ -177,6 +178,7 @@ impl ClaudeCodeExecutor {
         cmd.stdin(Stdio::piped());
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
+        configure_background_process(&mut cmd);
 
         // Spawn the process
         let child = cmd.spawn().map_err(|e| {

@@ -20,6 +20,7 @@ use crate::models::quality_gates::ProjectType;
 use crate::services::quality_gates::cache::GateCache;
 use crate::services::quality_gates::detector::detect_project_type;
 use crate::services::quality_gates::pipeline::{GatePhase, PipelineGateResult};
+use crate::utils::configure_background_process;
 
 /// FormatGate runs the appropriate formatter for the detected project type.
 pub struct FormatGate {
@@ -105,6 +106,7 @@ impl FormatGate {
             .current_dir(&self.project_path)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        configure_background_process(&mut cmd);
 
         let timeout_duration = Duration::from_secs(self.timeout_secs);
         match timeout(timeout_duration, cmd.output()).await {

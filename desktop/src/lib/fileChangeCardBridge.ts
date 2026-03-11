@@ -12,6 +12,7 @@ import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { useExecutionStore } from '../store/execution';
 import { useFileChangesStore } from '../store/fileChanges';
+import { useWorkflowKernelStore } from '../store/workflowKernel';
 import type { CommandResponse } from './tauri';
 import type { CardPayload, FileChangeCardData, TurnChangeSummaryCardData } from '../types/workflowCard';
 
@@ -82,7 +83,35 @@ export interface FileChangeCardBridge {
   reset(): void;
 }
 
-export function createFileChangeCardBridge(sessionId: string, projectRoot: string): FileChangeCardBridge {
+function appendCardToVisibleChatTranscript(payload: CardPayload): void {
+  useExecutionStore.getState().appendCard(payload);
+
+  const kernel = useWorkflowKernelStore.getState();
+  const rootSessionId = kernel.activeRootSessionId ?? kernel.sessionId ?? null;
+  if (!rootSessionId) return;
+
+  const existingLines = kernel.getCachedModeTranscript(rootSessionId, 'chat').lines as Array<{
+    id: number;
+  }>;
+  const nextId = existingLines.reduce((max, line) => Math.max(max, Number(line?.id ?? 0)), 0) + 1;
+
+  void kernel.patchModeTranscript(rootSessionId, 'chat', {
+    replaceFromLineId: null,
+    appendedLines: [
+      {
+        id: nextId,
+        content: JSON.stringify(payload),
+        type: 'card',
+        timestamp: Date.now(),
+        cardPayload: payload,
+      },
+    ],
+  });
+}
+
+export function createFileChangeCardBridge(sessionIds: string[], projectRoot: string): FileChangeCardBridge {
+  const normalizedSessionIds = new Set(sessionIds.map((value) => value.trim()).filter(Boolean));
+  const primarySessionId = [...normalizedSessionIds][0] ?? '';
   /** Accumulated changes per turn for summary card. */
   const turnChanges = new Map<number, PendingChange[]>();
   /** Debounce timer for batching rapid events. */
@@ -133,7 +162,7 @@ export function createFileChangeCardBridge(sessionId: string, projectRoot: strin
         };
 
         // Inject the card into the chat
-        useExecutionStore.getState().appendCard(makeCardPayload('file_change', cardData));
+        appendCardToVisibleChatTranscript(makeCardPayload('file_change', cardData));
 
         // Accumulate for turn summary
         const pending: PendingChange = {
@@ -151,7 +180,9 @@ export function createFileChangeCardBridge(sessionId: string, projectRoot: strin
       }
     }
     // Keep AI changes tab count fresh even when the Git panel is not visible.
-    await useFileChangesStore.getState().fetchChanges(sessionId, projectRoot);
+    if (primarySessionId) {
+      await useFileChangesStore.getState().fetchChanges(primarySessionId, projectRoot);
+    }
   }
 
   function flushPending() {
@@ -166,7 +197,7 @@ export function createFileChangeCardBridge(sessionId: string, projectRoot: strin
     async startListening(): Promise<() => void> {
       const unlisten = await listen<FileChangeEvent>('file-change-recorded', (e) => {
         // Only process events for our session
-        if (e.payload.session_id !== sessionId) return;
+        if (!normalizedSessionIds.has(e.payload.session_id)) return;
 
         pendingEvents.push(e.payload);
 
@@ -202,7 +233,7 @@ export function createFileChangeCardBridge(sessionId: string, projectRoot: strin
 
       const summaryData: TurnChangeSummaryCardData = {
         turnIndex,
-        sessionId,
+        sessionId: primarySessionId,
         totalFiles: changes.length,
         files: changes.map((c) => ({
           filePath: c.event.file_path,
@@ -215,7 +246,7 @@ export function createFileChangeCardBridge(sessionId: string, projectRoot: strin
         totalLinesRemoved: changes.reduce((sum, c) => sum + c.linesRemoved, 0),
       };
 
-      useExecutionStore.getState().appendCard(makeCardPayload('turn_change_summary', summaryData));
+      appendCardToVisibleChatTranscript(makeCardPayload('turn_change_summary', summaryData));
     },
 
     reset() {

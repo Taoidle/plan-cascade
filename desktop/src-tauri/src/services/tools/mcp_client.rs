@@ -17,6 +17,7 @@ use rmcp::transport::{StreamableHttpClientTransport, TokioChildProcess};
 use rmcp::ServiceExt;
 
 use crate::utils::error::{AppError, AppResult};
+use crate::utils::configure_background_process;
 
 /// Configuration for connecting to an MCP server
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -106,6 +107,7 @@ impl McpClient {
         for (key, value) in env {
             cmd.env(key, value);
         }
+        configure_background_process(&mut cmd);
 
         let transport = TokioChildProcess::new(cmd).map_err(|e| {
             AppError::command(format!(

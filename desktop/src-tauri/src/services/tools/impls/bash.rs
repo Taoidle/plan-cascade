@@ -16,6 +16,7 @@ use super::read::validate_path;
 use crate::services::llm::types::ParameterSchema;
 use crate::services::tools::executor::ToolResult;
 use crate::services::tools::trait_def::{Tool, ToolExecutionContext};
+use crate::utils::configure_background_process;
 
 /// Blocked bash commands for security
 const BLOCKED_COMMANDS: &[&str] = &[
@@ -200,6 +201,7 @@ impl Tool for BashTool {
             .current_dir(&working_dir)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        configure_background_process(&mut cmd);
 
         // Use spawn + select! so we can cancel or timeout and kill the child process.
         let mut child = match cmd.spawn() {

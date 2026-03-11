@@ -21,6 +21,7 @@ use crate::models::quality_gates::ProjectType;
 use crate::services::quality_gates::detector::detect_project_type;
 use crate::services::quality_gates::pipeline::{GateExecutor, GatePhase, PipelineGateResult};
 use crate::services::quality_gates::validators::ValidatorRegistry;
+use crate::utils::configure_background_process;
 
 /// ValidationGate creates GateExecutor closures for typecheck, test, and lint gates.
 ///
@@ -109,6 +110,7 @@ impl ValidationGate {
             .current_dir(project_path)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        configure_background_process(&mut cmd);
 
         match timeout(timeout_duration, cmd.output()).await {
             Ok(Ok(output)) => {

@@ -11,6 +11,7 @@ use chrono::Utc;
 use crate::models::{McpRuntimeInfo, McpRuntimeKind, McpRuntimeRepairResult};
 use crate::storage::database::Database;
 use crate::utils::error::AppResult;
+use crate::utils::{configure_background_process, configure_background_std_process};
 
 /// Runtime manager with persistence for inventory snapshots.
 #[derive(Clone)]
@@ -93,6 +94,7 @@ impl McpRuntimeManager {
         let path = found.unwrap_or_default();
         let mut cmd = Command::new(&path);
         cmd.args(&version_args);
+        configure_background_std_process(&mut cmd);
         let mut last_error = None;
         let mut version = None;
         let healthy = match cmd.output() {
@@ -294,10 +296,12 @@ impl McpRuntimeManager {
         let mut failures = Vec::new();
         for raw_cmd in plan {
             let (program, args) = self.elevated_wrapper(&raw_cmd);
-            let attempt = tokio::time::timeout(
-                Duration::from_secs(180),
-                tokio::process::Command::new(&program).args(&args).output(),
-            )
+            let attempt = tokio::time::timeout(Duration::from_secs(180), async {
+                let mut cmd = tokio::process::Command::new(&program);
+                cmd.args(&args);
+                configure_background_process(&mut cmd);
+                cmd.output().await
+            })
             .await;
             match attempt {
                 Ok(Ok(output)) => {
@@ -364,9 +368,10 @@ fn find_binary(binary: &str) -> Option<String> {
     } else {
         "which"
     };
-    Command::new(checker)
-        .arg(binary)
-        .output()
+    let mut cmd = Command::new(checker);
+    cmd.arg(binary);
+    configure_background_std_process(&mut cmd);
+    cmd.output()
         .ok()
         .and_then(|out| {
             if out.status.success() {

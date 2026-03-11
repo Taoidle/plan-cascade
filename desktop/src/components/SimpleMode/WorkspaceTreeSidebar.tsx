@@ -843,7 +843,6 @@ export const WorkspaceTreeSidebar = memo(function WorkspaceTreeSidebar({
   const { t } = useTranslation('simpleMode');
   const workspacePath = useSettingsStore((s) => s.workspacePath);
   const pinnedDirectories = useSettingsStore((s) => s.pinnedDirectories);
-  const addPinnedDirectory = useSettingsStore((s) => s.addPinnedDirectory);
   const removePinnedDirectory = useSettingsStore((s) => s.removePinnedDirectory);
   const setWorkspacePath = useSettingsStore((s) => s.setWorkspacePath);
   const sessionPathSort = useSettingsStore((s) => s.sessionPathSort);
@@ -993,12 +992,12 @@ export const WorkspaceTreeSidebar = memo(function WorkspaceTreeSidebar({
         title: t('sidebar.addDirectory'),
       });
       if (selected && typeof selected === 'string') {
-        addPinnedDirectory(selected);
+        setWorkspacePath(selected);
       }
     } catch (err) {
       console.error('Failed to open directory picker:', err);
     }
-  }, [addPinnedDirectory, t]);
+  }, [setWorkspacePath, t]);
 
   // Unpin a directory
   const handleUnpin = useCallback(

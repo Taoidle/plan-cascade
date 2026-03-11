@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::models::quality_gates::GateStatus;
 use crate::services::quality_gates::cache::{GateCache, GateCacheKey};
+use crate::utils::configure_background_process;
 use crate::utils::error::AppResult;
 
 // ============================================================================
@@ -567,12 +568,10 @@ impl GatePipeline {
 async fn resolve_git_hashes(project_path: &PathBuf) -> Option<(String, String)> {
     use tokio::process::Command;
 
-    let commit_output = Command::new("git")
-        .args(["rev-parse", "HEAD"])
-        .current_dir(project_path)
-        .output()
-        .await
-        .ok()?;
+    let mut commit_cmd = Command::new("git");
+    commit_cmd.args(["rev-parse", "HEAD"]).current_dir(project_path);
+    configure_background_process(&mut commit_cmd);
+    let commit_output = commit_cmd.output().await.ok()?;
 
     if !commit_output.status.success() {
         return None;
@@ -582,12 +581,10 @@ async fn resolve_git_hashes(project_path: &PathBuf) -> Option<(String, String)> 
         .trim()
         .to_string();
 
-    let tree_output = Command::new("git")
-        .arg("write-tree")
-        .current_dir(project_path)
-        .output()
-        .await
-        .ok()?;
+    let mut tree_cmd = Command::new("git");
+    tree_cmd.arg("write-tree").current_dir(project_path);
+    configure_background_process(&mut tree_cmd);
+    let tree_output = tree_cmd.output().await.ok()?;
 
     if !tree_output.status.success() {
         return None;

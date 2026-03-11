@@ -43,6 +43,7 @@ use crate::services::workflow_kernel::{
 
 use crate::state::AppState;
 use crate::storage::{ConfigService, KeyringService};
+use crate::utils::configure_background_process;
 use crate::utils::paths::ensure_plan_cascade_dir;
 use tauri::Emitter;
 
@@ -2399,6 +2400,7 @@ async fn execute_story_via_agent(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
+    configure_background_process(&mut process_builder);
 
     let child = match process_builder.spawn() {
         Ok(child) => child,

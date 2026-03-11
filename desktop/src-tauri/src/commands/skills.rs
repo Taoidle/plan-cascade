@@ -26,6 +26,7 @@ use crate::services::task_mode::context_provider::{
     resolve_effective_skills, SkillSelectionMode,
 };
 use crate::state::AppState;
+use crate::utils::configure_background_process;
 use crate::utils::paths::ensure_plan_cascade_dir;
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -1139,15 +1140,17 @@ async fn clone_skill_source(git_url: &str, target_dir: &Path) -> Result<(), Stri
     std::fs::create_dir_all(parent)
         .map_err(|e| format!("Failed to create parent directory {}: {}", parent.display(), e))?;
 
-    let output = tokio::process::Command::new("git")
-        .args([
-            "clone",
-            "--depth",
-            "1",
-            "--filter=blob:none",
-            git_url,
-            target_dir.to_str().unwrap_or("skill-source"),
-        ])
+    let mut clone_cmd = tokio::process::Command::new("git");
+    clone_cmd.args([
+        "clone",
+        "--depth",
+        "1",
+        "--filter=blob:none",
+        git_url,
+        target_dir.to_str().unwrap_or("skill-source"),
+    ]);
+    configure_background_process(&mut clone_cmd);
+    let output = clone_cmd
         .output()
         .await
         .map_err(|e| format!("Failed to execute git clone: {}", e))?;
@@ -1161,13 +1164,15 @@ async fn clone_skill_source(git_url: &str, target_dir: &Path) -> Result<(), Stri
 }
 
 async fn pull_skill_source(target_dir: &Path) -> Result<(), String> {
-    let output = tokio::process::Command::new("git")
-        .args([
-            "-C",
-            target_dir.to_str().unwrap_or("."),
-            "pull",
-            "--ff-only",
-        ])
+    let mut pull_cmd = tokio::process::Command::new("git");
+    pull_cmd.args([
+        "-C",
+        target_dir.to_str().unwrap_or("."),
+        "pull",
+        "--ff-only",
+    ]);
+    configure_background_process(&mut pull_cmd);
+    let output = pull_cmd
         .output()
         .await
         .map_err(|e| format!("Failed to execute git pull: {}", e))?;

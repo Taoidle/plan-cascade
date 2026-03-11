@@ -6,6 +6,7 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::utils::error::{AppError, AppResult};
+use crate::utils::configure_background_std_process;
 
 /// Result of a git command execution
 #[derive(Debug)]
@@ -43,12 +44,14 @@ impl GitOps {
 
     /// Execute a git command in the specified directory
     pub fn execute(&self, cwd: &Path, args: &[&str]) -> AppResult<GitResult> {
-        let output = Command::new("git")
-            .args(args)
+        let mut cmd = Command::new("git");
+        cmd.args(args)
             .current_dir(cwd)
             // Disable interactive prompts to avoid hanging automation flows/tests.
             .env("GIT_TERMINAL_PROMPT", "0")
-            .env("GCM_INTERACTIVE", "never")
+            .env("GCM_INTERACTIVE", "never");
+        configure_background_std_process(&mut cmd);
+        let output = cmd
             .output()
             .map_err(|e| AppError::command(format!("Failed to execute git: {}", e)))?;
 
@@ -69,14 +72,16 @@ impl GitOps {
     ) -> AppResult<GitResult> {
         use std::io::Write;
 
-        let mut child = Command::new("git")
-            .args(args)
+        let mut cmd = Command::new("git");
+        cmd.args(args)
             .current_dir(cwd)
             .env("GIT_TERMINAL_PROMPT", "0")
             .env("GCM_INTERACTIVE", "never")
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        configure_background_std_process(&mut cmd);
+        let mut child = cmd
             .spawn()
             .map_err(|e| AppError::command(format!("Failed to spawn git: {}", e)))?;
 

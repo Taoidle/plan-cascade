@@ -331,14 +331,19 @@ export function SimpleModeShell() {
     prevPathRef.current = workspacePath;
   }, [workspacePath, isChatSession, reset, clearStrategyAnalysis]);
 
-  // File change card bridge: converts file-change events into inline chat cards
-  // Both backends emit `file-change-recorded` events keyed by session ID:
-  //   - Claude Code backend uses `taskId`
-  //   - Standalone/multi-LLM backend uses `standaloneSessionId`
-  const bridgeSessionId = taskId || standaloneSessionId;
+  // File change card bridge: converts file-change events into inline chat cards.
+  // Runtime file changes may be keyed by backend session ID or by the active
+  // root kernel session ID, depending on the execution path.
+  const bridgeSessionIds = useMemo(
+    () =>
+      [taskId, standaloneSessionId, workflowKernelSessionId, activeRootSessionId]
+        .map((value) => value?.trim() ?? '')
+        .filter((value, index, array) => value.length > 0 && array.indexOf(value) === index),
+    [taskId, standaloneSessionId, workflowKernelSessionId, activeRootSessionId],
+  );
   useEffect(() => {
-    if (!bridgeSessionId || !workspacePath) return;
-    const bridge = createFileChangeCardBridge(bridgeSessionId, workspacePath);
+    if (bridgeSessionIds.length === 0 || !workspacePath) return;
+    const bridge = createFileChangeCardBridge(bridgeSessionIds, workspacePath);
     const unlistenPromise = bridge.startListening();
 
     // Listen for turn end (status transitions from running to something else)
@@ -360,7 +365,7 @@ export function SimpleModeShell() {
       unsub();
       bridge.reset();
     };
-  }, [bridgeSessionId, workspacePath]);
+  }, [bridgeSessionIds, workspacePath]);
 
   const startWorkflow = useWorkflowOrchestratorStore((s) => s.startWorkflow);
   const submitInterviewAnswer = useWorkflowOrchestratorStore((s) => s.submitInterviewAnswer);

@@ -82,7 +82,7 @@ export const BottomStatusBar = memo(function BottomStatusBar({
       {workspacePath && (
         <>
           <Divider />
-          <div className="hidden lg:flex items-center gap-2">
+          <div className="flex items-center gap-2 min-w-0">
             <IndexStatus compact />
             <DocsIndexStatus compact />
           </div>
@@ -96,7 +96,7 @@ export const BottomStatusBar = memo(function BottomStatusBar({
             onClick={onMemoryStatusClick ?? undefined}
             title={memoryStatus.title}
             className={clsx(
-              'hidden lg:inline-flex items-center px-1.5 py-0.5 rounded text-2xs transition-colors',
+              'inline-flex items-center px-1.5 py-0.5 rounded text-2xs transition-colors',
               memoryStatus.tone === 'warning' && 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300',
               memoryStatus.tone === 'success' &&
                 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300',
@@ -113,7 +113,7 @@ export const BottomStatusBar = memo(function BottomStatusBar({
       {hasUsage && (
         <>
           <Divider />
-          <div className="hidden lg:flex items-center gap-2">
+          <div className="flex items-center gap-2">
             <span className="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 text-2xs">
               {formatNumber(turn.input_tokens)}&uarr; {formatNumber(turn.output_tokens)}&darr;
             </span>
@@ -124,7 +124,7 @@ export const BottomStatusBar = memo(function BottomStatusBar({
         </>
       )}
       {showTokenBudget && (
-        <div className="hidden lg:flex items-center">
+        <div className="flex items-center">
           {isEstimatingTokenBudget ? (
             <span className="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 text-2xs">
               {t('workflow.tokenBudget.estimating', { defaultValue: 'Estimating token budget...' })}

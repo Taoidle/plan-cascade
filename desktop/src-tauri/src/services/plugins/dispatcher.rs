@@ -31,6 +31,7 @@ use crate::services::orchestrator::hooks::{AfterToolResult, AgenticHooks, Before
 use crate::services::plugins::models::*;
 use crate::services::plugins::runtime;
 use crate::services::streaming::UnifiedStreamEvent;
+use crate::utils::configure_background_process;
 
 // ============================================================================
 // Shell Hook Execution
@@ -76,6 +77,7 @@ pub async fn execute_shell_hook(
 
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
+    configure_background_process(&mut cmd);
 
     // Spawn the process
     let child = match cmd.spawn() {
