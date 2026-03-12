@@ -50,7 +50,6 @@ use crate::services::llm::{
     OpenAIProvider, ProviderConfig, ProviderType, QwenProvider, ToolCallMode, ToolCallReliability,
     ToolDefinition, UsageStats,
 };
-use crate::services::quality_gates::run_quality_gates as execute_quality_gates;
 use crate::services::streaming::UnifiedStreamEvent;
 #[allow(deprecated)]
 use crate::services::tools::{

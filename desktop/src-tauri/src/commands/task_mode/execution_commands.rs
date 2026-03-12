@@ -340,6 +340,12 @@ pub async fn approve_task_prd(
     let mut config = ExecutionConfig::default();
     if let Some(ref wc) = workflow_config {
         config.quality_gates_enabled = wc.quality_gates_enabled;
+        config.selected_quality_gate_ids = wc.selected_quality_gate_ids.clone();
+        if let Some(max_attempts) = wc.quality_retry_max_attempts {
+            config.max_retries = max_attempts;
+            config.retry_enabled = max_attempts > 0;
+        }
+        config.custom_quality_gates = wc.custom_quality_gates.clone();
         if let Some(max_p) = wc.max_parallel {
             config.max_parallel = max_p;
         }

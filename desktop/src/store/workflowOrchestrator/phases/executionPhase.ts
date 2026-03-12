@@ -3,6 +3,7 @@ import i18n from '../../../i18n';
 import type { TaskPrd } from '../../taskMode';
 import { useSettingsStore } from '../../settings';
 import { useTaskModeStore } from '../../taskMode';
+import { resolveModeQualityConfig } from '../../../types/workflowQuality';
 import type { DesignDocCardData } from '../../../types/workflowCard';
 import {
   injectWorkflowCard as injectCard,
@@ -171,11 +172,17 @@ export async function runDesignDocAndExecutionPhase(
         };
       }
     ).config;
+    const qualitySettings = useSettingsStore.getState().quality;
+    const taskQualityConfig = resolveModeQualityConfig(qualitySettings, 'task');
     const approved = await useTaskModeStore.getState().approvePrd(prd, effectiveSessionId, {
       flowLevel: workflowConfig.flowLevel,
       tddMode: workflowConfig.tddMode,
       enableInterview: workflowConfig.specInterviewEnabled,
-      qualityGatesEnabled: workflowConfig.qualityGatesEnabled,
+      qualityGatesEnabled:
+        workflowConfig.qualityGatesEnabled && taskQualityConfig.enabled && taskQualityConfig.selectedGateIds.length > 0,
+      selectedQualityGateIds: taskQualityConfig.selectedGateIds,
+      qualityRetryMaxAttempts: taskQualityConfig.retryPolicy.enabled ? taskQualityConfig.retryPolicy.maxAttempts : 0,
+      customQualityGates: qualitySettings.customGates.filter((gate) => gate.modes.includes('task')),
       maxParallel: workflowConfig.maxParallel,
       skipVerification: workflowConfig.skipVerification,
       skipReview: workflowConfig.skipReview,

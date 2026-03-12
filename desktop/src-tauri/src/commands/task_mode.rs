@@ -290,6 +290,18 @@ pub struct PhaseConfigInput {
     pub fallback_chain: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskCustomQualityGate {
+    pub id: String,
+    pub name: String,
+    pub command: String,
+    #[serde(default)]
+    pub modes: Vec<WorkflowMode>,
+    #[serde(default = "default_quality_gates_enabled")]
+    pub blocking: bool,
+}
+
 /// Workflow configuration from the frontend orchestrator.
 ///
 /// Passed through from the Simple Mode workflow to control execution behavior.
@@ -305,6 +317,15 @@ pub struct TaskWorkflowConfig {
     /// Whether quality gates are enabled for story execution
     #[serde(default = "default_quality_gates_enabled")]
     pub quality_gates_enabled: bool,
+    /// Selected task quality gate IDs to execute.
+    #[serde(default)]
+    pub selected_quality_gate_ids: Vec<String>,
+    /// Override for task quality retry attempts. `None` keeps executor defaults.
+    #[serde(default)]
+    pub quality_retry_max_attempts: Option<u32>,
+    /// User-configured custom quality gates that should run for task mode.
+    #[serde(default)]
+    pub custom_quality_gates: Vec<TaskCustomQualityGate>,
     /// Maximum parallel stories
     pub max_parallel: Option<usize>,
     /// Skip verification gates (--no-verify)

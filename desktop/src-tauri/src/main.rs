@@ -16,7 +16,6 @@ use plan_cascade_desktop::commands::pipeline_execution::ExecutionRegistry;
 use plan_cascade_desktop::commands::plan_mode::PlanModeState;
 use plan_cascade_desktop::commands::debug_mode::DebugModeState;
 use plan_cascade_desktop::commands::plugins::PluginState;
-use plan_cascade_desktop::commands::quality_gates::QualityGatesState;
 use plan_cascade_desktop::commands::remote::RemoteState;
 use plan_cascade_desktop::commands::spec_interview::SpecInterviewState;
 use plan_cascade_desktop::commands::standalone::StandaloneState;
@@ -40,7 +39,6 @@ fn main() {
         .manage(AppState::new())
         .manage(ClaudeCodeState::new())
         .manage(AnalyticsState::new())
-        .manage(QualityGatesState::new())
         .manage(WorktreeState::new())
         .manage(StandaloneState::new())
         .manage(SpecInterviewState::new())
@@ -178,20 +176,6 @@ fn main() {
             plan_cascade_desktop::commands::agents::run_agent,
             plan_cascade_desktop::commands::agents::export_agents,
             plan_cascade_desktop::commands::agents::import_agents,
-            // Quality Gates commands
-            plan_cascade_desktop::commands::quality_gates::init_quality_gates,
-            plan_cascade_desktop::commands::quality_gates::detect_project_type_cmd,
-            plan_cascade_desktop::commands::quality_gates::get_available_gates,
-            plan_cascade_desktop::commands::quality_gates::list_all_gates,
-            plan_cascade_desktop::commands::quality_gates::run_quality_gates,
-            plan_cascade_desktop::commands::quality_gates::run_specific_gates,
-            plan_cascade_desktop::commands::quality_gates::run_custom_gates,
-            plan_cascade_desktop::commands::quality_gates::get_gate_results,
-            plan_cascade_desktop::commands::quality_gates::get_session_gate_results,
-            plan_cascade_desktop::commands::quality_gates::get_gate_result,
-            plan_cascade_desktop::commands::quality_gates::cleanup_gate_results,
-            plan_cascade_desktop::commands::quality_gates::get_default_gates_for_type,
-            plan_cascade_desktop::commands::quality_gates::check_quality_gates_health,
             // Worktree commands
             plan_cascade_desktop::commands::worktree::create_worktree,
             plan_cascade_desktop::commands::worktree::list_worktrees,
@@ -320,7 +304,13 @@ fn main() {
             plan_cascade_desktop::commands::workflow::workflow_cancel_operation,
             plan_cascade_desktop::commands::workflow::workflow_append_context_items,
             plan_cascade_desktop::commands::workflow::workflow_get_session_state,
+            plan_cascade_desktop::commands::workflow::workflow_get_quality_snapshot,
             plan_cascade_desktop::commands::workflow::workflow_get_mode_transcript,
+            plan_cascade_desktop::commands::workflow::workflow_update_quality_snapshot,
+            plan_cascade_desktop::commands::workflow::workflow_apply_quality_decision,
+            plan_cascade_desktop::commands::workflow::workflow_retry_quality_run,
+            plan_cascade_desktop::commands::workflow::workflow_list_quality_profiles,
+            plan_cascade_desktop::commands::workflow::workflow_run_custom_quality_gates,
             plan_cascade_desktop::commands::workflow::workflow_patch_mode_transcript,
             plan_cascade_desktop::commands::workflow::workflow_get_observability_snapshot,
             plan_cascade_desktop::commands::workflow::workflow_recover_session,

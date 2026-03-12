@@ -21,6 +21,7 @@ use crate::models::prd::{Story, StoryStatus, StoryType};
 use crate::services::context::{ContextFilter, StoryContext};
 use crate::services::fallback::{AgentFallbackChain, FailureReason, FallbackExecutionLog};
 use crate::services::phase::{Phase, PhaseManager};
+use crate::services::quality_gates::run_quality_gates as execute_quality_gates;
 
 /// Errors from story execution
 #[derive(Debug, Error)]
@@ -415,10 +416,10 @@ impl StoryExecutor {
     /// Run quality gates for a story
     async fn run_quality_gates(&self, story_id: &str) -> Result<bool, StoryExecutorError> {
         debug!("Running quality gates for story {}", story_id);
-
-        // In a real implementation, this would call QualityGateRunner
-        // For now, simulate success
-        Ok(true)
+        let summary = execute_quality_gates(&self.config.project_root, None, None, None)
+            .await
+            .map_err(|error| StoryExecutorError::QualityGatesFailed(error.to_string()))?;
+        Ok(summary.failed_gates == 0)
     }
 
     /// Get the phase manager

@@ -384,7 +384,21 @@
 
   "quality": {
     "title": "质量门禁",
-    "description": "配置在故事标记完成前必须通过的质量检查。",
+    "description": "配置供 Chat、Plan、Task 和 Debug 工作流共用的统一质量平台。",
+    "enabled": "启用质量平台",
+    "enabledHelp": "该开关控制 Simple 模式下所有工作流共用的统一质量引擎。",
+    "modePolicies": "模式策略",
+    "modes": {
+      "chat": "Chat",
+      "plan": "Plan",
+      "task": "Task",
+      "debug": "Debug"
+    },
+    "behaviors": {
+      "manual_review": "人工审查",
+      "auto_retry_if_retryable": "自动重试",
+      "warn_and_continue": "警告后继续"
+    },
 
     "enabledGates": "已启用的门禁",
 
@@ -414,11 +428,122 @@
     "retry": {
       "label": "重试设置",
       "maxRetries": "最大重试次数",
+      "maxAttempts": "重试次数",
       "help": "质量门禁失败时重试故事的次数（0-10）。"
+    },
+
+    "profile": {
+      "defaultGates": "默认门禁",
+      "noOverrides": "未选择任何门禁",
+      "selectedCount": "已选择 {{count}} 个门禁"
+    },
+
+    "gates": {
+      "change_safety": {
+        "label": "变更安全",
+        "description": "当 Chat 单轮修改多个文件时给出提醒，便于在继续前人工复核。"
+      },
+      "output_completeness": {
+        "label": "输出完整性",
+        "description": "当 Plan 步骤输出被明确标记为不完整时阻断该步骤。"
+      },
+      "criteria_validation": {
+        "label": "标准校验",
+        "description": "根据步骤完成标准和结构化校验结果判断该步骤是否真正完成。"
+      },
+      "evidence_sufficiency": {
+        "label": "证据充分性",
+        "description": "检查当前模式是否产出了足够的工具输出、日志或引用证据。"
+      },
+      "artifact_integrity": {
+        "label": "产物完整性",
+        "description": "验证步骤是否产出了可落地的内容或附加产物，而不是空结果。"
+      },
+      "dor": {
+        "label": "就绪定义",
+        "description": "在实现开始前确认 Task story 是否达到可执行状态。"
+      },
+      "format": {
+        "label": "格式化",
+        "description": "在 story 完成前执行格式化检查。"
+      },
+      "typecheck": {
+        "label": "类型检查",
+        "description": "执行项目的类型检查。"
+      },
+      "test": {
+        "label": "测试",
+        "description": "执行项目配置的测试命令。"
+      },
+      "lint": {
+        "label": "代码检查",
+        "description": "执行项目的 lint 检查。"
+      },
+      "ai_verify": {
+        "label": "AI 验证",
+        "description": "用 AI 验证门禁检查 diff 中是否存在明显实现问题。"
+      },
+      "code_review": {
+        "label": "代码评审",
+        "description": "通过代码评审门禁评估可读性、可维护性和审查发现。"
+      },
+      "dod": {
+        "label": "完成定义",
+        "description": "在 story 视为完成前校验验收标准和实现后的质量状态。"
+      },
+      "repro_confidence": {
+        "label": "复现置信度",
+        "description": "评估 Debug 会话是否具备稳定复现路径和足够可信的根因判断。"
+      },
+      "patch_safety": {
+        "label": "补丁安全性",
+        "description": "当 Debug 补丁存在风险或仍待审批时要求人工复核。"
+      },
+      "verification_success": {
+        "label": "验证成功",
+        "description": "检查修复后的验证是否已完成且通过。"
+      },
+      "regression_risk": {
+        "label": "回归风险",
+        "description": "展示拟议修复或验证报告中的残余风险。"
+      }
+    },
+
+    "plugins": {
+      "title": "插件质量门禁",
+      "description": "允许插件提供的质量门禁参与统一质量评估。"
+    },
+    "custom": {
+      "title": "自定义质量门禁",
+      "description": "在工作区根目录中执行 shell 命令，作为额外的质量门禁。",
+      "envHelp": "命令会收到 QUALITY_MODE、QUALITY_GATE_ID、QUALITY_GATE_NAME、PROJECT_PATH，以及可选的 QUALITY_SCOPE_ID 和 QUALITY_METADATA_JSON 环境变量。",
+      "empty": "尚未配置自定义质量门禁。",
+      "addTitle": "新增自定义门禁",
+      "editTitle": "编辑自定义门禁",
+      "name": "门禁名称",
+      "namePlaceholder": "例如：契约漂移检查",
+      "command": "命令",
+      "commandPlaceholder": "例如：./scripts/check-contracts.sh",
+      "commandHelp": "退出码 0 代表通过。非 0 会根据是否阻塞被记为失败或警告。",
+      "modes": "适用模式",
+      "blocking": "阻塞",
+      "nonBlocking": "非阻塞",
+      "blockingLabel": "将失败视为阻塞",
+      "add": "添加门禁",
+      "save": "保存修改",
+      "edit": "编辑",
+      "remove": "删除",
+      "cancel": "取消",
+      "validation": {
+        "required": "名称、命令以及至少一个模式为必填项。",
+        "duplicateName": "已存在同名的自定义门禁。"
+      }
     },
 
     "summary": {
       "label": "摘要",
+      "configured": "已配置 {{count}} 个自定义门禁。Task 默认自动重试；Chat、Plan 和 Debug 默认进入人工审查。",
+      "disabled": "统一质量检查已禁用。",
       "noGates": "未启用质量门禁。故事将在没有验证的情况下标记为完成。",
       "mustPass": "故事必须通过{{gates}}才能被视为完成。{{retryMessage}}",
       "retryMessage": "如果门禁失败，代理将最多重试{{count}}次。",

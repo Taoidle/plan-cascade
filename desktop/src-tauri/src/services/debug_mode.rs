@@ -8,7 +8,7 @@ use crate::services::tools::{
     definitions::get_tool_definitions_from_registry,
     runtime_tools::{self, RuntimeToolMetadata},
 };
-use crate::services::workflow_kernel::HandoffContextBundle;
+use crate::services::workflow_kernel::{HandoffContextBundle, ModeQualitySnapshot, WorkflowMode};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -290,6 +290,8 @@ pub struct DebugState {
     pub last_checkpoint_id: Option<String>,
     #[serde(default)]
     pub entry_handoff: HandoffContextBundle,
+    #[serde(default)]
+    pub quality: Option<ModeQualitySnapshot>,
 }
 
 impl Default for DebugState {
@@ -320,6 +322,7 @@ impl Default for DebugState {
             background_status: None,
             last_checkpoint_id: None,
             entry_handoff: HandoffContextBundle::default(),
+            quality: Some(ModeQualitySnapshot::for_mode(WorkflowMode::Debug)),
         }
     }
 }

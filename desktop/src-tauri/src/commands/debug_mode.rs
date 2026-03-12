@@ -17,7 +17,9 @@ use crate::services::debug_mode::{
 };
 use crate::commands::permissions::PermissionState;
 use crate::services::orchestrator::permissions::PermissionLevel;
-use crate::services::workflow_kernel::{WorkflowKernelState, WorkflowStatus};
+use crate::services::workflow_kernel::{
+    ModeQualitySnapshot, WorkflowKernelState, WorkflowMode, WorkflowStatus,
+};
 use crate::utils::paths::ensure_plan_cascade_dir;
 use tauri::Emitter;
 
@@ -2561,6 +2563,7 @@ pub async fn enter_debug_mode(
             background_status: Some("idle".to_string()),
             last_checkpoint_id: None,
             entry_handoff: Default::default(),
+            quality: Some(ModeQualitySnapshot::for_mode(WorkflowMode::Debug)),
         },
         created_at: created_at.clone(),
         updated_at: created_at,
@@ -3382,6 +3385,7 @@ mod tests {
                 background_status: None,
                 last_checkpoint_id: None,
                 entry_handoff: Default::default(),
+                quality: Some(ModeQualitySnapshot::for_mode(WorkflowMode::Debug)),
             },
             created_at: now_rfc3339(),
             updated_at: now_rfc3339(),

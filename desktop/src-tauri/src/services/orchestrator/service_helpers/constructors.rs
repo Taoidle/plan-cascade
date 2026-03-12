@@ -1493,7 +1493,7 @@ impl OrchestratorService {
         &self,
         session: &mut ExecutionSession,
         tx: mpsc::Sender<UnifiedStreamEvent>,
-        run_quality_gates: bool,
+        _run_quality_gates: bool,
     ) -> SessionExecutionResult {
         let tools = get_tool_definitions_from_registry();
 
@@ -1538,8 +1538,6 @@ impl OrchestratorService {
             let story_index = session.current_story_index;
             let total_stories = session.stories.len();
             let session_id = session.id.clone();
-            let project_path = session.project_path.clone();
-
             let (story_id, story_title, story_prompt) = {
                 let story = &mut session.stories[story_index];
                 story.start();
@@ -1584,41 +1582,6 @@ impl OrchestratorService {
             if result.success {
                 // Mark story complete
                 session.stories[story_index].complete();
-
-                // Run quality gates if enabled
-                if run_quality_gates {
-                    let gates_result = execute_quality_gates(
-                        &project_path,
-                        None,
-                        self.db_pool.clone(),
-                        Some(session_id.clone()),
-                    )
-                    .await;
-
-                    if let Ok(summary) = gates_result {
-                        let passed = summary.failed_gates == 0;
-                        session.stories[story_index]
-                            .quality_gates
-                            .insert("overall".to_string(), passed);
-
-                        // Emit quality gates result
-                        let _ = tx
-                            .send(UnifiedStreamEvent::QualityGatesResult {
-                                session_id: session_id.clone(),
-                                story_id: story_id.clone(),
-                                passed,
-                                summary: serde_json::to_value(&summary).unwrap_or_default(),
-                            })
-                            .await;
-
-                        if !passed {
-                            // Quality gates failed - mark story as failed
-                            session.stories[story_index].status = ExecutionStatus::Failed;
-                            session.stories[story_index].error =
-                                Some("Quality gates failed".to_string());
-                        }
-                    }
-                }
 
                 // Get current story status for event
                 let story_success =

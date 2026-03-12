@@ -873,7 +873,7 @@ function buildFrontendExportState(settings: ReturnType<typeof useSettingsStore.g
     agents: settings.agents,
     agent_selection: settings.agentSelection,
     default_agent: settings.defaultAgent,
-    quality_gates: settings.qualityGates,
+    quality: settings.quality,
     max_parallel_stories: settings.maxParallelStories,
     max_total_tokens: settings.maxTotalTokens,
     timeout_seconds: settings.timeoutSeconds,
@@ -942,15 +942,51 @@ function syncSettingsToStore(settings: Record<string, unknown>) {
     });
   }
 
-  if (settings.quality_gates && typeof settings.quality_gates === 'object') {
+  if (settings.quality && typeof settings.quality === 'object') {
+    store.updateQualitySettings(settings.quality as Parameters<typeof store.updateQualitySettings>[0]);
+  } else if (settings.quality_gates && typeof settings.quality_gates === 'object') {
     const qg = settings.quality_gates as Record<string, unknown>;
-    store.updateQualityGates({
-      typecheck: qg.typecheck as boolean,
-      test: qg.test as boolean,
-      lint: qg.lint as boolean,
-      custom: qg.custom as boolean,
-      customScript: qg.custom_script as string,
-      maxRetries: qg.max_retries as number,
+    const taskGateIds = ['dor'];
+    if (qg.typecheck !== false) taskGateIds.push('typecheck');
+    if (qg.test !== false) taskGateIds.push('test');
+    if (qg.lint !== false) taskGateIds.push('lint');
+    taskGateIds.push('dod');
+    const customScript =
+      typeof qg.custom_script === 'string'
+        ? qg.custom_script
+        : typeof qg.customScript === 'string'
+          ? qg.customScript
+          : '';
+    const maxRetries =
+      typeof qg.max_retries === 'number' ? qg.max_retries : typeof qg.maxRetries === 'number' ? qg.maxRetries : 2;
+    store.updateQualitySettings({
+      enabled: taskGateIds.length > 0 || customScript.trim().length > 0,
+      retryPolicyByMode: {
+        ...store.quality.retryPolicyByMode,
+        task: {
+          enabled: maxRetries > 0,
+          maxAttempts: maxRetries,
+        },
+      },
+      profileOverridesByMode: {
+        ...store.quality.profileOverridesByMode,
+        task: {
+          ...store.quality.profileOverridesByMode.task,
+          defaultGateIds: taskGateIds,
+        },
+      },
+      customGates:
+        customScript.trim().length > 0
+          ? [
+              {
+                id: 'imported-custom-gate',
+                name: 'Imported Custom Gate',
+                command: customScript,
+                modes: ['chat', 'plan', 'task', 'debug'],
+                blocking: true,
+              },
+            ]
+          : store.quality.customGates,
     });
   }
 

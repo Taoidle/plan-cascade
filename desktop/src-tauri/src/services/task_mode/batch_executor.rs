@@ -28,6 +28,7 @@ use crate::services::quality_gates::validation::ValidationGate;
 use crate::services::task_mode::agent_resolver::{
     AgentAssignment, AgentResolver, ExecutionPhase, StoryInfo,
 };
+use crate::commands::task_mode::TaskCustomQualityGate;
 use crate::utils::error::{AppError, AppResult};
 
 // ============================================================================
@@ -78,6 +79,12 @@ pub struct ExecutionConfig {
     /// Whether story quality gates are enabled.
     #[serde(default = "default_quality_gates_enabled")]
     pub quality_gates_enabled: bool,
+    /// Exact quality gate IDs selected for task execution.
+    #[serde(default)]
+    pub selected_quality_gate_ids: Vec<String>,
+    /// User-defined custom quality gates executed in task mode.
+    #[serde(default)]
+    pub custom_quality_gates: Vec<TaskCustomQualityGate>,
     /// DoR gate mode (Soft = warning only, Hard = blocking)
     #[serde(default = "default_dor_mode")]
     pub dor_mode: GateMode,
@@ -119,6 +126,10 @@ fn default_dod_mode() -> GateMode {
     GateMode::Soft
 }
 
+fn gate_selected(selected_gate_ids: &HashSet<String>, gate_id: &str) -> bool {
+    selected_gate_ids.is_empty() || selected_gate_ids.contains(gate_id)
+}
+
 impl Default for ExecutionConfig {
     fn default() -> Self {
         Self {
@@ -126,6 +137,8 @@ impl Default for ExecutionConfig {
             max_retries: default_max_retries(),
             retry_enabled: default_retry_enabled(),
             quality_gates_enabled: default_quality_gates_enabled(),
+            selected_quality_gate_ids: vec![],
+            custom_quality_gates: vec![],
             dor_mode: default_dor_mode(),
             dod_mode: default_dod_mode(),
             skip_verification: false,
@@ -1146,8 +1159,12 @@ impl BatchExecutor {
                 let max_retries = self.config.max_retries;
                 let retry_enabled = self.config.retry_enabled;
                 let quality_gates_enabled = self.config.quality_gates_enabled;
+                let selected_quality_gate_ids = self.config.selected_quality_gate_ids.clone();
+                let custom_quality_gates = self.config.custom_quality_gates.clone();
                 let dor_mode = self.config.dor_mode;
                 let dod_mode = self.config.dod_mode;
+                let skip_verification = self.config.skip_verification;
+                let skip_review = self.config.skip_review;
                 let plugin_gates = self.config.plugin_quality_gates.clone();
                 let cancel_token = self.cancellation_token.clone();
                 let state_ref = self.state.clone();
@@ -1181,8 +1198,12 @@ impl BatchExecutor {
                         max_retries,
                         retry_enabled,
                         quality_gates_enabled,
+                        selected_quality_gate_ids,
+                        custom_quality_gates,
                         dor_mode,
                         dod_mode,
+                        skip_verification,
+                        skip_review,
                         plugin_gates.clone(),
                         cancel_token,
                         state_ref,
@@ -1289,8 +1310,12 @@ impl BatchExecutor {
         max_retries: u32,
         retry_enabled: bool,
         quality_gates_enabled: bool,
+        selected_quality_gate_ids: Vec<String>,
+        custom_quality_gates: Vec<TaskCustomQualityGate>,
         dor_mode: GateMode,
         dod_mode: GateMode,
+        skip_verification: bool,
+        skip_review: bool,
         plugin_quality_gates: Vec<crate::services::plugins::models::PluginQualityGate>,
         cancel_token: CancellationToken,
         state: Arc<RwLock<BatchExecutionState>>,
@@ -1313,6 +1338,9 @@ impl BatchExecutor {
         let mut last_gate_results: Option<Vec<PipelineGateResult>> = None;
         let mut last_error = String::new();
         let mut previous_agent = String::new();
+        let selected_gate_ids: HashSet<String> = selected_quality_gate_ids.into_iter().collect();
+        let dor_enabled = quality_gates_enabled && gate_selected(&selected_gate_ids, "dor");
+        let dod_enabled = quality_gates_enabled && gate_selected(&selected_gate_ids, "dod");
 
         // ================================================================
         // DoR Pre-Flight Check (runs once before the retry loop)
@@ -1334,63 +1362,66 @@ impl BatchExecutor {
             dependencies: story.dependencies.clone(),
         };
 
-        let dor_result = DoRGate::new(story_for_validation, completed_ids).run();
+        let dor_gate_result = if dor_enabled {
+            let dor_result = DoRGate::new(story_for_validation, completed_ids).run();
 
-        if !dor_result.passed {
-            match dor_mode {
-                GateMode::Hard => {
-                    // DoR hard failure -- skip execution entirely
-                    let failure_reason = format!("DoR pre-flight failed: {}", dor_result.message);
-                    tracing::error!(
-                        story_id = %story_id,
-                        findings = ?dor_result.findings,
-                        "DoR hard failure -- skipping story execution"
-                    );
+            if !dor_result.passed {
+                match dor_mode {
+                    GateMode::Hard => {
+                        // DoR hard failure -- skip execution entirely
+                        let failure_reason = format!("DoR pre-flight failed: {}", dor_result.message);
+                        tracing::error!(
+                            story_id = %story_id,
+                            findings = ?dor_result.findings,
+                            "DoR hard failure -- skipping story execution"
+                        );
 
-                    {
-                        let mut s = state.write().await;
-                        s.story_states.insert(
-                            story_id.to_string(),
-                            StoryExecutionState::Failed {
-                                reason: failure_reason.clone(),
-                                attempts: 0,
-                                last_agent: current_agent.clone(),
-                            },
+                        {
+                            let mut s = state.write().await;
+                            s.story_states.insert(
+                                story_id.to_string(),
+                                StoryExecutionState::Failed {
+                                    reason: failure_reason.clone(),
+                                    attempts: 0,
+                                    last_agent: current_agent.clone(),
+                                },
+                            );
+                        }
+
+                        let dor_gate_results = vec![dor_result.clone()];
+                        let mut event = TaskModeProgressEvent::story_failed(
+                            session_id,
+                            batch_index,
+                            total_batches,
+                            story_id,
+                            &current_agent,
+                            &failure_reason,
+                            Some(dor_gate_results.clone()),
+                            0.0,
+                        );
+                        event.gate_summary = Some(task_gate_summary_from_results(
+                            &dor_gate_results,
+                            None,
+                            dor_mode,
+                            dod_mode,
+                        ));
+                        emit(event);
+                        return;
+                    }
+                    GateMode::Soft => {
+                        tracing::warn!(
+                            story_id = %story_id,
+                            findings = ?dor_result.findings,
+                            "DoR soft warning -- proceeding with execution"
                         );
                     }
-
-                    let dor_gate_results = vec![dor_result];
-                    let mut event = TaskModeProgressEvent::story_failed(
-                        session_id,
-                        batch_index,
-                        total_batches,
-                        story_id,
-                        &current_agent,
-                        &failure_reason,
-                        Some(dor_gate_results.clone()),
-                        0.0,
-                    );
-                    event.gate_summary = Some(task_gate_summary_from_results(
-                        &dor_gate_results,
-                        None,
-                        dor_mode,
-                        dod_mode,
-                    ));
-                    emit(event);
-                    return;
-                }
-                GateMode::Soft => {
-                    tracing::warn!(
-                        story_id = %story_id,
-                        findings = ?dor_result.findings,
-                        "DoR soft warning -- proceeding with execution"
-                    );
                 }
             }
-        }
 
-        // Keep the DoR result for inclusion in gate_results events
-        let dor_gate_result = dor_result;
+            Some(dor_result)
+        } else {
+            None
+        };
 
         for attempt in 1..=max_attempts {
             // Check cancellation
@@ -1477,15 +1508,13 @@ impl BatchExecutor {
 
             if !quality_gates_enabled {
                 let duration_ms = story_start.elapsed().as_millis() as u64;
-                let gate_results = vec![
-                    dor_gate_result.clone(),
-                    PipelineGateResult::skipped(
+                let mut gate_results = dor_gate_result.clone().into_iter().collect::<Vec<_>>();
+                gate_results.push(PipelineGateResult::skipped(
                         "quality_gates_disabled",
                         "Quality Gates",
                         GatePhase::Validation,
                         "Quality gates disabled by workflow configuration",
-                    ),
-                ];
+                    ));
                 {
                     let mut s = state.write().await;
                     s.story_states.insert(
@@ -1521,31 +1550,43 @@ impl BatchExecutor {
             let pipeline_config = PipelineConfig::new(project_path.to_path_buf());
             let mut pipeline = GatePipeline::new(pipeline_config);
 
-            let format_path = project_path.to_path_buf();
-            let format_cache = pipeline.cache().cloned();
-            pipeline.register_gate(
-                "format",
-                Box::new(move || {
-                    let mut gate = FormatGate::new(format_path.clone());
-                    if let Some(ref cache) = format_cache {
-                        gate = gate.with_cache(Arc::clone(cache));
-                    }
-                    Box::pin(async move { gate.run().await })
-                }),
-            );
+            if gate_selected(&selected_gate_ids, "format") && !skip_verification {
+                let format_path = project_path.to_path_buf();
+                let format_cache = pipeline.cache().cloned();
+                pipeline.register_gate(
+                    "format",
+                    Box::new(move || {
+                        let mut gate = FormatGate::new(format_path.clone());
+                        if let Some(ref cache) = format_cache {
+                            gate = gate.with_cache(Arc::clone(cache));
+                        }
+                        Box::pin(async move { gate.run().await })
+                    }),
+                );
+            }
 
-            pipeline.register_gate(
-                "typecheck",
-                ValidationGate::create_executor("typecheck", project_path.to_path_buf()),
-            );
-            pipeline.register_gate(
-                "test",
-                ValidationGate::create_executor("test", project_path.to_path_buf()),
-            );
-            pipeline.register_gate(
-                "lint",
-                ValidationGate::create_executor("lint", project_path.to_path_buf()),
-            );
+            if gate_selected(&selected_gate_ids, "typecheck") && !skip_verification {
+                pipeline.register_gate(
+                    "typecheck",
+                    ValidationGate::create_executor("typecheck", project_path.to_path_buf()),
+                );
+            }
+            if gate_selected(&selected_gate_ids, "test") {
+                pipeline.register_gate(
+                    "test",
+                    ValidationGate::create_executor("test", project_path.to_path_buf()),
+                );
+            }
+            if gate_selected(&selected_gate_ids, "lint") && !skip_verification {
+                pipeline.register_gate(
+                    "lint",
+                    ValidationGate::create_executor("lint", project_path.to_path_buf()),
+                );
+            }
+
+            let ai_verify_enabled = gate_selected(&selected_gate_ids, "ai_verify");
+            let code_review_enabled =
+                gate_selected(&selected_gate_ids, "code_review") && !skip_review;
 
             let (diff_content, diff_warning): (String, Option<PipelineGateResult>) = {
                 let diff_output = tokio::process::Command::new("git")
@@ -1570,17 +1611,21 @@ impl BatchExecutor {
                             stderr = %stderr,
                             "git diff HEAD failed; AI gates will be skipped"
                         );
-                        let warning = PipelineGateResult::warning(
-                            "git_diff_warning",
-                            "Git Diff",
-                            GatePhase::PostValidation,
-                            &reason,
-                            vec![format!(
-                                "AI gates (ai_verify, code_review) skipped due to diff failure: {}",
-                                stderr.trim()
-                            )],
-                        );
-                        (String::new(), Some(warning))
+                        let warning = if ai_verify_enabled || code_review_enabled {
+                            Some(PipelineGateResult::warning(
+                                "git_diff_warning",
+                                "Git Diff",
+                                GatePhase::PostValidation,
+                                &reason,
+                                vec![format!(
+                                    "AI gates skipped due to diff failure: {}",
+                                    stderr.trim()
+                                )],
+                            ))
+                        } else {
+                            None
+                        };
+                        (String::new(), warning)
                     }
                     Err(e) => {
                         let reason = format!("Git diff failed: {}", e);
@@ -1589,17 +1634,18 @@ impl BatchExecutor {
                             error = %e,
                             "git diff HEAD execution error; AI gates will be skipped"
                         );
-                        let warning = PipelineGateResult::warning(
-                            "git_diff_warning",
-                            "Git Diff",
-                            GatePhase::PostValidation,
-                            &reason,
-                            vec![format!(
-                                "AI gates (ai_verify, code_review) skipped due to diff failure: {}",
-                                e
-                            )],
-                        );
-                        (String::new(), Some(warning))
+                        let warning = if ai_verify_enabled || code_review_enabled {
+                            Some(PipelineGateResult::warning(
+                                "git_diff_warning",
+                                "Git Diff",
+                                GatePhase::PostValidation,
+                                &reason,
+                                vec![format!("AI gates skipped due to diff failure: {}", e)],
+                            ))
+                        } else {
+                            None
+                        };
+                        (String::new(), warning)
                     }
                 }
             };
@@ -1617,14 +1663,16 @@ impl BatchExecutor {
                     story_id,
                     attempt,
                 );
-                pipeline.register_gate(
-                    "ai_verify",
-                    Box::new(move || {
-                        let gate = AiVerificationGate::new(verify_diff.clone());
-                        let provider = verify_provider.clone();
-                        Box::pin(async move { gate.run(provider).await })
-                    }),
-                );
+                if ai_verify_enabled {
+                    pipeline.register_gate(
+                        "ai_verify",
+                        Box::new(move || {
+                            let gate = AiVerificationGate::new(verify_diff.clone());
+                            let provider = verify_provider.clone();
+                            Box::pin(async move { gate.run(provider).await })
+                        }),
+                    );
+                }
 
                 let review_diff = diff_content.clone();
                 let review_provider = Self::tracked_quality_gate_provider(
@@ -1638,20 +1686,25 @@ impl BatchExecutor {
                     story_id,
                     attempt,
                 );
-                pipeline.register_gate(
-                    "code_review",
-                    Box::new(move || {
-                        let gate = CodeReviewGate::new(review_diff.clone());
-                        let provider = review_provider.clone();
-                        Box::pin(async move { gate.run(provider).await })
-                    }),
-                );
+                if code_review_enabled {
+                    pipeline.register_gate(
+                        "code_review",
+                        Box::new(move || {
+                            let gate = CodeReviewGate::new(review_diff.clone());
+                            let provider = review_provider.clone();
+                            Box::pin(async move { gate.run(provider).await })
+                        }),
+                    );
+                }
             }
 
             for gate_def in &plugin_quality_gates {
                 let cmd = gate_def.command.clone();
                 let gate_id = gate_def.gate_id.clone();
                 let gate_id_key = gate_id.clone();
+                if !gate_selected(&selected_gate_ids, &gate_id_key) {
+                    continue;
+                }
                 let gate_name = gate_def.gate_name.clone();
                 let timeout = gate_def.timeout_ms;
                 let story_id_for_gate = story_id.clone();
@@ -1720,12 +1773,99 @@ impl BatchExecutor {
                 );
             }
 
+            for gate_def in &custom_quality_gates {
+                let cmd = gate_def.command.clone();
+                let gate_id = gate_def.id.clone();
+                let gate_id_key = gate_id.clone();
+                let gate_name = gate_def.name.clone();
+                let blocking = gate_def.blocking;
+                let story_id_for_gate = story_id.clone();
+                let story_title_for_gate = story.title.clone();
+                let proj_path = project_path.to_path_buf();
+                let diff = diff_content.clone();
+
+                pipeline.register_gate(
+                    &gate_id_key,
+                    Box::new(move || {
+                        let cmd = cmd.clone();
+                        let gate_id = gate_id.clone();
+                        let gate_name = gate_name.clone();
+                        let blocking = blocking;
+                        let story_id = story_id_for_gate.clone();
+                        let story_title = story_title_for_gate.clone();
+                        let proj_path = proj_path.clone();
+                        let diff = diff.clone();
+                        Box::pin(async move {
+                            let diff_file =
+                                std::env::temp_dir().join(format!("gate-{}.diff", gate_id));
+                            let _ = tokio::fs::write(&diff_file, &diff).await;
+
+                            let mut env = std::collections::HashMap::new();
+                            env.insert("STORY_ID".to_string(), story_id);
+                            env.insert("STORY_TITLE".to_string(), story_title);
+                            env.insert("PROJECT_PATH".to_string(), proj_path.to_string_lossy().to_string());
+                            env.insert(
+                                "DIFF_FILE".to_string(),
+                                diff_file.to_string_lossy().to_string(),
+                            );
+                            env.insert("QUALITY_MODE".to_string(), "task".to_string());
+
+                            let start = std::time::Instant::now();
+                            let shell_result =
+                                crate::services::plugins::dispatcher::execute_shell_hook(
+                                    &cmd, &env, None, 60_000,
+                                )
+                                .await;
+                            let duration_ms = start.elapsed().as_millis() as u64;
+
+                            let _ = tokio::fs::remove_file(&diff_file).await;
+
+                            if shell_result.exit_code == 0 {
+                                PipelineGateResult::passed(
+                                    &gate_id,
+                                    &gate_name,
+                                    GatePhase::PostValidation,
+                                    duration_ms,
+                                )
+                            } else {
+                                let fallback_output = if shell_result.stdout.trim().is_empty() {
+                                    shell_result.stderr.as_str()
+                                } else {
+                                    shell_result.stdout.as_str()
+                                };
+                                let (message, findings) =
+                                    parse_plugin_gate_output(fallback_output);
+                                if blocking {
+                                    PipelineGateResult::failed(
+                                        &gate_id,
+                                        &gate_name,
+                                        GatePhase::PostValidation,
+                                        duration_ms,
+                                        message,
+                                        findings,
+                                    )
+                                } else {
+                                    PipelineGateResult::warning(
+                                        &gate_id,
+                                        &gate_name,
+                                        GatePhase::PostValidation,
+                                        &message,
+                                        findings,
+                                    )
+                                }
+                            }
+                        })
+                    }),
+                );
+            }
+
             let gate_result = pipeline.execute().await;
 
             match gate_result {
                 Ok(pipeline_result) => {
                     // Collect all gate results: DoR + pipeline gates + diff warning
-                    let mut gate_results: Vec<PipelineGateResult> = vec![dor_gate_result.clone()];
+                    let mut gate_results: Vec<PipelineGateResult> =
+                        dor_gate_result.clone().into_iter().collect();
                     gate_results.extend(
                         pipeline_result
                             .phase_results
@@ -1742,74 +1882,76 @@ impl BatchExecutor {
                         // ============================================
                         // DoD Post-Validation
                         // ============================================
-                        let dod_input = DoDInput {
-                            story_id: story_id.to_string(),
-                            acceptance_criteria: story.acceptance_criteria.clone(),
-                            pipeline_result: Some(pipeline_result.clone()),
-                            code_review_result: None,
-                            diff_content: if diff_content.is_empty() {
-                                None
-                            } else {
-                                Some(diff_content.clone())
-                            },
-                        };
+                        if dod_enabled {
+                            let dod_input = DoDInput {
+                                story_id: story_id.to_string(),
+                                acceptance_criteria: story.acceptance_criteria.clone(),
+                                pipeline_result: Some(pipeline_result.clone()),
+                                code_review_result: None,
+                                diff_content: if diff_content.is_empty() {
+                                    None
+                                } else {
+                                    Some(diff_content.clone())
+                                },
+                            };
 
-                        let dod_gate = DoDGate::new(dod_input);
-                        let dod_result = dod_gate
-                            .run(Self::tracked_quality_gate_provider(
-                                llm_provider.clone(),
-                                analytics_tx.clone(),
-                                analytics_cost_calculator.clone(),
-                                kernel_session_id.clone(),
-                                mode_session_id.clone(),
-                                "task_dod",
-                                "dod",
-                                story_id,
-                                attempt,
-                            ))
-                            .await;
+                            let dod_gate = DoDGate::new(dod_input);
+                            let dod_result = dod_gate
+                                .run(Self::tracked_quality_gate_provider(
+                                    llm_provider.clone(),
+                                    analytics_tx.clone(),
+                                    analytics_cost_calculator.clone(),
+                                    kernel_session_id.clone(),
+                                    mode_session_id.clone(),
+                                    "task_dod",
+                                    "dod",
+                                    story_id,
+                                    attempt,
+                                ))
+                                .await;
 
-                        gate_results.push(dod_result.clone());
+                            gate_results.push(dod_result.clone());
 
-                        if !dod_result.passed {
-                            match dod_mode {
-                                GateMode::Hard => {
-                                    // DoD hard failure -- trigger retry flow
-                                    last_error = format!(
-                                        "DoD post-validation failed: {}",
-                                        dod_result.message
-                                    );
-                                    tracing::warn!(
-                                        story_id = %story_id,
-                                        findings = ?dod_result.findings,
-                                        "DoD hard failure -- triggering retry"
-                                    );
-                                    last_gate_results = Some(gate_results);
+                            if !dod_result.passed {
+                                match dod_mode {
+                                    GateMode::Hard => {
+                                        // DoD hard failure -- trigger retry flow
+                                        last_error = format!(
+                                            "DoD post-validation failed: {}",
+                                            dod_result.message
+                                        );
+                                        tracing::warn!(
+                                            story_id = %story_id,
+                                            findings = ?dod_result.findings,
+                                            "DoD hard failure -- triggering retry"
+                                        );
+                                        last_gate_results = Some(gate_results);
 
-                                    if attempt < max_attempts {
-                                        let resolver = AgentResolver::new(agents_config.clone());
-                                        let story_info = StoryInfo {
-                                            title: story.title.clone(),
-                                            description: story.description.clone(),
-                                            agent: None,
-                                        };
-                                        let retry_assignment =
-                                            resolver.resolve(&story_info, ExecutionPhase::Retry);
-                                        current_agent = retry_assignment.agent_name.clone();
+                                        if attempt < max_attempts {
+                                            let resolver = AgentResolver::new(agents_config.clone());
+                                            let story_info = StoryInfo {
+                                                title: story.title.clone(),
+                                                description: story.description.clone(),
+                                                agent: None,
+                                            };
+                                            let retry_assignment =
+                                                resolver.resolve(&story_info, ExecutionPhase::Retry);
+                                            current_agent = retry_assignment.agent_name.clone();
 
-                                        let mut s = state.write().await;
-                                        s.agent_assignments
-                                            .insert(story_id.to_string(), retry_assignment);
+                                            let mut s = state.write().await;
+                                            s.agent_assignments
+                                                .insert(story_id.to_string(), retry_assignment);
+                                        }
+                                        continue;
                                     }
-                                    continue;
-                                }
-                                GateMode::Soft => {
-                                    // DoD soft failure -- log warning, still complete
-                                    tracing::warn!(
-                                        story_id = %story_id,
-                                        findings = ?dod_result.findings,
-                                        "DoD soft warning -- story marked as completed with warnings"
-                                    );
+                                    GateMode::Soft => {
+                                        // DoD soft failure -- log warning, still complete
+                                        tracing::warn!(
+                                            story_id = %story_id,
+                                            findings = ?dod_result.findings,
+                                            "DoD soft warning -- story marked as completed with warnings"
+                                        );
+                                    }
                                 }
                             }
                         }

@@ -149,6 +149,9 @@ export interface TaskWorkflowConfigPayload {
   tddMode: 'off' | 'flexible' | 'strict';
   enableInterview: boolean;
   qualityGatesEnabled: boolean;
+  selectedQualityGateIds: string[];
+  qualityRetryMaxAttempts: number | null;
+  customQualityGates: import('../types/workflowQuality').QualityCustomGate[];
   maxParallel: number;
   skipVerification: boolean;
   skipReview: boolean;
@@ -416,6 +419,9 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
             tddMode: workflowConfig.tddMode,
             enableInterview: workflowConfig.enableInterview,
             qualityGatesEnabled: workflowConfig.qualityGatesEnabled,
+            selectedQualityGateIds: workflowConfig.selectedQualityGateIds,
+            qualityRetryMaxAttempts: workflowConfig.qualityRetryMaxAttempts,
+            customQualityGates: workflowConfig.customQualityGates,
             maxParallel: workflowConfig.maxParallel,
             skipVerification: workflowConfig.skipVerification,
             skipReview: workflowConfig.skipReview,
@@ -530,6 +536,9 @@ export const useTaskModeStore = create<TaskModeState>()((set, get) => ({
                 tddMode: workflowConfig.tddMode,
                 enableInterview: workflowConfig.enableInterview,
                 qualityGatesEnabled: workflowConfig.qualityGatesEnabled,
+                selectedQualityGateIds: workflowConfig.selectedQualityGateIds,
+                qualityRetryMaxAttempts: workflowConfig.qualityRetryMaxAttempts,
+                customQualityGates: workflowConfig.customQualityGates,
                 maxParallel: workflowConfig.maxParallel,
                 skipVerification: workflowConfig.skipVerification,
                 skipReview: workflowConfig.skipReview,

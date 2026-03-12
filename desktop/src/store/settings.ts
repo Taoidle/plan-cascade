@@ -8,6 +8,12 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import i18n from '../i18n';
 import type { DebugEnvironment } from '../types/debugMode';
+import {
+  DEFAULT_QUALITY_SETTINGS,
+  sanitizeQualityGateIds,
+  sanitizeQualityCustomGates,
+  type QualitySettings,
+} from '../types/workflowQuality';
 
 export type Backend = 'claude-code' | 'claude-api' | 'openai' | 'deepseek' | 'glm' | 'qwen' | 'minimax' | 'ollama';
 export type Theme = 'system' | 'light' | 'dark';
@@ -20,7 +26,7 @@ export type QwenEndpoint = 'china' | 'singapore' | 'us';
 export type MemoryReviewMode = 'llm_review' | 'auto_approve' | 'manual_only';
 export type UpdateChannel = 'stable' | 'beta' | 'alpha';
 export type DebugBrowserProfile = 'desktop' | 'mobile';
-const SETTINGS_PERSIST_VERSION = 9;
+const SETTINGS_PERSIST_VERSION = 10;
 const PLAN_MODE_PHASE_IDS = [
   'plan_strategy',
   'plan_clarification',
@@ -46,15 +52,6 @@ interface Agent {
   enabled: boolean;
   command: string;
   isDefault: boolean;
-}
-
-interface QualityGates {
-  typecheck: boolean;
-  test: boolean;
-  lint: boolean;
-  custom: boolean;
-  customScript: string;
-  maxRetries: number;
 }
 
 export interface PhaseAgentConfig {
@@ -97,8 +94,8 @@ interface SettingsState {
   agentSelection: 'smart' | 'prefer_default' | 'manual';
   defaultAgent: string;
 
-  // Quality gates
-  qualityGates: QualityGates;
+  // Quality
+  quality: QualitySettings;
 
   // Execution settings
   maxParallelStories: number;
@@ -185,7 +182,7 @@ interface SettingsState {
   setDefaultMode: (mode: 'simple' | 'expert') => void;
   setStandaloneContextTurns: (turns: StandaloneContextTurns) => void;
   updateAgent: (name: string, updates: Partial<Agent>) => void;
-  updateQualityGates: (updates: Partial<QualityGates>) => void;
+  updateQualitySettings: (updates: Partial<QualitySettings>) => void;
   resetToDefaults: () => void;
   setEnableContextCompaction: (enable: boolean) => void;
   setShowReasoningOutput: (show: boolean) => void;
@@ -258,15 +255,8 @@ const defaultSettings = {
   agentSelection: 'prefer_default' as const,
   defaultAgent: 'claude-code',
 
-  // Quality gates
-  qualityGates: {
-    typecheck: true,
-    test: true,
-    lint: true,
-    custom: false,
-    customScript: '',
-    maxRetries: 3,
-  },
+  // Quality
+  quality: DEFAULT_QUALITY_SETTINGS,
 
   // Execution
   maxParallelStories: 3,
@@ -527,6 +517,118 @@ function ensureDebugProductionDiagnosticsAllowlist(
     : [...defaultSettings.debugProductionDiagnosticsAllowlist];
 }
 
+function ensureQualitySettings(state: Partial<SettingsState> & Record<string, unknown>): QualitySettings {
+  const next: QualitySettings = {
+    ...DEFAULT_QUALITY_SETTINGS,
+    defaultBehaviorByMode: { ...DEFAULT_QUALITY_SETTINGS.defaultBehaviorByMode },
+    retryPolicyByMode: {
+      chat: { ...DEFAULT_QUALITY_SETTINGS.retryPolicyByMode.chat },
+      plan: { ...DEFAULT_QUALITY_SETTINGS.retryPolicyByMode.plan },
+      task: { ...DEFAULT_QUALITY_SETTINGS.retryPolicyByMode.task },
+      debug: { ...DEFAULT_QUALITY_SETTINGS.retryPolicyByMode.debug },
+    },
+    profileOverridesByMode: {
+      chat: { ...DEFAULT_QUALITY_SETTINGS.profileOverridesByMode.chat },
+      plan: { ...DEFAULT_QUALITY_SETTINGS.profileOverridesByMode.plan },
+      task: { ...DEFAULT_QUALITY_SETTINGS.profileOverridesByMode.task },
+      debug: { ...DEFAULT_QUALITY_SETTINGS.profileOverridesByMode.debug },
+    },
+    customGates: [...DEFAULT_QUALITY_SETTINGS.customGates],
+    pluginPolicy: { ...DEFAULT_QUALITY_SETTINGS.pluginPolicy },
+  };
+
+  const quality = state.quality;
+  if (quality && typeof quality === 'object') {
+    const candidate = quality as Partial<QualitySettings>;
+    const candidateProfiles =
+      (candidate.profileOverridesByMode as Partial<QualitySettings['profileOverridesByMode']> | undefined) ?? {};
+    return {
+      ...next,
+      ...candidate,
+      defaultBehaviorByMode: {
+        ...next.defaultBehaviorByMode,
+        ...(candidate.defaultBehaviorByMode ?? {}),
+      },
+      retryPolicyByMode: {
+        ...next.retryPolicyByMode,
+        ...(candidate.retryPolicyByMode ?? {}),
+      },
+      profileOverridesByMode: {
+        chat: {
+          ...next.profileOverridesByMode.chat,
+          ...(candidateProfiles.chat ?? {}),
+          defaultGateIds: sanitizeQualityGateIds('chat', candidateProfiles.chat?.defaultGateIds),
+        },
+        plan: {
+          ...next.profileOverridesByMode.plan,
+          ...(candidateProfiles.plan ?? {}),
+          defaultGateIds: sanitizeQualityGateIds('plan', candidateProfiles.plan?.defaultGateIds),
+        },
+        task: {
+          ...next.profileOverridesByMode.task,
+          ...(candidateProfiles.task ?? {}),
+          defaultGateIds: sanitizeQualityGateIds('task', candidateProfiles.task?.defaultGateIds),
+        },
+        debug: {
+          ...next.profileOverridesByMode.debug,
+          ...(candidateProfiles.debug ?? {}),
+          defaultGateIds: sanitizeQualityGateIds('debug', candidateProfiles.debug?.defaultGateIds),
+        },
+      },
+      customGates:
+        candidate.customGates !== undefined ? sanitizeQualityCustomGates(candidate.customGates) : next.customGates,
+      pluginPolicy: {
+        ...next.pluginPolicy,
+        ...(candidate.pluginPolicy ?? {}),
+      },
+    };
+  }
+
+  const legacy = state.qualityGates;
+  if (legacy && typeof legacy === 'object') {
+    const old = legacy as Record<string, unknown>;
+    const taskGateIds = ['dor'];
+    if (old.typecheck !== false) taskGateIds.push('typecheck');
+    if (old.test !== false) taskGateIds.push('test');
+    if (old.lint !== false) taskGateIds.push('lint');
+    taskGateIds.push('dod');
+    const customScript = typeof old.customScript === 'string' ? old.customScript.trim() : '';
+    const maxRetries = typeof old.maxRetries === 'number' && Number.isFinite(old.maxRetries) ? old.maxRetries : 2;
+    return {
+      ...next,
+      enabled: taskGateIds.length > 0 || customScript.length > 0,
+      retryPolicyByMode: {
+        ...next.retryPolicyByMode,
+        task: {
+          enabled: maxRetries > 0,
+          maxAttempts: maxRetries,
+        },
+      },
+      profileOverridesByMode: {
+        ...next.profileOverridesByMode,
+        task: {
+          ...next.profileOverridesByMode.task,
+          defaultGateIds: sanitizeQualityGateIds('task', taskGateIds),
+        },
+      },
+      customGates:
+        customScript.length > 0
+          ? [
+              {
+                id: 'legacy-custom-gate',
+                name: 'Legacy Custom Gate',
+                command: customScript,
+                modes: ['chat', 'plan', 'task', 'debug'],
+                blocking: true,
+              },
+            ]
+          : [],
+    };
+  }
+
+  return next;
+}
+
 export const useSettingsStore = create<SettingsState>()(
   persist(
     (set) => ({
@@ -592,9 +694,66 @@ export const useSettingsStore = create<SettingsState>()(
           agents: state.agents.map((a) => (a.name === name ? { ...a, ...updates } : a)),
         })),
 
-      updateQualityGates: (updates) =>
+      updateQualitySettings: (updates) =>
         set((state) => ({
-          qualityGates: { ...state.qualityGates, ...updates },
+          quality: {
+            ...state.quality,
+            ...updates,
+            defaultBehaviorByMode: {
+              ...state.quality.defaultBehaviorByMode,
+              ...(updates.defaultBehaviorByMode ?? {}),
+            },
+            retryPolicyByMode: {
+              ...state.quality.retryPolicyByMode,
+              ...(updates.retryPolicyByMode ?? {}),
+            },
+            profileOverridesByMode: {
+              ...state.quality.profileOverridesByMode,
+              ...(updates.profileOverridesByMode ?? {}),
+              chat: {
+                ...state.quality.profileOverridesByMode.chat,
+                ...(updates.profileOverridesByMode?.chat ?? {}),
+                defaultGateIds: sanitizeQualityGateIds(
+                  'chat',
+                  updates.profileOverridesByMode?.chat?.defaultGateIds ??
+                    state.quality.profileOverridesByMode.chat.defaultGateIds,
+                ),
+              },
+              plan: {
+                ...state.quality.profileOverridesByMode.plan,
+                ...(updates.profileOverridesByMode?.plan ?? {}),
+                defaultGateIds: sanitizeQualityGateIds(
+                  'plan',
+                  updates.profileOverridesByMode?.plan?.defaultGateIds ??
+                    state.quality.profileOverridesByMode.plan.defaultGateIds,
+                ),
+              },
+              task: {
+                ...state.quality.profileOverridesByMode.task,
+                ...(updates.profileOverridesByMode?.task ?? {}),
+                defaultGateIds: sanitizeQualityGateIds(
+                  'task',
+                  updates.profileOverridesByMode?.task?.defaultGateIds ??
+                    state.quality.profileOverridesByMode.task.defaultGateIds,
+                ),
+              },
+              debug: {
+                ...state.quality.profileOverridesByMode.debug,
+                ...(updates.profileOverridesByMode?.debug ?? {}),
+                defaultGateIds: sanitizeQualityGateIds(
+                  'debug',
+                  updates.profileOverridesByMode?.debug?.defaultGateIds ??
+                    state.quality.profileOverridesByMode.debug.defaultGateIds,
+                ),
+              },
+            },
+            pluginPolicy: {
+              ...state.quality.pluginPolicy,
+              ...(updates.pluginPolicy ?? {}),
+            },
+            customGates:
+              updates.customGates != null ? sanitizeQualityCustomGates(updates.customGates) : state.quality.customGates,
+          },
         })),
 
       resetToDefaults: () => set(defaultSettings),
@@ -782,6 +941,7 @@ export const useSettingsStore = create<SettingsState>()(
         }
         return {
           ...migrated,
+          quality: ensureQualitySettings(nextState as Partial<SettingsState> & Record<string, unknown>),
           phaseConfigs,
           memorySettings: ensureMemorySettings(state),
           developerPanels: ensureDeveloperPanels(state),
@@ -820,6 +980,7 @@ export const useSettingsStore = create<SettingsState>()(
           mergedState.model = modelByProvider[canonicalProvider];
         }
         mergedState.phaseConfigs = ensurePhaseConfigs(mergedState.phaseConfigs);
+        mergedState.quality = ensureQualitySettings(mergedState as SettingsState & Record<string, unknown>);
         mergedState.memorySettings = ensureMemorySettings(mergedState);
         mergedState.developerPanels = ensureDeveloperPanels(mergedState);
         mergedState.updatePreferences = ensureUpdatePreferences(mergedState);

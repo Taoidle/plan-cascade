@@ -34,8 +34,6 @@ pub use commands::{
     // Embedding configuration commands
     check_embedding_provider_health,
     check_provider_health,
-    check_quality_gates_health,
-    cleanup_gate_results,
     cleanup_standalone_sessions,
     // Settings commands
     clear_all_data,
@@ -82,7 +80,6 @@ pub use commands::{
     detect_incomplete_tasks,
     // LSP commands
     detect_lsp_servers,
-    detect_project_type_cmd,
     discard_task,
     disconnect_mcp_server,
     // A2A Remote Agent commands
@@ -104,7 +101,6 @@ pub use commands::{
     get_agent_pipeline,
     get_agent_run,
     get_agent_stats,
-    get_available_gates,
     get_branch,
     get_checkpoint,
     get_checkpoint_diff,
@@ -113,7 +109,6 @@ pub use commands::{
     get_connected_mcp_server_tools,
     get_analytics_summary,
     get_dashboard_summary_v2,
-    get_default_gates_for_type,
     get_design_doc,
     get_diff_from_current,
     get_embedding_api_key,
@@ -121,8 +116,6 @@ pub use commands::{
     get_enrichment_debounce,
     get_enrichment_report,
     get_evaluation_reports,
-    get_gate_result,
-    get_gate_results,
     get_graph_workflow,
     // Health commands
     get_health,
@@ -139,7 +132,6 @@ pub use commands::{
     get_project,
     get_provider_api_key,
     get_session,
-    get_session_gate_results,
     get_session_history,
     get_session_info,
     get_settings,
@@ -217,7 +209,6 @@ pub use commands::{
     init_analytics,
     // Init commands
     init_app,
-    init_quality_gates,
     install_mcp_catalog_item,
     install_plugin,
     install_plugin_from_git,
@@ -227,7 +218,6 @@ pub use commands::{
     // Agent commands
     list_agents,
     list_agents_with_stats,
-    list_all_gates,
     list_branches,
     list_checkpoints,
     list_configured_api_key_providers,
@@ -294,9 +284,6 @@ pub use commands::{
     retry_mcp_install,
     retry_webhook_delivery,
     run_agent,
-    run_custom_gates,
-    run_quality_gates,
-    run_specific_gates,
     save_claude_md,
     save_output_export,
     // Markdown commands
@@ -345,8 +332,6 @@ pub use commands::{
     // MCP runtime state
     McpRuntimeState,
     PluginState,
-    // Quality Gates commands
-    QualityGatesState,
     // Spec Interview commands
     SpecInterviewState,
     StandaloneState,

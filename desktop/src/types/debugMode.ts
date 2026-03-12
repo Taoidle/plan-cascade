@@ -1,4 +1,5 @@
 import type { HandoffContextBundle } from './workflowKernel';
+import type { ModeQualitySnapshot } from './workflowQuality';
 
 export type DebugLifecyclePhase =
   | 'intaking'
@@ -147,6 +148,7 @@ export interface DebugState {
   backgroundStatus?: string | null;
   lastCheckpointId?: string | null;
   entryHandoff?: HandoffContextBundle;
+  quality?: ModeQualitySnapshot | null;
 }
 
 export interface DebugRuntimeCapabilities {

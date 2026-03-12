@@ -168,6 +168,9 @@ describe('TaskModeStore', () => {
           description: 'Build feature X',
           kernelSessionId: null,
           locale: expect.any(String),
+          provider: 'anthropic',
+          model: null,
+          baseUrl: null,
         },
       });
     });
@@ -312,6 +315,58 @@ describe('TaskModeStore', () => {
             | undefined
         )?.request?.globalDefaultAgent,
       ).toBe('codex');
+    });
+
+    it('passes custom quality gates in workflow config payload', async () => {
+      await enterSession();
+      mockInvoke.mockResolvedValueOnce({ success: true, data: true, error: null });
+
+      await useTaskModeStore.getState().approvePrd(mockPrd(), undefined, {
+        flowLevel: 'standard',
+        tddMode: 'off',
+        enableInterview: false,
+        qualityGatesEnabled: true,
+        selectedQualityGateIds: ['dor', 'test'],
+        qualityRetryMaxAttempts: 1,
+        customQualityGates: [
+          {
+            id: 'contracts',
+            name: 'Contracts',
+            command: './scripts/check-contracts.sh',
+            modes: ['task'],
+            blocking: true,
+          },
+        ],
+        maxParallel: 2,
+        skipVerification: false,
+        skipReview: false,
+        globalAgentOverride: null,
+        implAgentOverride: null,
+      });
+
+      const call = mockInvoke.mock.calls.find(([command]) => command === 'approve_task_prd');
+      expect(call).toBeDefined();
+      expect(
+        (
+          call?.[1] as
+            | {
+                request?: {
+                  workflowConfig?: {
+                    customQualityGates?: Array<{ id: string; command: string }>;
+                  };
+                };
+              }
+            | undefined
+        )?.request?.workflowConfig?.customQualityGates,
+      ).toEqual([
+        {
+          id: 'contracts',
+          name: 'Contracts',
+          command: './scripts/check-contracts.sh',
+          modes: ['task'],
+          blocking: true,
+        },
+      ]);
     });
   });
 

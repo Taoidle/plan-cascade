@@ -384,7 +384,21 @@
 
   "quality": {
     "title": "品質ゲート",
-    "description": "ストーリーが完了とマークされる前に合格する必要がある品質チェックを設定します。",
+    "description": "Chat、Plan、Task、Debug ワークフローで共通利用する統一品質プラットフォームを設定します。",
+    "enabled": "品質プラットフォームを有効化",
+    "enabledHelp": "この設定は Simple モード全体で使われる統一品質エンジンを制御します。",
+    "modePolicies": "モードポリシー",
+    "modes": {
+      "chat": "Chat",
+      "plan": "Plan",
+      "task": "Task",
+      "debug": "Debug"
+    },
+    "behaviors": {
+      "manual_review": "手動レビュー",
+      "auto_retry_if_retryable": "自動リトライ",
+      "warn_and_continue": "警告して続行"
+    },
 
     "enabledGates": "有効なゲート",
 
@@ -414,11 +428,122 @@
     "retry": {
       "label": "リトライ設定",
       "maxRetries": "最大リトライ回数",
+      "maxAttempts": "リトライ回数",
       "help": "品質ゲート失敗時にストーリーをリトライする回数（0-10）。"
+    },
+
+    "profile": {
+      "defaultGates": "デフォルトゲート",
+      "noOverrides": "ゲートが選択されていません",
+      "selectedCount": "{{count}} 個のゲートを選択中"
+    },
+
+    "gates": {
+      "change_safety": {
+        "label": "変更安全性",
+        "description": "Chat の 1 ターンで複数ファイルが変更された場合に警告し、継続前の確認を促します。"
+      },
+      "output_completeness": {
+        "label": "出力完全性",
+        "description": "Plan ステップの出力が不完全と明示された場合にそのステップをブロックします。"
+      },
+      "criteria_validation": {
+        "label": "基準検証",
+        "description": "ステップの完了条件と構造化バリデーション結果を使って、本当に完了したかを判定します。"
+      },
+      "evidence_sufficiency": {
+        "label": "証拠十分性",
+        "description": "ツール出力、ログ、参照情報などの裏付けが十分に集まっているかを確認します。"
+      },
+      "artifact_integrity": {
+        "label": "成果物整合性",
+        "description": "空の結果ではなく、保存可能な出力や成果物が生成されたかを検証します。"
+      },
+      "dor": {
+        "label": "Definition of Ready",
+        "description": "実装開始前に Task ストーリーが実行可能な状態かを確認します。"
+      },
+      "format": {
+        "label": "フォーマット",
+        "description": "ストーリー完了前にフォーマットチェックを実行します。"
+      },
+      "typecheck": {
+        "label": "型チェック",
+        "description": "プロジェクトの型チェックを実行します。"
+      },
+      "test": {
+        "label": "テスト",
+        "description": "プロジェクトで設定されたテストコマンドを実行します。"
+      },
+      "lint": {
+        "label": "リント",
+        "description": "プロジェクトの lint チェックを実行します。"
+      },
+      "ai_verify": {
+        "label": "AI Verify",
+        "description": "AI 検証ゲートで diff を確認し、明らかな実装上の問題がないかを点検します。"
+      },
+      "code_review": {
+        "label": "コードレビュー",
+        "description": "可読性、保守性、レビュー指摘をコードレビューゲートで評価します。"
+      },
+      "dod": {
+        "label": "Definition of Done",
+        "description": "ストーリー完了前に受け入れ条件と実装後の品質状態を検証します。"
+      },
+      "repro_confidence": {
+        "label": "再現信頼度",
+        "description": "Debug セッションに安定した再現経路と十分な根本原因の確信があるかを評価します。"
+      },
+      "patch_safety": {
+        "label": "パッチ安全性",
+        "description": "Debug パッチが高リスク、または未承認の場合にレビューを要求します。"
+      },
+      "verification_success": {
+        "label": "検証成功",
+        "description": "修正後の検証が完了し、成功しているかを確認します。"
+      },
+      "regression_risk": {
+        "label": "回帰リスク",
+        "description": "提案された修正や検証レポートに残るリスクを可視化します。"
+      }
+    },
+
+    "plugins": {
+      "title": "プラグイン品質ゲート",
+      "description": "プラグインが提供する品質ゲートを統一品質評価に参加させます。"
+    },
+    "custom": {
+      "title": "カスタム品質ゲート",
+      "description": "ワークスペースのルートで shell コマンドを実行し、追加の品質ゲートとして扱います。",
+      "envHelp": "コマンドには QUALITY_MODE、QUALITY_GATE_ID、QUALITY_GATE_NAME、PROJECT_PATH、および任意の QUALITY_SCOPE_ID と QUALITY_METADATA_JSON が渡されます。",
+      "empty": "カスタム品質ゲートはまだ設定されていません。",
+      "addTitle": "カスタムゲートを追加",
+      "editTitle": "カスタムゲートを編集",
+      "name": "ゲート名",
+      "namePlaceholder": "例: 契約差分チェック",
+      "command": "コマンド",
+      "commandPlaceholder": "例: ./scripts/check-contracts.sh",
+      "commandHelp": "終了コード 0 は成功です。非 0 は blocking 設定に応じて失敗または警告になります。",
+      "modes": "対象モード",
+      "blocking": "ブロッキング",
+      "nonBlocking": "非ブロッキング",
+      "blockingLabel": "失敗をブロッキングとして扱う",
+      "add": "ゲートを追加",
+      "save": "変更を保存",
+      "edit": "編集",
+      "remove": "削除",
+      "cancel": "キャンセル",
+      "validation": {
+        "required": "名前、コマンド、少なくとも 1 つのモードが必要です。",
+        "duplicateName": "同じ名前のカスタムゲートが既に存在します。"
+      }
     },
 
     "summary": {
       "label": "概要",
+      "configured": "{{count}} 件のカスタムゲートが設定されています。Task は既定で自動リトライ、Chat・Plan・Debug は既定で手動レビューです。",
+      "disabled": "統一品質チェックは無効です。",
       "noGates": "品質ゲートが有効になっていません。ストーリーは検証なしで完了とマークされます。",
       "mustPass": "ストーリーは完了と見なされるために{{gates}}に合格する必要があります。{{retryMessage}}",
       "retryMessage": "ゲートが失敗した場合、エージェントは最大{{count}}回リトライします。",

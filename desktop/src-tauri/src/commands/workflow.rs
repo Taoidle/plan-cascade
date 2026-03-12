@@ -11,18 +11,22 @@ use crate::services::plan_mode::types::{
 };
 use crate::services::spec_interview::interview::InterviewSession;
 use crate::services::workflow_kernel::{
+    quality_profiles,
     observability::{self, WorkflowFailureRecordInput, WorkflowObservabilitySnapshot},
-    HandoffContextBundle, ModeTranscriptPayload, PlanClarificationSnapshot, PlanEditOperation,
-    PlanSnapshotRehydrate, ResumeResult, TaskInterviewSnapshot, TaskSnapshotRehydrate,
-    UserInputIntent, WorkflowKernelState, WorkflowKernelUpdatedEvent, WorkflowMode,
-    WorkflowModeTranscriptUpdatedEvent, WorkflowSession, WorkflowSessionCatalogState,
-    WorkflowSessionCatalogUpdatedEvent, WorkflowSessionMutation, WorkflowSessionState,
-    WorkflowStatus, WORKFLOW_KERNEL_UPDATED_CHANNEL, WORKFLOW_MODE_TRANSCRIPT_UPDATED_CHANNEL,
-    WORKFLOW_SESSION_CATALOG_UPDATED_CHANNEL,
+    HandoffContextBundle, ModeQualitySnapshot, ModeTranscriptPayload, PlanClarificationSnapshot,
+    PlanEditOperation, PlanSnapshotRehydrate, QualityDecisionAction, QualityGateOutcome,
+    QualityGateSource, QualityGateStatus, QualityProfileSummary, QualitySeverity, ResumeResult,
+    TaskInterviewSnapshot, TaskSnapshotRehydrate, UserInputIntent, WorkflowKernelState,
+    WorkflowKernelUpdatedEvent, WorkflowMode, WorkflowModeTranscriptUpdatedEvent, WorkflowSession,
+    WorkflowSessionCatalogState, WorkflowSessionCatalogUpdatedEvent, WorkflowSessionMutation,
+    WorkflowSessionState, WorkflowStatus, WORKFLOW_KERNEL_UPDATED_CHANNEL,
+    WORKFLOW_MODE_TRANSCRIPT_UPDATED_CHANNEL, WORKFLOW_SESSION_CATALOG_UPDATED_CHANNEL,
 };
 use crate::{commands::plan_mode::PlanModeState, commands::spec_interview::SpecInterviewState};
 use crate::{commands::task_mode::TaskModeState, state::AppState};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::time::Instant;
 use tauri::Emitter;
 
 pub(crate) fn build_kernel_update(
@@ -101,6 +105,52 @@ fn workflow_mode_label(mode: WorkflowMode) -> &'static str {
         WorkflowMode::Plan => "plan",
         WorkflowMode::Task => "task",
         WorkflowMode::Debug => "debug",
+    }
+}
+
+fn default_custom_gate_blocking() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowCustomQualityGate {
+    pub id: String,
+    pub name: String,
+    pub command: String,
+    #[serde(default)]
+    pub modes: Vec<WorkflowMode>,
+    #[serde(default = "default_custom_gate_blocking")]
+    pub blocking: bool,
+}
+
+fn parse_custom_gate_output(stdout: &str) -> (String, Vec<String>) {
+    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(stdout) {
+        let message = parsed
+            .get("message")
+            .and_then(|value| value.as_str())
+            .unwrap_or("Custom gate failed")
+            .to_string();
+        let findings = parsed
+            .get("findings")
+            .and_then(|value| value.as_array())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.as_str().map(String::from))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        (message, findings)
+    } else {
+        (
+            stdout
+                .lines()
+                .next()
+                .unwrap_or("Custom gate failed")
+                .to_string(),
+            vec![],
+        )
     }
 }
 
@@ -1243,6 +1293,204 @@ pub async fn workflow_get_session_state(
         Ok(session_state) => CommandResponse::ok(session_state),
         Err(error) => CommandResponse::err(error),
     })
+}
+
+#[tauri::command]
+pub async fn workflow_get_quality_snapshot(
+    session_id: String,
+    mode: WorkflowMode,
+    state: tauri::State<'_, WorkflowKernelState>,
+) -> Result<CommandResponse<ModeQualitySnapshot>, String> {
+    let result = state.get_quality_snapshot(&session_id, mode).await;
+    Ok(match result {
+        Ok(snapshot) => CommandResponse::ok(snapshot),
+        Err(error) => CommandResponse::err(error),
+    })
+}
+
+#[tauri::command]
+pub async fn workflow_update_quality_snapshot(
+    session_id: String,
+    mode: WorkflowMode,
+    snapshot: ModeQualitySnapshot,
+    state: tauri::State<'_, WorkflowKernelState>,
+    app: tauri::AppHandle,
+) -> Result<CommandResponse<WorkflowSession>, String> {
+    let result = state.update_quality_snapshot(&session_id, mode, snapshot).await;
+    Ok(match result {
+        Ok(session) => {
+            let _ = emit_kernel_update_for_session(
+                &app,
+                state.inner(),
+                &session_id,
+                "workflow_update_quality_snapshot",
+            )
+            .await;
+            let _ =
+                emit_session_catalog_update(&app, state.inner(), "workflow_update_quality_snapshot").await;
+            CommandResponse::ok(session)
+        }
+        Err(error) => CommandResponse::err(error),
+    })
+}
+
+#[tauri::command]
+pub async fn workflow_apply_quality_decision(
+    session_id: String,
+    mode: WorkflowMode,
+    run_id: String,
+    action: QualityDecisionAction,
+    state: tauri::State<'_, WorkflowKernelState>,
+    app: tauri::AppHandle,
+) -> Result<CommandResponse<WorkflowSession>, String> {
+    let result = state
+        .apply_quality_decision(&session_id, mode, &run_id, action)
+        .await;
+    Ok(match result {
+        Ok(session) => {
+            let _ = emit_kernel_update_for_session(
+                &app,
+                state.inner(),
+                &session_id,
+                "workflow_apply_quality_decision",
+            )
+            .await;
+            let _ =
+                emit_session_catalog_update(&app, state.inner(), "workflow_apply_quality_decision").await;
+            CommandResponse::ok(session)
+        }
+        Err(error) => CommandResponse::err(error),
+    })
+}
+
+#[tauri::command]
+pub async fn workflow_retry_quality_run(
+    session_id: String,
+    mode: WorkflowMode,
+    run_id: String,
+    state: tauri::State<'_, WorkflowKernelState>,
+    app: tauri::AppHandle,
+) -> Result<CommandResponse<WorkflowSession>, String> {
+    let result = state.retry_quality_run(&session_id, mode, &run_id).await;
+    Ok(match result {
+        Ok(session) => {
+            let _ =
+                emit_kernel_update_for_session(&app, state.inner(), &session_id, "workflow_retry_quality_run")
+                    .await;
+            let _ = emit_session_catalog_update(&app, state.inner(), "workflow_retry_quality_run").await;
+            CommandResponse::ok(session)
+        }
+        Err(error) => CommandResponse::err(error),
+    })
+}
+
+#[tauri::command]
+pub async fn workflow_list_quality_profiles(
+) -> Result<CommandResponse<Vec<QualityProfileSummary>>, String> {
+    Ok(CommandResponse::ok(quality_profiles()))
+}
+
+#[tauri::command]
+pub async fn workflow_run_custom_quality_gates(
+    project_path: String,
+    mode: WorkflowMode,
+    gates: Vec<WorkflowCustomQualityGate>,
+    scope_id: Option<String>,
+    metadata: Option<serde_json::Value>,
+) -> Result<CommandResponse<Vec<QualityGateOutcome>>, String> {
+    let relevant_gates = gates
+        .into_iter()
+        .filter(|gate| gate.modes.iter().any(|gate_mode| *gate_mode == mode))
+        .collect::<Vec<_>>();
+
+    let mut outcomes = Vec::with_capacity(relevant_gates.len());
+    for gate in relevant_gates {
+        let mut env = HashMap::new();
+        env.insert("QUALITY_MODE".to_string(), workflow_mode_label(mode).to_string());
+        env.insert("WORKFLOW_MODE".to_string(), workflow_mode_label(mode).to_string());
+        env.insert("PROJECT_PATH".to_string(), project_path.clone());
+        env.insert("QUALITY_GATE_ID".to_string(), gate.id.clone());
+        env.insert("QUALITY_GATE_NAME".to_string(), gate.name.clone());
+        if let Some(ref scope_id_value) = scope_id {
+            env.insert("QUALITY_SCOPE_ID".to_string(), scope_id_value.clone());
+        }
+        if let Some(ref metadata_value) = metadata {
+            env.insert(
+                "QUALITY_METADATA_JSON".to_string(),
+                serde_json::to_string(metadata_value).unwrap_or_else(|_| "{}".to_string()),
+            );
+        }
+        let metadata_stdin = metadata
+            .as_ref()
+            .and_then(|value| serde_json::to_string(value).ok());
+
+        let start = Instant::now();
+        let shell_result = crate::services::plugins::dispatcher::execute_shell_hook(
+            &gate.command,
+            &env,
+            metadata_stdin.as_deref(),
+            60_000,
+        )
+        .await;
+        let duration_ms = start.elapsed().as_millis() as u64;
+
+        let (message, findings) = if shell_result.exit_code == 0 {
+            (
+                if shell_result.stdout.trim().is_empty() {
+                    None
+                } else {
+                    Some(shell_result.stdout.trim().to_string())
+                },
+                Vec::new(),
+            )
+        } else {
+            let fallback_output = if shell_result.stdout.trim().is_empty() {
+                shell_result.stderr.as_str()
+            } else {
+                shell_result.stdout.as_str()
+            };
+            let (message, findings) = parse_custom_gate_output(fallback_output);
+            (Some(message), findings)
+        };
+
+        let mut outcome_metadata = serde_json::Map::new();
+        if !findings.is_empty() {
+            outcome_metadata.insert("findings".to_string(), serde_json::json!(findings));
+        }
+        if !shell_result.stderr.trim().is_empty() {
+            outcome_metadata.insert(
+                "stderr".to_string(),
+                serde_json::Value::String(shell_result.stderr.trim().to_string()),
+            );
+        }
+
+        outcomes.push(QualityGateOutcome {
+            gate_id: gate.id,
+            gate_name: gate.name,
+            status: if shell_result.exit_code == 0 {
+                QualityGateStatus::Passed
+            } else if gate.blocking {
+                QualityGateStatus::Failed
+            } else {
+                QualityGateStatus::Warning
+            },
+            severity: if shell_result.exit_code == 0 {
+                QualitySeverity::Info
+            } else if gate.blocking {
+                QualitySeverity::HardFail
+            } else {
+                QualitySeverity::SoftFail
+            },
+            blocking: gate.blocking,
+            source: QualityGateSource::Custom,
+            message,
+            duration_ms: Some(duration_ms),
+            retryable: shell_result.exit_code != 0,
+            metadata: outcome_metadata,
+        });
+    }
+
+    Ok(CommandResponse::ok(outcomes))
 }
 
 #[tauri::command]

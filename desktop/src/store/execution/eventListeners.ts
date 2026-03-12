@@ -1381,31 +1381,6 @@ function handleUnifiedExecutionEvent(
       }
       break;
 
-    case 'quality_gates_result':
-      if (payload.story_id && payload.summary && typeof payload.summary === 'object') {
-        const summary = payload.summary as Record<string, { passed?: boolean; output?: string; duration?: number }>;
-        const passed = payload.passed !== false;
-
-        // Parse individual gate results from summary
-        for (const [gateName, gateResult] of Object.entries(summary)) {
-          get().updateQualityGate({
-            gateId: gateName.toLowerCase().replace(/\s+/g, '_'),
-            gateName,
-            storyId: payload.story_id,
-            status: gateResult.passed !== false ? 'passed' : 'failed',
-            output: gateResult.output,
-            duration: gateResult.duration,
-            completedAt: Date.now(),
-          });
-        }
-
-        get().appendStreamLine(
-          `Quality gates ${passed ? 'passed' : 'failed'} for story: ${payload.story_id}`,
-          passed ? 'success' : 'warning',
-        );
-      }
-      break;
-
     case 'context_compaction': {
       const compacted = (payload as unknown as { messages_compacted?: number }).messages_compacted || 0;
       const preserved = (payload as unknown as { messages_preserved?: number }).messages_preserved || 0;

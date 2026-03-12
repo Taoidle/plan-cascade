@@ -13,9 +13,12 @@
 import { create } from 'zustand';
 import i18n from '../i18n';
 import { usePlanModeStore } from './planMode';
+import { useSettingsStore } from './settings';
 import { useWorkflowKernelStore } from './workflowKernel';
 import { useContextSourcesStore } from './contextSources';
 import { selectKernelPlanRuntime } from './workflowKernelSelectors';
+import { appendQualityOutcomes, buildPlanQualitySnapshot } from '../lib/workflowQualitySnapshot';
+import { runCustomQualityGatesForMode } from '../lib/workflowCustomQuality';
 import { failResult, okResult, type ActionResult } from '../types/actionResult';
 import type {
   PlanModePhase,
@@ -205,6 +208,39 @@ async function subscribePlanProgressEvents(
     }
 
     const stepTitle = plan.steps.find((s) => s.id === payload.stepId)?.title;
+    if (payload.stepId && stepTitle && payload.stepOutput) {
+      const kernel = useWorkflowKernelStore.getState();
+      const previousQuality = kernel.session?.modeSnapshots.plan?.quality;
+      const qualitySettings = useSettingsStore.getState().quality;
+      const stepId = payload.stepId;
+      const stepOutput = payload.stepOutput;
+      if (qualitySettings.enabled) {
+        void (async () => {
+          const customOutcomes = await runCustomQualityGatesForMode({
+            mode: 'plan',
+            projectPath: useSettingsStore.getState().workspacePath,
+            scopeId: stepId,
+            metadata: {
+              stepId,
+              stepTitle,
+              qualityState: stepOutput.qualityState ?? null,
+              outcomeStatus: stepOutput.outcomeStatus ?? null,
+            },
+            customGates: qualitySettings.customGates,
+          });
+          const snapshot = buildPlanQualitySnapshot(previousQuality, stepId, stepTitle, stepOutput, qualitySettings);
+          await kernel.updateQualitySnapshot(
+            'plan',
+            appendQualityOutcomes(
+              previousQuality,
+              snapshot,
+              customOutcomes,
+              qualitySettings.defaultBehaviorByMode.plan,
+            ),
+          );
+        })();
+      }
+    }
     if (
       !hasAuthoritativeKernelTranscript &&
       stepUpdateEvents.has(payload.eventType as PlanStepUpdateCardData['eventType'])

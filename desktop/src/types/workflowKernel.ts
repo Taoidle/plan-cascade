@@ -12,6 +12,7 @@ import type {
   DebugSeverity,
   DebugState,
 } from './debugMode';
+import type { ModeQualitySnapshot } from './workflowQuality';
 
 export type WorkflowMode = 'chat' | 'plan' | 'task' | 'debug';
 
@@ -92,6 +93,7 @@ export interface ChatState {
   lastUserMessage: string | null;
   lastAssistantMessage: string | null;
   entryHandoff?: HandoffContextBundle;
+  quality?: ModeQualitySnapshot | null;
 }
 
 export interface PlanClarificationSnapshot {
@@ -117,6 +119,7 @@ export interface PlanState {
   resumableFromCheckpoint?: boolean;
   lastCheckpointId?: string | null;
   entryHandoff?: HandoffContextBundle;
+  quality?: ModeQualitySnapshot | null;
 }
 
 export interface TaskInterviewSnapshot {
@@ -176,6 +179,9 @@ export interface TaskWorkflowConfigSnapshot {
   tddMode: string | null;
   enableInterview: boolean;
   qualityGatesEnabled: boolean;
+  selectedQualityGateIds: string[];
+  qualityRetryMaxAttempts: number | null;
+  customQualityGates: import('./workflowQuality').QualityCustomGate[];
   maxParallel: number | null;
   skipVerification: boolean;
   skipReview: boolean;
@@ -201,6 +207,7 @@ export interface TaskState {
   resumableFromCheckpoint?: boolean;
   lastCheckpointId?: string | null;
   entryHandoff?: HandoffContextBundle;
+  quality?: ModeQualitySnapshot | null;
 }
 
 export type ModeState =
@@ -227,7 +234,12 @@ export type WorkflowEventKind =
   | 'plan_step_retried'
   | 'operation_cancelled'
   | 'session_recovered'
-  | 'checkpoint_created';
+  | 'checkpoint_created'
+  | 'quality_run_started'
+  | 'quality_gate_updated'
+  | 'quality_run_completed'
+  | 'quality_decision_required'
+  | 'quality_decision_applied';
 
 export interface WorkflowEventV2 {
   eventId: string;

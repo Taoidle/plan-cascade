@@ -3,8 +3,11 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import i18n from '../i18n';
 import { collectPreferredBrowserEvidence, getDebugBrowserBridgeStatus } from '../lib/browserDebugApi';
 import { writeDebugArtifact } from '../lib/debugArtifactsApi';
+import { appendQualityOutcomes, buildDebugQualitySnapshot } from '../lib/workflowQualitySnapshot';
+import { runCustomQualityGatesForMode } from '../lib/workflowCustomQuality';
 import { useDebugModeStore } from './debugMode';
 import { useWorkflowKernelStore } from './workflowKernel';
+import { useSettingsStore } from './settings';
 import { useContextSourcesStore } from './contextSources';
 import { selectKernelDebugRuntime } from './workflowKernelSelectors';
 import { isDebugPhaseBusy } from './workflowPhaseModel';
@@ -441,6 +444,37 @@ async function injectBrowserEvidenceCards(
 }
 
 function injectStateCards(session: DebugModeSession) {
+  const kernel = useWorkflowKernelStore.getState();
+  const previousQuality = kernel.session?.modeSnapshots.debug?.quality;
+  const qualitySettings = useSettingsStore.getState().quality;
+  if (qualitySettings.enabled) {
+    void (async () => {
+      const customOutcomes = await runCustomQualityGatesForMode({
+        mode: 'debug',
+        projectPath: session.projectPath ?? session.state.projectPath ?? useSettingsStore.getState().workspacePath,
+        scopeId: session.sessionId,
+        metadata: {
+          phase: session.state.phase,
+          severity: session.state.severity,
+          evidenceCount: session.state.evidenceRefs.length,
+          hasPendingApproval: !!session.state.pendingApproval,
+          hasVerificationReport: !!session.state.verificationReport,
+        },
+        customGates: qualitySettings.customGates,
+      });
+      const snapshot = buildDebugQualitySnapshot(previousQuality, session, qualitySettings);
+      await kernel.updateQualitySnapshot(
+        'debug',
+        appendQualityOutcomes(
+          previousQuality,
+          snapshot,
+          customOutcomes,
+          qualitySettings.defaultBehaviorByMode.debug,
+          qualitySettings.profileOverridesByMode.debug.requireApprovalOnRisk ?? false,
+        ),
+      );
+    })();
+  }
   const state = session.state;
   if (state.activeHypotheses.length > 0) {
     injectDebugCard(

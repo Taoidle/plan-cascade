@@ -29,7 +29,9 @@ import { useSpecInterviewStore, type InterviewQuestion } from './specInterview';
 import { useSettingsStore } from './settings';
 import { useWorkflowKernelStore } from './workflowKernel';
 import { selectKernelTaskRuntime } from './workflowKernelSelectors';
+import { buildTaskQualitySnapshot } from '../lib/workflowQualitySnapshot';
 import { parseWorkflowConfigNatural } from '../lib/workflowConfigNaturalParser';
+import { resolveModeQualityConfig } from '../types/workflowQuality';
 import { failResult, okResult, type ActionResult } from '../types/actionResult';
 import { applyArchitectureModifications } from './workflowOrchestrator/architectureModifications';
 import {
@@ -521,12 +523,20 @@ export const useWorkflowOrchestratorStore = create<WorkflowOrchestratorState>()(
       return failResult('stale_run_token', 'Configuration request was superseded');
     }
     try {
+      const qualitySettings = useSettingsStore.getState().quality;
+      const taskQualityConfig = resolveModeQualityConfig(qualitySettings, 'task');
       const confirmedSession = await useTaskModeStore.getState().confirmTaskConfiguration(
         {
           flowLevel: config.flowLevel,
           tddMode: config.tddMode,
           enableInterview: config.specInterviewEnabled,
-          qualityGatesEnabled: config.qualityGatesEnabled,
+          qualityGatesEnabled:
+            config.qualityGatesEnabled && taskQualityConfig.enabled && taskQualityConfig.selectedGateIds.length > 0,
+          selectedQualityGateIds: taskQualityConfig.selectedGateIds,
+          qualityRetryMaxAttempts: taskQualityConfig.retryPolicy.enabled
+            ? taskQualityConfig.retryPolicy.maxAttempts
+            : 0,
+          customQualityGates: qualitySettings.customGates.filter((gate) => gate.modes.includes('task')),
           maxParallel: config.maxParallel,
           skipVerification: config.skipVerification,
           skipReview: config.skipReview,
@@ -1207,17 +1217,25 @@ async function subscribeToProgressEvents(set: SetFn, get: GetFn, runToken: numbe
       }
 
       if (payload.storyId && payload.gateResults && payload.gateResults.length > 0) {
+        const nextStoryResult = {
+          storyId: payload.storyId,
+          overallStatus: payload.gateSummary?.overallStatus ?? 'passed',
+          blockingStatus: payload.gateSummary?.blockingStatus ?? 'passed',
+          softFailedGateCount: payload.gateSummary?.softFailedGateCount ?? 0,
+          gateSource: payload.gateSummary?.gateSource ?? 'skipped',
+          gates: payload.gateResults,
+        } as StoryQualityGateResults;
         orchestratorPatch.qualityGateResults = {
           ...state.qualityGateResults,
-          [payload.storyId]: {
-            storyId: payload.storyId,
-            overallStatus: payload.gateSummary?.overallStatus ?? 'passed',
-            blockingStatus: payload.gateSummary?.blockingStatus ?? 'passed',
-            softFailedGateCount: payload.gateSummary?.softFailedGateCount ?? 0,
-            gateSource: payload.gateSummary?.gateSource ?? 'skipped',
-            gates: payload.gateResults,
-          },
+          [payload.storyId]: nextStoryResult,
         };
+        const kernel = useWorkflowKernelStore.getState();
+        const previousQuality = kernel.session?.modeSnapshots.task?.quality;
+        const qualitySettings = useSettingsStore.getState().quality;
+        void kernel.updateQualitySnapshot(
+          'task',
+          buildTaskQualitySnapshot(previousQuality, nextStoryResult, [], qualitySettings),
+        );
       }
 
       // Resolve story title from editablePrd

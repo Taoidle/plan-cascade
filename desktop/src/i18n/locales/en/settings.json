@@ -383,8 +383,22 @@
   },
 
   "quality": {
-    "title": "Quality Gates",
-    "description": "Configure quality checks that must pass before a story is marked complete.",
+    "title": "Quality",
+    "description": "Configure the unified quality platform used by Chat, Plan, Task, and Debug workflows.",
+    "enabled": "Enable quality platform",
+    "enabledHelp": "This controls the unified quality engine across all Simple mode workflows.",
+    "modePolicies": "Mode policies",
+    "modes": {
+      "chat": "Chat",
+      "plan": "Plan",
+      "task": "Task",
+      "debug": "Debug"
+    },
+    "behaviors": {
+      "manual_review": "Manual review",
+      "auto_retry_if_retryable": "Auto retry",
+      "warn_and_continue": "Warn and continue"
+    },
 
     "enabledGates": "Enabled Gates",
 
@@ -414,11 +428,122 @@
     "retry": {
       "label": "Retry Settings",
       "maxRetries": "Maximum Retries",
+      "maxAttempts": "Retry Attempts",
       "help": "Number of times to retry a story if quality gates fail (0-10)."
+    },
+
+    "profile": {
+      "defaultGates": "Default Gates",
+      "noOverrides": "No gates selected",
+      "selectedCount": "{{count}} gates selected"
+    },
+
+    "gates": {
+      "change_safety": {
+        "label": "Change Safety",
+        "description": "Warn when a chat turn changes multiple files so the result can be reviewed before continuing."
+      },
+      "output_completeness": {
+        "label": "Output Completeness",
+        "description": "Block a plan step when the output is explicitly marked incomplete."
+      },
+      "criteria_validation": {
+        "label": "Criteria Validation",
+        "description": "Validate step criteria and structured validation checks before the step is treated as done."
+      },
+      "evidence_sufficiency": {
+        "label": "Evidence Sufficiency",
+        "description": "Check that the mode produced enough supporting evidence such as tool output, logs, or references."
+      },
+      "artifact_integrity": {
+        "label": "Artifact Integrity",
+        "description": "Verify that the step produced durable output content or attached artifacts instead of an empty result."
+      },
+      "dor": {
+        "label": "Definition of Ready",
+        "description": "Validate that a task story is ready to execute before implementation starts."
+      },
+      "format": {
+        "label": "Format",
+        "description": "Run formatting checks before marking the story complete."
+      },
+      "typecheck": {
+        "label": "Type Check",
+        "description": "Run type checking for the project."
+      },
+      "test": {
+        "label": "Tests",
+        "description": "Run the configured test command for the project."
+      },
+      "lint": {
+        "label": "Lint",
+        "description": "Run lint checks for the project."
+      },
+      "ai_verify": {
+        "label": "AI Verify",
+        "description": "Use the AI verification gate to inspect the diff for obvious implementation issues."
+      },
+      "code_review": {
+        "label": "Code Review",
+        "description": "Use the code review gate to evaluate readability, maintainability, and review findings."
+      },
+      "dod": {
+        "label": "Definition of Done",
+        "description": "Validate acceptance criteria and post-implementation quality before the story is considered complete."
+      },
+      "repro_confidence": {
+        "label": "Reproduction Confidence",
+        "description": "Estimate whether the debug session has a stable reproduction path and a confident root-cause hypothesis."
+      },
+      "patch_safety": {
+        "label": "Patch Safety",
+        "description": "Require review when the proposed debug patch is risky or still awaiting approval."
+      },
+      "verification_success": {
+        "label": "Verification Success",
+        "description": "Check whether post-fix verification finished and passed."
+      },
+      "regression_risk": {
+        "label": "Regression Risk",
+        "description": "Surface residual risk from the proposed fix or verification report."
+      }
+    },
+
+    "plugins": {
+      "title": "Plugin quality gates",
+      "description": "Allow plugin-provided quality gates to participate in unified evaluation."
+    },
+    "custom": {
+      "title": "Custom quality gates",
+      "description": "Run shell commands as additional quality gates inside the workspace root.",
+      "envHelp": "Commands receive QUALITY_MODE, QUALITY_GATE_ID, QUALITY_GATE_NAME, PROJECT_PATH, optional QUALITY_SCOPE_ID, and QUALITY_METADATA_JSON.",
+      "empty": "No custom quality gates configured yet.",
+      "addTitle": "Add custom gate",
+      "editTitle": "Edit custom gate",
+      "name": "Gate name",
+      "namePlaceholder": "e.g. Contract drift check",
+      "command": "Command",
+      "commandPlaceholder": "e.g. ./scripts/check-contracts.sh",
+      "commandHelp": "Exit code 0 passes. Non-zero produces a failure or warning depending on the blocking setting.",
+      "modes": "Apply to modes",
+      "blocking": "Blocking",
+      "nonBlocking": "Non-blocking",
+      "blockingLabel": "Treat failures as blocking",
+      "add": "Add gate",
+      "save": "Save changes",
+      "edit": "Edit",
+      "remove": "Remove",
+      "cancel": "Cancel",
+      "validation": {
+        "required": "Name, command, and at least one mode are required.",
+        "duplicateName": "A custom gate with the same name already exists."
+      }
     },
 
     "summary": {
       "label": "Summary",
+      "configured": "{{count}} custom gates configured. Task defaults to auto retry. Chat, Plan, and Debug default to manual review.",
+      "disabled": "Unified quality checks are disabled.",
       "noGates": "No quality gates enabled. Stories will be marked complete without validation.",
       "mustPass": "Stories must pass {{gates}} to be considered complete. {{retryMessage}}",
       "retryMessage": "If gates fail, the agent will retry up to {{count}} time.",

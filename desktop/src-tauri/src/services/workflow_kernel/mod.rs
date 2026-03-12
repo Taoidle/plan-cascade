@@ -156,6 +156,180 @@ impl Default for HandoffContextBundle {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QualityScope {
+    Turn,
+    Step,
+    Story,
+    Patch,
+    Session,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QualityTrigger {
+    PreExecution,
+    PostExecution,
+    Transition,
+    Manual,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QualityDecision {
+    Pass,
+    Warn,
+    NeedsReview,
+    Retry,
+    Block,
+    ApprovalRequired,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QualityDecisionAction {
+    Retry,
+    ApproveAndContinue,
+    IgnoreWithWarning,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QualityBehavior {
+    ManualReview,
+    AutoRetryIfRetryable,
+    WarnAndContinue,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QualityGateStatus {
+    Pending,
+    Running,
+    Passed,
+    Failed,
+    Warning,
+    Skipped,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QualitySeverity {
+    Info,
+    Warning,
+    SoftFail,
+    HardFail,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QualityGateSource {
+    Builtin,
+    Plugin,
+    Custom,
+    Llm,
+    FallbackHeuristic,
+    Derived,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QualityGateOutcome {
+    pub gate_id: String,
+    pub gate_name: String,
+    pub status: QualityGateStatus,
+    pub severity: QualitySeverity,
+    pub blocking: bool,
+    pub source: QualityGateSource,
+    #[serde(default)]
+    pub message: Option<String>,
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
+    #[serde(default)]
+    pub retryable: bool,
+    #[serde(default)]
+    pub metadata: serde_json::Map<String, Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QualityRunSnapshot {
+    pub run_id: String,
+    pub mode: WorkflowMode,
+    pub scope: QualityScope,
+    #[serde(default)]
+    pub scope_id: Option<String>,
+    pub trigger: QualityTrigger,
+    pub status: QualityGateStatus,
+    pub decision: QualityDecision,
+    #[serde(default)]
+    pub recommended_action: Option<QualityDecisionAction>,
+    #[serde(default)]
+    pub retryable: bool,
+    pub blocking_status: String,
+    pub started_at: String,
+    #[serde(default)]
+    pub completed_at: Option<String>,
+    #[serde(default)]
+    pub outcomes: Vec<QualityGateOutcome>,
+    #[serde(default)]
+    pub summary: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModeQualitySnapshot {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    pub profile_id: String,
+    #[serde(default)]
+    pub default_behavior: QualityBehavior,
+    #[serde(default)]
+    pub active_run_id: Option<String>,
+    #[serde(default)]
+    pub last_decision: Option<QualityDecision>,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+    #[serde(default)]
+    pub runs: Vec<QualityRunSnapshot>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QualityProfileSummary {
+    pub profile_id: String,
+    pub mode: WorkflowMode,
+    pub default_behavior: QualityBehavior,
+    pub description: String,
+    #[serde(default)]
+    pub default_gate_ids: Vec<String>,
+}
+
+impl Default for QualityBehavior {
+    fn default() -> Self {
+        Self::ManualReview
+    }
+}
+
+impl ModeQualitySnapshot {
+    pub fn for_mode(mode: WorkflowMode) -> Self {
+        Self {
+            enabled: true,
+            profile_id: mode_storage_name(mode).to_string(),
+            default_behavior: if mode == WorkflowMode::Task {
+                QualityBehavior::AutoRetryIfRetryable
+            } else {
+                QualityBehavior::ManualReview
+            },
+            active_run_id: None,
+            last_decision: None,
+            updated_at: None,
+            runs: Vec::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatState {
@@ -166,6 +340,8 @@ pub struct ChatState {
     pub active_turn_id: Option<String>,
     #[serde(default)]
     pub entry_handoff: HandoffContextBundle,
+    #[serde(default)]
+    pub quality: Option<ModeQualitySnapshot>,
     pub turn_count: u64,
     pub last_user_message: Option<String>,
     pub last_assistant_message: Option<String>,
@@ -178,6 +354,7 @@ impl Default for ChatState {
             pending_input: String::new(),
             active_turn_id: None,
             entry_handoff: HandoffContextBundle::default(),
+            quality: Some(ModeQualitySnapshot::for_mode(WorkflowMode::Chat)),
             turn_count: 0,
             last_user_message: None,
             last_assistant_message: None,
@@ -210,6 +387,8 @@ pub struct PlanState {
     pub pending_clarification: Option<PlanClarificationSnapshot>,
     #[serde(default)]
     pub entry_handoff: HandoffContextBundle,
+    #[serde(default)]
+    pub quality: Option<ModeQualitySnapshot>,
     pub retryable_steps: Vec<String>,
     pub plan_revision: u64,
     pub last_edit_operation: Option<String>,
@@ -231,6 +410,7 @@ impl Default for PlanState {
             running_step_id: None,
             pending_clarification: None,
             entry_handoff: HandoffContextBundle::default(),
+            quality: Some(ModeQualitySnapshot::for_mode(WorkflowMode::Plan)),
             retryable_steps: Vec::new(),
             plan_revision: 0,
             last_edit_operation: None,
@@ -274,6 +454,8 @@ pub struct TaskState {
     pub pending_interview: Option<TaskInterviewSnapshot>,
     #[serde(default)]
     pub entry_handoff: HandoffContextBundle,
+    #[serde(default)]
+    pub quality: Option<ModeQualitySnapshot>,
     pub completed_stories: u64,
     pub failed_stories: u64,
     #[serde(default)]
@@ -301,6 +483,7 @@ impl Default for TaskState {
             interview_session_id: None,
             pending_interview: None,
             entry_handoff: HandoffContextBundle::default(),
+            quality: Some(ModeQualitySnapshot::for_mode(WorkflowMode::Task)),
             completed_stories: 0,
             failed_stories: 0,
             strategy_recommendation: None,
@@ -524,6 +707,11 @@ pub enum WorkflowEventKind {
     OperationCancelled,
     SessionRecovered,
     CheckpointCreated,
+    QualityRunStarted,
+    QualityGateUpdated,
+    QualityRunCompleted,
+    QualityDecisionRequired,
+    QualityDecisionApplied,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2930,6 +3118,145 @@ impl WorkflowKernelState {
         Ok(updated_session)
     }
 
+    pub async fn get_quality_snapshot(
+        &self,
+        session_id: &str,
+        mode: WorkflowMode,
+    ) -> Result<ModeQualitySnapshot, String> {
+        let session = self.get_session(session_id).await?;
+        Ok(mode_quality_snapshot_for_session(&session, mode))
+    }
+
+    pub async fn update_quality_snapshot(
+        &self,
+        session_id: &str,
+        mode: WorkflowMode,
+        snapshot: ModeQualitySnapshot,
+    ) -> Result<WorkflowSession, String> {
+        let updated_session = {
+            let mut sessions = self.sessions.write().await;
+            let session = sessions
+                .get_mut(session_id)
+                .ok_or_else(|| format!("Workflow session not found: {session_id}"))?;
+            session.mode_snapshots.ensure_mode(mode);
+            apply_mode_quality_snapshot(&mut session.mode_snapshots, mode, snapshot.clone());
+            session.updated_at = now_rfc3339();
+            session.clone()
+        };
+
+        let event_kind = if snapshot.active_run_id.is_some() {
+            WorkflowEventKind::QualityRunCompleted
+        } else {
+            WorkflowEventKind::QualityGateUpdated
+        };
+
+        self.append_event(
+            session_id,
+            event_kind,
+            mode,
+            json!({
+                "profileId": snapshot.profile_id,
+                "activeRunId": snapshot.active_run_id,
+                "lastDecision": snapshot.last_decision,
+                "runCount": snapshot.runs.len()
+            }),
+        )
+        .await;
+        self.persist_session_record(session_id).await?;
+
+        Ok(updated_session)
+    }
+
+    pub async fn apply_quality_decision(
+        &self,
+        session_id: &str,
+        mode: WorkflowMode,
+        run_id: &str,
+        action: QualityDecisionAction,
+    ) -> Result<WorkflowSession, String> {
+        let updated_session = {
+            let mut sessions = self.sessions.write().await;
+            let session = sessions
+                .get_mut(session_id)
+                .ok_or_else(|| format!("Workflow session not found: {session_id}"))?;
+            session.mode_snapshots.ensure_mode(mode);
+            let snapshot = mode_quality_snapshot_mut(&mut session.mode_snapshots, mode);
+            let run = snapshot
+                .runs
+                .iter_mut()
+                .find(|run| run.run_id == run_id)
+                .ok_or_else(|| format!("Quality run not found: {run_id}"))?;
+            run.recommended_action = Some(action);
+            run.completed_at = Some(now_rfc3339());
+            snapshot.last_decision = Some(match action {
+                QualityDecisionAction::Retry => QualityDecision::Retry,
+                QualityDecisionAction::ApproveAndContinue => QualityDecision::Pass,
+                QualityDecisionAction::IgnoreWithWarning => QualityDecision::Warn,
+            });
+            snapshot.updated_at = Some(now_rfc3339());
+            session.updated_at = now_rfc3339();
+            session.clone()
+        };
+
+        self.append_event(
+            session_id,
+            WorkflowEventKind::QualityDecisionApplied,
+            mode,
+            json!({
+                "runId": run_id,
+                "action": action
+            }),
+        )
+        .await;
+        self.persist_session_record(session_id).await?;
+
+        Ok(updated_session)
+    }
+
+    pub async fn retry_quality_run(
+        &self,
+        session_id: &str,
+        mode: WorkflowMode,
+        run_id: &str,
+    ) -> Result<WorkflowSession, String> {
+        let updated_session = {
+            let mut sessions = self.sessions.write().await;
+            let session = sessions
+                .get_mut(session_id)
+                .ok_or_else(|| format!("Workflow session not found: {session_id}"))?;
+            session.mode_snapshots.ensure_mode(mode);
+            let snapshot = mode_quality_snapshot_mut(&mut session.mode_snapshots, mode);
+            let run = snapshot
+                .runs
+                .iter_mut()
+                .find(|run| run.run_id == run_id)
+                .ok_or_else(|| format!("Quality run not found: {run_id}"))?;
+            run.status = QualityGateStatus::Pending;
+            run.decision = QualityDecision::Retry;
+            run.recommended_action = Some(QualityDecisionAction::Retry);
+            run.completed_at = None;
+            snapshot.active_run_id = Some(run_id.to_string());
+            snapshot.last_decision = Some(QualityDecision::Retry);
+            snapshot.updated_at = Some(now_rfc3339());
+            session.updated_at = now_rfc3339();
+            session.clone()
+        };
+
+        self.append_event(
+            session_id,
+            WorkflowEventKind::QualityRunStarted,
+            mode,
+            json!({
+                "runId": run_id,
+                "reason": "retry_requested"
+            }),
+        )
+        .await;
+        self.persist_session_record(session_id).await?;
+
+        Ok(updated_session)
+    }
+
     pub async fn cancel_operation(
         &self,
         session_id: &str,
@@ -3075,6 +3402,10 @@ impl WorkflowKernelState {
         session.mode_snapshots.ensure_mode(session.active_mode);
 
         if let Some(chat) = session.mode_snapshots.chat.as_mut() {
+            if chat.quality.is_none() {
+                chat.quality = Some(ModeQualitySnapshot::for_mode(WorkflowMode::Chat));
+                repaired.push("mode_snapshots.chat.quality".to_string());
+            }
             let normalized_phase = normalize_chat_phase(&chat.phase);
             if chat.phase != normalized_phase {
                 chat.phase = normalized_phase;
@@ -3100,6 +3431,10 @@ impl WorkflowKernelState {
             }
         }
         if let Some(plan) = session.mode_snapshots.plan.as_mut() {
+            if plan.quality.is_none() {
+                plan.quality = Some(ModeQualitySnapshot::for_mode(WorkflowMode::Plan));
+                repaired.push("mode_snapshots.plan.quality".to_string());
+            }
             if plan.phase.trim().is_empty() {
                 plan.phase = "idle".to_string();
                 repaired.push("mode_snapshots.plan.phase".to_string());
@@ -3112,6 +3447,10 @@ impl WorkflowKernelState {
             }
         }
         if let Some(task) = session.mode_snapshots.task.as_mut() {
+            if task.quality.is_none() {
+                task.quality = Some(ModeQualitySnapshot::for_mode(WorkflowMode::Task));
+                repaired.push("mode_snapshots.task.quality".to_string());
+            }
             if task.phase.trim().is_empty() {
                 task.phase = "idle".to_string();
                 repaired.push("mode_snapshots.task.phase".to_string());
@@ -3133,6 +3472,10 @@ impl WorkflowKernelState {
             }
         }
         if let Some(debug) = session.mode_snapshots.debug.as_mut() {
+            if debug.quality.is_none() {
+                debug.quality = Some(ModeQualitySnapshot::for_mode(WorkflowMode::Debug));
+                repaired.push("mode_snapshots.debug.quality".to_string());
+            }
             if debug.phase.trim().is_empty() {
                 debug.phase = "intaking".to_string();
                 repaired.push("mode_snapshots.debug.phase".to_string());
@@ -4758,6 +5101,126 @@ fn mode_storage_name(mode: WorkflowMode) -> &'static str {
         WorkflowMode::Task => "task",
         WorkflowMode::Debug => "debug",
     }
+}
+
+fn mode_quality_snapshot_for_session(
+    session: &WorkflowSession,
+    mode: WorkflowMode,
+) -> ModeQualitySnapshot {
+    match mode {
+        WorkflowMode::Chat => session
+            .mode_snapshots
+            .chat
+            .as_ref()
+            .and_then(|state| state.quality.clone())
+            .unwrap_or_else(|| ModeQualitySnapshot::for_mode(mode)),
+        WorkflowMode::Plan => session
+            .mode_snapshots
+            .plan
+            .as_ref()
+            .and_then(|state| state.quality.clone())
+            .unwrap_or_else(|| ModeQualitySnapshot::for_mode(mode)),
+        WorkflowMode::Task => session
+            .mode_snapshots
+            .task
+            .as_ref()
+            .and_then(|state| state.quality.clone())
+            .unwrap_or_else(|| ModeQualitySnapshot::for_mode(mode)),
+        WorkflowMode::Debug => session
+            .mode_snapshots
+            .debug
+            .as_ref()
+            .and_then(|state| state.quality.clone())
+            .unwrap_or_else(|| ModeQualitySnapshot::for_mode(mode)),
+    }
+}
+
+fn mode_quality_snapshot_mut(
+    snapshots: &mut ModeSnapshots,
+    mode: WorkflowMode,
+) -> &mut ModeQualitySnapshot {
+    match mode {
+        WorkflowMode::Chat => snapshots
+            .chat_mut()
+            .quality
+            .get_or_insert_with(|| ModeQualitySnapshot::for_mode(mode)),
+        WorkflowMode::Plan => snapshots
+            .plan_mut()
+            .quality
+            .get_or_insert_with(|| ModeQualitySnapshot::for_mode(mode)),
+        WorkflowMode::Task => snapshots
+            .task_mut()
+            .quality
+            .get_or_insert_with(|| ModeQualitySnapshot::for_mode(mode)),
+        WorkflowMode::Debug => snapshots
+            .debug_mut()
+            .quality
+            .get_or_insert_with(|| ModeQualitySnapshot::for_mode(mode)),
+    }
+}
+
+fn apply_mode_quality_snapshot(
+    snapshots: &mut ModeSnapshots,
+    mode: WorkflowMode,
+    snapshot: ModeQualitySnapshot,
+) {
+    *mode_quality_snapshot_mut(snapshots, mode) = snapshot;
+}
+
+pub fn quality_profiles() -> Vec<QualityProfileSummary> {
+    vec![
+        QualityProfileSummary {
+            profile_id: "chat".to_string(),
+            mode: WorkflowMode::Chat,
+            default_behavior: QualityBehavior::ManualReview,
+            description: "Quality checks for chat turns with code or file side effects.".to_string(),
+            default_gate_ids: vec!["change_safety".to_string()],
+        },
+        QualityProfileSummary {
+            profile_id: "plan".to_string(),
+            mode: WorkflowMode::Plan,
+            default_behavior: QualityBehavior::ManualReview,
+            description: "Quality checks for plan step completeness, evidence, and output integrity."
+                .to_string(),
+            default_gate_ids: vec![
+                "output_completeness".to_string(),
+                "criteria_validation".to_string(),
+                "evidence_sufficiency".to_string(),
+                "artifact_integrity".to_string(),
+            ],
+        },
+        QualityProfileSummary {
+            profile_id: "task".to_string(),
+            mode: WorkflowMode::Task,
+            default_behavior: QualityBehavior::AutoRetryIfRetryable,
+            description: "Task execution quality checks including DoR, validation, AI review, and DoD."
+                .to_string(),
+            default_gate_ids: vec![
+                "dor".to_string(),
+                "format".to_string(),
+                "typecheck".to_string(),
+                "test".to_string(),
+                "lint".to_string(),
+                "ai_verify".to_string(),
+                "code_review".to_string(),
+                "dod".to_string(),
+            ],
+        },
+        QualityProfileSummary {
+            profile_id: "debug".to_string(),
+            mode: WorkflowMode::Debug,
+            default_behavior: QualityBehavior::ManualReview,
+            description: "Debug quality checks for evidence, patch safety, verification, and regression risk."
+                .to_string(),
+            default_gate_ids: vec![
+                "evidence_sufficiency".to_string(),
+                "repro_confidence".to_string(),
+                "patch_safety".to_string(),
+                "verification_success".to_string(),
+                "regression_risk".to_string(),
+            ],
+        },
+    ]
 }
 
 fn resolve_storage_root() -> PathBuf {

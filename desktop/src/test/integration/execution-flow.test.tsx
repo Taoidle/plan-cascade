@@ -318,82 +318,102 @@ describe('Worktree Integration', () => {
 });
 
 // ============================================================================
-// Quality Gates Integration Tests
+// Workflow Quality Integration Tests
 // ============================================================================
 
-describe('Quality Gates Integration', () => {
+describe('Workflow Quality Integration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('should detect project type', async () => {
+  it('should list workflow quality profiles', async () => {
     mockInvoke.mockResolvedValue({
-      projectType: 'nodejs',
-      markerFile: '/project/package.json',
-      metadata: {
-        name: 'test-project',
-        hasTypescript: true,
-        hasEslint: true,
-        hasTests: true,
-      },
-      suggestedGates: ['tsc', 'eslint', 'test'],
-    });
-
-    const result = await mockInvoke('detect_project_type', { projectPath: '/project' });
-
-    expect(result.projectType).toBe('nodejs');
-    expect(result.metadata.hasTypescript).toBe(true);
-    expect(result.suggestedGates).toContain('tsc');
-  });
-
-  it('should run quality gates', async () => {
-    mockInvoke.mockResolvedValue({
-      projectPath: '/project',
-      projectType: 'nodejs',
-      overallStatus: 'passed',
-      totalGates: 3,
-      passedGates: 2,
-      failedGates: 0,
-      skippedGates: 1,
-      results: [
-        { gateId: 'tsc', gateName: 'TypeScript', status: 'passed', durationMs: 1500 },
-        { gateId: 'eslint', gateName: 'ESLint', status: 'passed', durationMs: 2000 },
-        { gateId: 'test', gateName: 'Tests', status: 'skipped', durationMs: 0 },
+      success: true,
+      data: [
+        {
+          profileId: 'task',
+          mode: 'task',
+          defaultBehavior: 'auto_retry_if_retryable',
+          description: 'Task quality profile',
+          defaultGateIds: ['dor', 'typecheck', 'test'],
+        },
       ],
     });
 
-    const summary = await mockInvoke('run_quality_gates', { projectPath: '/project' });
+    const result = await mockInvoke('workflow_list_quality_profiles');
 
-    expect(summary.overallStatus).toBe('passed');
-    expect(summary.passedGates).toBe(2);
-    expect(summary.results).toHaveLength(3);
+    expect(result.success).toBe(true);
+    expect(result.data[0].mode).toBe('task');
+    expect(result.data[0].defaultGateIds).toContain('dor');
   });
 
-  it('should get gate results history', async () => {
-    mockInvoke.mockResolvedValue([
-      {
-        id: 1,
-        projectPath: '/project',
-        gateId: 'tsc',
-        status: 'passed',
-        createdAt: '2024-01-15T10:00:00Z',
-      },
-      {
-        id: 2,
-        projectPath: '/project',
-        gateId: 'tsc',
-        status: 'failed',
-        createdAt: '2024-01-14T10:00:00Z',
-      },
-    ]);
-
-    const history = await mockInvoke('get_gate_history', {
-      projectPath: '/project',
-      limit: 10,
+  it('should run custom workflow quality gates', async () => {
+    mockInvoke.mockResolvedValue({
+      success: true,
+      data: [
+        { gateId: 'contracts', gateName: 'Contracts', status: 'passed', durationMs: 1500 },
+        { gateId: 'license', gateName: 'License Policy', status: 'warning', durationMs: 2000 },
+      ],
     });
 
-    expect(history).toHaveLength(2);
-    expect(history[0].status).toBe('passed');
+    const summary = await mockInvoke('workflow_run_custom_quality_gates', {
+      projectPath: '/project',
+      mode: 'task',
+      gates: [
+        {
+          id: 'contracts',
+          name: 'Contracts',
+          command: './scripts/check-contracts.sh',
+          modes: ['task'],
+          blocking: true,
+        },
+      ],
+    });
+
+    expect(summary.success).toBe(true);
+    expect(summary.data).toHaveLength(2);
+    expect(summary.data[1].status).toBe('warning');
+  });
+
+  it('should fetch workflow quality snapshots', async () => {
+    mockInvoke.mockResolvedValue({
+      success: true,
+      data: {
+        enabled: true,
+        profileId: 'plan',
+        defaultBehavior: 'manual_review',
+        activeRunId: null,
+        lastDecision: 'needs_review',
+        updatedAt: '2026-03-13T10:00:00Z',
+        runs: [
+          {
+            runId: 'plan:step-1',
+            mode: 'plan',
+            scope: 'step',
+            scopeId: 'step-1',
+            trigger: 'post_execution',
+            status: 'warning',
+            decision: 'needs_review',
+            recommendedAction: 'approve_and_continue',
+            retryable: false,
+            blockingStatus: 'passed',
+            startedAt: '2026-03-13T09:59:00Z',
+            completedAt: '2026-03-13T10:00:00Z',
+            outcomes: [],
+            summary: 'step-1: warning',
+          },
+        ],
+      },
+    });
+
+    const snapshot = await mockInvoke('workflow_get_quality_snapshot', {
+      sessionId: 'session-123',
+      mode: 'plan',
+    });
+
+    expect(snapshot.success).toBe(true);
+    expect(snapshot.data.profileId).toBe('plan');
+    expect(snapshot.data.runs[0].decision).toBe('needs_review');
   });
 });
 
@@ -517,7 +537,7 @@ describe('Error Handling Integration', () => {
     });
 
     try {
-      await mockInvoke('detect_project_type', { projectPath: '' });
+      await mockInvoke('workflow_run_custom_quality_gates', { projectPath: '' });
       expect.fail('Should have thrown');
     } catch (error) {
       expect((error as { code: string }).code).toBe('VALIDATION_ERROR');

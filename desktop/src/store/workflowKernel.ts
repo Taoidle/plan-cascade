@@ -33,6 +33,14 @@ import type {
   WorkflowSession,
   WorkflowSessionState,
 } from '../types/workflowKernel';
+import type {
+  ModeQualitySnapshot,
+  QualityCustomGate,
+  QualityDecisionAction,
+  QualityGateOutcome,
+  QualityProfileSummary,
+} from '../types/workflowQuality';
+import { DEFAULT_MODE_QUALITY_SNAPSHOT } from '../types/workflowQuality';
 
 const WORKFLOW_KERNEL_UPDATED_CHANNEL = 'workflow-kernel-updated';
 const WORKFLOW_SESSION_CATALOG_UPDATED_CHANNEL = 'workflow-session-catalog-updated';
@@ -179,6 +187,15 @@ function normalizeHandoff(bundle?: HandoffContextBundle): HandoffContextBundle {
   };
 }
 
+function normalizeQualitySnapshot(snapshot?: ModeQualitySnapshot | null, profileId?: string): ModeQualitySnapshot {
+  return {
+    ...DEFAULT_MODE_QUALITY_SNAPSHOT,
+    ...(snapshot ?? {}),
+    profileId: snapshot?.profileId ?? profileId ?? DEFAULT_MODE_QUALITY_SNAPSHOT.profileId,
+    runs: snapshot?.runs ?? [],
+  };
+}
+
 function normalizeSession(session: WorkflowSession): WorkflowSession {
   return {
     ...session,
@@ -190,24 +207,28 @@ function normalizeSession(session: WorkflowSession): WorkflowSession {
         ? {
             ...session.modeSnapshots.chat,
             entryHandoff: normalizeHandoff(session.modeSnapshots.chat.entryHandoff),
+            quality: normalizeQualitySnapshot(session.modeSnapshots.chat.quality, 'chat'),
           }
         : null,
       plan: session.modeSnapshots.plan
         ? {
             ...session.modeSnapshots.plan,
             entryHandoff: normalizeHandoff(session.modeSnapshots.plan.entryHandoff),
+            quality: normalizeQualitySnapshot(session.modeSnapshots.plan.quality, 'plan'),
           }
         : null,
       task: session.modeSnapshots.task
         ? {
             ...session.modeSnapshots.task,
             entryHandoff: normalizeHandoff(session.modeSnapshots.task.entryHandoff),
+            quality: normalizeQualitySnapshot(session.modeSnapshots.task.quality, 'task'),
           }
         : null,
       debug: session.modeSnapshots.debug
         ? {
             ...session.modeSnapshots.debug,
             entryHandoff: normalizeHandoff(session.modeSnapshots.debug.entryHandoff),
+            quality: normalizeQualitySnapshot(session.modeSnapshots.debug.quality, 'debug'),
           }
         : null,
     },
@@ -324,6 +345,22 @@ export interface WorkflowKernelStore {
   recoverSession: (sessionId: string) => Promise<WorkflowSessionState | null>;
   linkModeSession: (mode: WorkflowMode, modeSessionId: string) => Promise<WorkflowSession | null>;
   markChatTurnFailed: (error: string) => Promise<WorkflowSession | null>;
+  getQualitySnapshot: (sessionId: string, mode: WorkflowMode) => Promise<ModeQualitySnapshot | null>;
+  updateQualitySnapshot: (mode: WorkflowMode, snapshot: ModeQualitySnapshot) => Promise<WorkflowSession | null>;
+  applyQualityDecision: (
+    mode: WorkflowMode,
+    runId: string,
+    action: QualityDecisionAction,
+  ) => Promise<WorkflowSession | null>;
+  retryQualityRun: (mode: WorkflowMode, runId: string) => Promise<WorkflowSession | null>;
+  listQualityProfiles: () => Promise<QualityProfileSummary[]>;
+  runCustomQualityGates: (
+    mode: WorkflowMode,
+    projectPath: string,
+    gates: QualityCustomGate[],
+    scopeId?: string | null,
+    metadata?: Record<string, unknown> | null,
+  ) => Promise<QualityGateOutcome[]>;
   subscribeToUpdates: () => Promise<void>;
   unsubscribeFromUpdates: () => void;
   reset: () => void;
@@ -1209,6 +1246,142 @@ export const useWorkflowKernelStore = create<WorkflowKernelStore>((set, get) => 
         error: invokeError instanceof Error ? invokeError.message : String(invokeError),
       });
       return null;
+    }
+  },
+
+  getQualitySnapshot: async (sessionId, mode) => {
+    try {
+      const result = await invoke<CommandResponse<ModeQualitySnapshot>>('workflow_get_quality_snapshot', {
+        sessionId,
+        mode,
+      });
+      if (!result.success || !result.data) {
+        set({ error: result.error || 'Failed to get quality snapshot' });
+        return null;
+      }
+      return normalizeQualitySnapshot(result.data, mode);
+    } catch (invokeError) {
+      set({
+        error: invokeError instanceof Error ? invokeError.message : String(invokeError),
+      });
+      return null;
+    }
+  },
+
+  updateQualitySnapshot: async (mode, snapshot) => {
+    const sessionId = get().sessionId;
+    if (!sessionId) {
+      set({ error: 'No workflow session available' });
+      return null;
+    }
+    try {
+      const result = await invoke<CommandResponse<WorkflowSession>>('workflow_update_quality_snapshot', {
+        sessionId,
+        mode,
+        snapshot,
+      });
+      if (!result.success || !result.data) {
+        set({ error: result.error || 'Failed to update quality snapshot' });
+        return null;
+      }
+      applySession(set, result.data);
+      return result.data;
+    } catch (invokeError) {
+      set({
+        error: invokeError instanceof Error ? invokeError.message : String(invokeError),
+      });
+      return null;
+    }
+  },
+
+  applyQualityDecision: async (mode, runId, action) => {
+    const sessionId = get().sessionId;
+    if (!sessionId) {
+      set({ error: 'No workflow session available' });
+      return null;
+    }
+    try {
+      const result = await invoke<CommandResponse<WorkflowSession>>('workflow_apply_quality_decision', {
+        sessionId,
+        mode,
+        runId,
+        action,
+      });
+      if (!result.success || !result.data) {
+        set({ error: result.error || 'Failed to apply quality decision' });
+        return null;
+      }
+      applySession(set, result.data);
+      return result.data;
+    } catch (invokeError) {
+      set({
+        error: invokeError instanceof Error ? invokeError.message : String(invokeError),
+      });
+      return null;
+    }
+  },
+
+  retryQualityRun: async (mode, runId) => {
+    const sessionId = get().sessionId;
+    if (!sessionId) {
+      set({ error: 'No workflow session available' });
+      return null;
+    }
+    try {
+      const result = await invoke<CommandResponse<WorkflowSession>>('workflow_retry_quality_run', {
+        sessionId,
+        mode,
+        runId,
+      });
+      if (!result.success || !result.data) {
+        set({ error: result.error || 'Failed to retry quality run' });
+        return null;
+      }
+      applySession(set, result.data);
+      return result.data;
+    } catch (invokeError) {
+      set({
+        error: invokeError instanceof Error ? invokeError.message : String(invokeError),
+      });
+      return null;
+    }
+  },
+
+  listQualityProfiles: async () => {
+    try {
+      const result = await invoke<CommandResponse<QualityProfileSummary[]>>('workflow_list_quality_profiles');
+      if (!result.success || !result.data) {
+        set({ error: result.error || 'Failed to list quality profiles' });
+        return [];
+      }
+      return result.data;
+    } catch (invokeError) {
+      set({
+        error: invokeError instanceof Error ? invokeError.message : String(invokeError),
+      });
+      return [];
+    }
+  },
+
+  runCustomQualityGates: async (mode, projectPath, gates, scopeId, metadata) => {
+    try {
+      const result = await invoke<CommandResponse<QualityGateOutcome[]>>('workflow_run_custom_quality_gates', {
+        projectPath,
+        mode,
+        gates,
+        scopeId: scopeId ?? null,
+        metadata: metadata ?? null,
+      });
+      if (!result.success || !result.data) {
+        set({ error: result.error || 'Failed to run custom quality gates' });
+        return [];
+      }
+      return result.data;
+    } catch (invokeError) {
+      set({
+        error: invokeError instanceof Error ? invokeError.message : String(invokeError),
+      });
+      return [];
     }
   },
 

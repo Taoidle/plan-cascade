@@ -16,6 +16,11 @@ const EVENT_KIND_KEYS: Record<WorkflowEventKind, true> = {
   operation_cancelled: true,
   session_recovered: true,
   checkpoint_created: true,
+  quality_run_started: true,
+  quality_gate_updated: true,
+  quality_run_completed: true,
+  quality_decision_required: true,
+  quality_decision_applied: true,
 };
 
 const EVENT_KINDS = Object.keys(EVENT_KIND_KEYS) as WorkflowEventKind[];

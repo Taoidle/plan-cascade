@@ -37,13 +37,7 @@ import { GraphWorkflowEditor } from '../GraphWorkflow';
 import { EvaluationDashboard } from '../Evaluation';
 import { PlayIcon, ResetIcon, GearIcon } from '@radix-ui/react-icons';
 
-// Check if dnd-kit is available (for graceful degradation)
-let hasDndKit = true;
-try {
-  require('@dnd-kit/core');
-} catch {
-  hasDndKit = false;
-}
+const hasDndKit = true;
 
 export function ExpertMode() {
   const { t } = useTranslation('expertMode');
@@ -60,14 +54,14 @@ export function ExpertMode() {
     if (hasStories && activeTab === 'generate') {
       setActiveTab('prd');
     }
-  }, [hasStories]);
+  }, [activeTab, hasStories]);
 
   // Auto-switch to execution tab when execution starts
   useEffect(() => {
     if (status === 'running' && activeTab !== 'execution') {
       setActiveTab('execution');
     }
-  }, [status]);
+  }, [activeTab, status]);
 
   const handleStartExecution = async () => {
     if (!hasStories) return;
@@ -283,7 +277,7 @@ function TabTrigger({ value, children, disabled = false }: TabTriggerProps) {
 
 function ExecutionView() {
   const { t } = useTranslation('expertMode');
-  const { stories, currentStoryId, qualityGateResults } = useExecutionStore();
+  const { stories, currentStoryId } = useExecutionStore();
 
   if (stories.length === 0) {
     return (
@@ -307,8 +301,6 @@ function ExecutionView() {
         <div className="space-y-2">
           <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Stories</h3>
           {stories.map((story, index) => {
-            const storyGates = qualityGateResults.filter((r) => r.storyId === story.id);
-
             return (
               <div
                 key={story.id}
@@ -354,11 +346,9 @@ function ExecutionView() {
                 </div>
 
                 {/* Quality gate badges inline after each story */}
-                {storyGates.length > 0 && (
-                  <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700/50">
-                    <QualityGateBadge storyId={story.id} />
-                  </div>
-                )}
+                <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700/50">
+                  <QualityGateBadge storyId={story.id} />
+                </div>
 
                 {/* Error message for failed stories */}
                 {story.status === 'failed' && story.error && (

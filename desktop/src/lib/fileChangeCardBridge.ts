@@ -12,9 +12,12 @@ import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { useExecutionStore } from '../store/execution';
 import { useFileChangesStore } from '../store/fileChanges';
+import { useSettingsStore } from '../store/settings';
 import { useWorkflowKernelStore } from '../store/workflowKernel';
 import type { CommandResponse } from './tauri';
 import type { CardPayload, FileChangeCardData, TurnChangeSummaryCardData } from '../types/workflowCard';
+import { buildChatQualitySnapshot } from './workflowQualitySnapshot';
+import { runCustomQualityGatesForMode } from './workflowCustomQuality';
 
 // ============================================================================
 // Types
@@ -257,6 +260,48 @@ export function createFileChangeCardBridge(sessionIds: string[], projectRoot: st
       };
 
       appendCardToVisibleChatTranscript(makeCardPayload('turn_change_summary', summaryData));
+      const kernel = useWorkflowKernelStore.getState();
+      const previousQuality = kernel.session?.modeSnapshots.chat?.quality;
+      const qualitySettings = useSettingsStore.getState().quality;
+      if (!qualitySettings.enabled) return;
+      void (async () => {
+        const customOutcomes = await runCustomQualityGatesForMode({
+          mode: 'chat',
+          projectPath: projectRoot,
+          scopeId: `turn-${turnIndex}`,
+          metadata: {
+            totalFiles: changes.length,
+            totalLinesAdded: summaryData.totalLinesAdded,
+            totalLinesRemoved: summaryData.totalLinesRemoved,
+          },
+          customGates: qualitySettings.customGates,
+        });
+        await kernel.updateQualitySnapshot(
+          'chat',
+          buildChatQualitySnapshot(
+            previousQuality,
+            `turn-${turnIndex}`,
+            [
+              {
+                gateId: 'change_safety',
+                gateName: 'Change Safety',
+                status: 'warning',
+                severity: 'warning',
+                blocking: false,
+                source: 'derived',
+                message: `${changes.length} files changed in turn ${turnIndex}.`,
+                metadata: {
+                  totalFiles: changes.length,
+                  totalLinesAdded: summaryData.totalLinesAdded,
+                  totalLinesRemoved: summaryData.totalLinesRemoved,
+                },
+              },
+              ...customOutcomes,
+            ],
+            qualitySettings,
+          ),
+        );
+      })();
     },
 
     reset() {
