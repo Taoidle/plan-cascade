@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { SessionRuntimeCapsule, SimpleTopBarContext, buildDefaultWorktreeBranchName } from './SimpleTopBarContext';
 import type { WorkflowSession } from '../../types/workflowKernel';
 
@@ -14,8 +14,22 @@ vi.mock('../shared/Toast', () => ({
   useToast: () => ({ showToast: mockShowToast }),
 }));
 
+const mockInvoke = vi.fn();
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: (...args: unknown[]) => mockInvoke(...args),
+}));
+
+vi.mock('@tauri-apps/plugin-shell', () => ({
+  Command: {
+    create: vi.fn(() => ({
+      execute: vi.fn().mockResolvedValue(undefined),
+    })),
+  },
+}));
+
 const mockWorkflowStore = {
   session: null as WorkflowSession | null,
+  renameSession: vi.fn(),
   moveSessionToManagedWorktree: vi.fn(),
   detachSessionWorktree: vi.fn(),
   cleanupSessionWorktree: vi.fn(),
@@ -115,6 +129,15 @@ describe('SimpleTopBarContext', () => {
   beforeEach(() => {
     mockShowToast.mockReset();
     mockWorkflowStore.session = null;
+    mockWorkflowStore.renameSession = vi.fn().mockResolvedValue(null);
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue({
+      success: true,
+      data: [
+        { name: 'master', is_head: true },
+        { name: 'develop', is_head: false },
+      ],
+    });
   });
 
   it('renders empty state when there is no active session', () => {
@@ -122,12 +145,33 @@ describe('SimpleTopBarContext', () => {
     expect(screen.getByText('No active session')).toBeInTheDocument();
   });
 
-  it('renders current session context details', () => {
+  it('renders current session context details', async () => {
     mockWorkflowStore.session = createSession();
     render(<SimpleTopBarContext />);
     expect(screen.getByText('Desktop Desktop')).toBeInTheDocument();
     expect(screen.getByText('Main')).toBeInTheDocument();
-    expect(screen.getByText('main')).toBeInTheDocument();
+    expect(await screen.findByText('master')).toBeInTheDocument();
+  });
+
+  it('allows renaming the session title by double-clicking it', async () => {
+    mockWorkflowStore.session = createSession();
+    const renameSession = vi.fn().mockResolvedValue({
+      ...mockWorkflowStore.session,
+      displayTitle: 'Renamed session',
+    });
+    mockWorkflowStore.renameSession = renameSession;
+
+    render(<SimpleTopBarContext />);
+
+    fireEvent.doubleClick(screen.getByRole('button', { name: /Session title\. Double-click to rename\./i }));
+
+    const input = screen.getByDisplayValue('Desktop Desktop');
+    fireEvent.change(input, { target: { value: 'Renamed session' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => {
+      expect(renameSession).toHaveBeenCalledWith('session-12345678', 'Renamed session');
+    });
   });
 });
 

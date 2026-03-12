@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Command } from '@tauri-apps/plugin-shell';
 import * as Dialog from '@radix-ui/react-dialog';
@@ -195,6 +195,15 @@ function BranchSwitcher({
       setLoading(false);
     }
   }, [repoPath, t]);
+
+  useEffect(() => {
+    if (!repoPath) {
+      setBranches([]);
+      setError(null);
+      return;
+    }
+    void loadBranches();
+  }, [loadBranches, repoPath]);
 
   useEffect(() => {
     if (!open) return;
@@ -395,12 +404,30 @@ function BranchSwitcher({
 export function SimpleTopBarContext() {
   const { t } = useTranslation('simpleMode');
   const session = useWorkflowKernelStore((state) => state.session);
+  const renameSession = useWorkflowKernelStore((state) => state.renameSession);
   const fallbackWorkspacePath = useSettingsStore((state) => state.workspacePath);
+  const { showToast } = useToast();
   const activeSessionPaths = useActiveSessionPaths(session, fallbackWorkspacePath);
   const chatRuntime = selectKernelChatRuntime(session);
   const taskRuntime = selectKernelTaskRuntime(session);
   const planRuntime = selectKernelPlanRuntime(session);
   const debugRuntime = selectKernelDebugRuntime(session);
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [titleDraft, setTitleDraft] = useState('');
+  const [isSavingTitle, setIsSavingTitle] = useState(false);
+  const renameInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    setTitleDraft(session?.displayTitle ?? '');
+    setIsRenaming(false);
+    setIsSavingTitle(false);
+  }, [session?.displayTitle, session?.sessionId]);
+
+  useEffect(() => {
+    if (!isRenaming) return;
+    renameInputRef.current?.focus();
+    renameInputRef.current?.select();
+  }, [isRenaming]);
 
   if (!session) {
     return (
@@ -415,15 +442,86 @@ export function SimpleTopBarContext() {
   const branchDisabledReason = isBusy
     ? t('topBar.branchBusy', { defaultValue: 'Finish the current run before switching branches.' })
     : null;
+  const canRename = !isSavingTitle;
+
+  const beginRenaming = () => {
+    if (!canRename) return;
+    setTitleDraft(session.displayTitle);
+    setIsRenaming(true);
+  };
+
+  const cancelRenaming = () => {
+    setTitleDraft(session.displayTitle);
+    setIsRenaming(false);
+  };
+
+  const submitRename = async () => {
+    if (isSavingTitle) {
+      return;
+    }
+    const normalized = titleDraft.trim();
+    if (!normalized) {
+      cancelRenaming();
+      return;
+    }
+    if (normalized === session.displayTitle.trim()) {
+      setIsRenaming(false);
+      return;
+    }
+    setIsSavingTitle(true);
+    try {
+      const renamed = await renameSession(session.sessionId, normalized);
+      if (!renamed) {
+        showToast(t('topBar.toast.renameFailed', { defaultValue: 'Failed to rename session.' }), 'error');
+        return;
+      }
+      setIsRenaming(false);
+    } finally {
+      setIsSavingTitle(false);
+    }
+  };
 
   return (
     <div className="flex min-w-0 items-center gap-2 px-2">
-      <span
-        className="max-w-[420px] truncate text-sm font-medium text-gray-900 dark:text-gray-100"
-        title={session.displayTitle}
-      >
-        {session.displayTitle}
-      </span>
+      {isRenaming ? (
+        <input
+          ref={renameInputRef}
+          type="text"
+          value={titleDraft}
+          onChange={(event) => setTitleDraft(event.target.value)}
+          onBlur={() => void submitRename()}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              void submitRename();
+            } else if (event.key === 'Escape') {
+              event.preventDefault();
+              cancelRenaming();
+            }
+          }}
+          disabled={isSavingTitle}
+          aria-label={t('sidebar.renameInputLabel', { defaultValue: 'Session title' })}
+          placeholder={t('sidebar.renameInputPlaceholder', { defaultValue: 'Enter session title' })}
+          className="w-[min(32vw,420px)] min-w-[160px] rounded-md border border-primary-300 bg-white px-2 py-1 text-sm font-medium text-gray-900 outline-none ring-2 ring-primary-500/30 dark:border-primary-700 dark:bg-gray-900 dark:text-gray-100"
+        />
+      ) : (
+        <button
+          type="button"
+          onDoubleClick={beginRenaming}
+          title={session.displayTitle}
+          aria-label={t('topBar.renameTitle', {
+            defaultValue: 'Session title. Double-click to rename.',
+          })}
+          className={clsx(
+            'max-w-[420px] truncate text-left text-sm font-medium text-gray-900 outline-none dark:text-gray-100',
+            'rounded px-1 py-0.5 transition-colors',
+            'hover:bg-gray-100 dark:hover:bg-gray-800',
+            'focus:ring-2 focus:ring-primary-500/30',
+          )}
+        >
+          {session.displayTitle}
+        </button>
+      )}
       <RuntimeBadge
         label={runtimeLabel(t, activeSessionPaths.runtimeKind)}
         runtimeKind={activeSessionPaths.runtimeKind}
