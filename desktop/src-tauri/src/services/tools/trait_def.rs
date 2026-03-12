@@ -13,7 +13,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use crate::services::file_change_tracker::FileChangeTracker;
+use crate::services::file_change_tracker::{
+    FileChangeActorKind, FileChangeMetadata, FileChangeSourceMode, FileChangeTracker,
+};
 use crate::services::knowledge::pipeline::{RagPipeline, ScopedDocumentRef};
 use crate::services::llm::types::{ParameterSchema, ToolDefinition};
 use crate::services::orchestrator::embedding_manager::EmbeddingManager;
@@ -84,6 +86,18 @@ pub struct ToolExecutionContext {
     /// tracker's mutable global index. Used by Plan/Task step or story runs
     /// so nested sub-agents share the same group deterministically.
     pub file_change_turn_index: Option<u32>,
+    /// Optional source-mode metadata for file change attribution.
+    pub file_change_source_mode: Option<FileChangeSourceMode>,
+    /// Optional actor-kind metadata for file change attribution.
+    pub file_change_actor_kind: Option<FileChangeActorKind>,
+    /// Optional actor identifier for file change attribution.
+    pub file_change_actor_id: Option<String>,
+    /// Optional actor label for UI display in file change attribution.
+    pub file_change_actor_label: Option<String>,
+    /// Optional sub-agent depth for file change attribution.
+    pub file_change_sub_agent_depth: Option<u32>,
+    /// Optional origin session id for file change attribution.
+    pub file_change_origin_session_id: Option<String>,
 
     /// Optional permission gate for tool execution approval.
     /// When set, tool calls are checked against the session's permission level
@@ -120,6 +134,27 @@ impl ToolExecutionContext {
         if let Ok(mut cache) = self.read_cache.lock() {
             cache.retain(|key, _| key.0 != *path);
         }
+    }
+
+    pub fn file_change_metadata(&self) -> Option<FileChangeMetadata> {
+        if self.file_change_source_mode.is_none()
+            && self.file_change_actor_kind.is_none()
+            && self.file_change_actor_id.is_none()
+            && self.file_change_actor_label.is_none()
+            && self.file_change_sub_agent_depth.is_none()
+            && self.file_change_origin_session_id.is_none()
+        {
+            return None;
+        }
+
+        Some(FileChangeMetadata {
+            source_mode: self.file_change_source_mode,
+            actor_kind: self.file_change_actor_kind,
+            actor_id: self.file_change_actor_id.clone(),
+            actor_label: self.file_change_actor_label.clone(),
+            sub_agent_depth: self.file_change_sub_agent_depth,
+            origin_session_id: self.file_change_origin_session_id.clone(),
+        })
     }
 }
 
@@ -531,6 +566,12 @@ mod tests {
             core_context: None,
             file_change_tracker: None,
             file_change_turn_index: None,
+            file_change_source_mode: None,
+            file_change_actor_kind: None,
+            file_change_actor_id: None,
+            file_change_actor_label: None,
+            file_change_sub_agent_depth: None,
+            file_change_origin_session_id: None,
             permission_gate: None,
             knowledge_pipeline: None,
             knowledge_project_id: None,

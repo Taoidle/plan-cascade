@@ -19,7 +19,6 @@ import { RemotesTab } from './RemotesTab';
 import { AIChangesTab } from './AIChangesTab';
 import { ToolChangesBar } from './ToolChangesBar';
 import type { StreamLine } from '../../../store/execution';
-import { useExecutionStore } from '../../../store/execution';
 import { useFileChangesStore } from '../../../store/fileChanges';
 
 // Re-export sub-components for consumers
@@ -36,21 +35,20 @@ interface GitPanelProps {
   streamingOutput: StreamLine[];
   /** Current workspace directory path, or null if none selected. */
   workspacePath: string | null;
+  /** Active workflow root session id for AI Changes tracking. */
+  rootSessionId: string | null;
 }
 
 // ============================================================================
 // GitPanel Component
 // ============================================================================
 
-export function GitPanel({ streamingOutput, workspacePath }: GitPanelProps) {
+export function GitPanel({ streamingOutput, workspacePath, rootSessionId }: GitPanelProps) {
   const { t } = useTranslation('git');
   const selectedTab = useGitStore((s) => s.selectedTab);
   const status = useGitStore((s) => s.status);
   const commitLog = useGitStore((s) => s.commitLog);
   const branches = useGitStore((s) => s.branches);
-  const taskId = useExecutionStore((s) => s.taskId);
-  const standaloneSessionId = useExecutionStore((s) => s.standaloneSessionId);
-  const activeSessionId = taskId || standaloneSessionId;
   const aiChangeCount = useFileChangesStore((s) => s.turnChanges.reduce((acc, t) => acc + t.changes.length, 0));
 
   // Initialize git status polling / event subscription
@@ -84,7 +82,7 @@ export function GitPanel({ streamingOutput, workspacePath }: GitPanelProps) {
       {/* Tab Content */}
       <div className="flex-1 min-h-0 overflow-y-auto">
         {selectedTab === 'changes' && <ChangesTab />}
-        {selectedTab === 'ai-changes' && <AIChangesTab sessionId={activeSessionId} projectRoot={workspacePath} />}
+        {selectedTab === 'ai-changes' && <AIChangesTab sessionId={rootSessionId} projectRoot={workspacePath} />}
         {selectedTab === 'history' && <HistoryTab />}
         {selectedTab === 'branches' && <BranchesTab />}
         {selectedTab === 'remotes' && <RemotesTab />}

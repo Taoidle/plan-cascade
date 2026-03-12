@@ -2475,15 +2475,24 @@ async fn execute_story_via_agent(
     ) {
         if let Ok(mut tracker_guard) = tracker.lock() {
             if let Ok(after_snapshot) = tracker_guard.capture_workspace_snapshot() {
+                let metadata = crate::services::file_change_tracker::FileChangeMetadata {
+                    source_mode: Some(crate::services::file_change_tracker::FileChangeSourceMode::Task),
+                    actor_kind: Some(crate::services::file_change_tracker::FileChangeActorKind::SubAgent),
+                    actor_id: Some(format!("story-agent:{agent_name}")),
+                    actor_label: Some(agent_name.to_string()),
+                    sub_agent_depth: Some(1),
+                    origin_session_id: None,
+                };
                 let turn_index = file_change_turn_index
                     .unwrap_or_else(|| tracker_guard.turn_index());
-                tracker_guard.record_workspace_delta_between_at(
+                tracker_guard.record_workspace_delta_between_at_with_metadata(
                     turn_index,
                     &format!("agent-{}", uuid::Uuid::new_v4()),
                     "Bash",
                     before_snapshot,
                     &after_snapshot,
                     &format!("{} story execution", command),
+                    Some(&metadata),
                 );
             }
         }
@@ -2594,7 +2603,7 @@ async fn execute_story_via_llm(
             .with_analytics_tracker(analytics_tx)
             .with_analytics_cost_calculator(analytics_cost_calculator)
             .with_analytics_attribution(build_task_analytics_attribution(
-                kernel_session_id,
+                kernel_session_id.clone(),
                 task_session_id,
                 "task_story",
                 crate::models::analytics::AnalyticsExecutionScope::RootAgent,
@@ -2615,6 +2624,15 @@ async fn execute_story_via_llm(
     if let Some(turn_index) = file_change_turn_index {
         orchestrator = orchestrator.with_file_change_turn_index(turn_index);
     }
+    orchestrator = orchestrator
+        .with_file_change_source_mode(crate::services::file_change_tracker::FileChangeSourceMode::Task)
+        .with_file_change_actor_metadata(
+            crate::services::file_change_tracker::FileChangeActorKind::RootAgent,
+            Some(format!("task-story:{story_id}")),
+            Some("Main Agent".to_string()),
+            None,
+            kernel_session_id.clone(),
+        );
 
     if !selected_skill_matches.is_empty() {
         let selected_skills =

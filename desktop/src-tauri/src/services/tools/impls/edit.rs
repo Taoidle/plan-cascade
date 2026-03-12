@@ -164,6 +164,7 @@ impl Tool for EditTool {
                 if let Some(tracker) = &ctx.file_change_tracker {
                     if let Ok(mut t) = tracker.lock() {
                         if let Ok(after_hash) = t.store_content(&encoded_bytes) {
+                            let metadata = ctx.file_change_metadata();
                             let rel_path = path
                                 .strip_prefix(&ctx.project_root)
                                 .unwrap_or(&path)
@@ -176,7 +177,7 @@ impl Tool for EditTool {
                             };
                             let tool_call_id = format!("edit-{}", uuid::Uuid::new_v4());
                             if let Some(turn_index) = ctx.file_change_turn_index {
-                                t.record_change_at(
+                                t.record_change_at_with_metadata(
                                     turn_index,
                                     &tool_call_id,
                                     "Edit",
@@ -184,15 +185,19 @@ impl Tool for EditTool {
                                     before_hash,
                                     Some(&after_hash),
                                     &desc,
+                                    metadata.as_ref(),
                                 );
                             } else {
-                                t.record_change(
+                                let turn_index = t.turn_index();
+                                t.record_change_at_with_metadata(
+                                    turn_index,
                                     &tool_call_id,
                                     "Edit",
                                     &rel_path,
                                     before_hash,
                                     Some(&after_hash),
                                     &desc,
+                                    metadata.as_ref(),
                                 );
                             }
                         }

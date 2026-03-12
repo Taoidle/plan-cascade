@@ -260,16 +260,18 @@ impl Tool for BashTool {
         ) {
             if let Ok(mut tracker_guard) = tracker.lock() {
                 if let Ok(after_snapshot) = tracker_guard.capture_workspace_snapshot() {
+                    let metadata = ctx.file_change_metadata();
                     let turn_index = ctx
                         .file_change_turn_index
                         .unwrap_or_else(|| tracker_guard.turn_index());
-                    tracker_guard.record_workspace_delta_between_at(
+                    tracker_guard.record_workspace_delta_between_at_with_metadata(
                         turn_index,
                         &format!("bash-{}", uuid::Uuid::new_v4()),
                         "Bash",
                         before_snapshot,
                         &after_snapshot,
                         command.trim(),
+                        metadata.as_ref(),
                     );
                 }
             }

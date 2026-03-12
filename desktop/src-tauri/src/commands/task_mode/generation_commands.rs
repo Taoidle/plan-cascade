@@ -1546,7 +1546,17 @@ pub async fn explore_project(
                     drop(tracker);
                     coordinator = coordinator
                         .with_file_change_tracker(tracker_for_orchestrator)
-                        .with_file_change_turn_index(next);
+                        .with_file_change_turn_index(next)
+                        .with_file_change_source_mode(
+                            crate::services::file_change_tracker::FileChangeSourceMode::Task,
+                        )
+                        .with_file_change_actor_metadata(
+                            crate::services::file_change_tracker::FileChangeActorKind::RootAgent,
+                            Some("task-exploration".to_string()),
+                            Some("Main Agent".to_string()),
+                            None,
+                            Some(tracker_session_id.clone()),
+                        );
                 }
 
                 // Wire database pool for CodebaseSearch

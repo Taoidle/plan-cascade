@@ -4223,6 +4223,8 @@ fn test_sub_agent_knowledge_block_capped() {
         shared_hnsw_index: None,
         shared_file_change_tracker: None,
         shared_file_change_turn_index: None,
+        shared_file_change_source_mode: None,
+        shared_file_change_origin_session_id: None,
         detected_language: None,
         parent_supports_thinking: false,
         skills_snapshot: vec![],

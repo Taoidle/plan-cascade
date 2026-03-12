@@ -2363,6 +2363,8 @@ impl OrchestratorService {
             shared_permission_gate: self.permission_gate.clone(),
             shared_file_change_tracker: self.tool_executor.get_file_change_tracker(),
             shared_file_change_turn_index: self.tool_executor.get_file_change_turn_index(),
+            shared_file_change_source_mode: self.tool_executor.get_file_change_source_mode(),
+            shared_file_change_origin_session_id: self.tool_executor.get_file_change_origin_session_id(),
             shared_paused: Arc::clone(&self.paused),
             plugin_instructions_snapshot,
             plugin_skills_snapshot,

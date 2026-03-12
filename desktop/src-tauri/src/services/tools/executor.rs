@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use crate::services::file_change_tracker::FileChangeTracker;
+use crate::services::file_change_tracker::{FileChangeActorKind, FileChangeSourceMode};
 use crate::services::knowledge::pipeline::{RagPipeline, ScopedDocumentRef};
 use crate::services::orchestrator::embedding_manager::EmbeddingManager;
 use crate::services::orchestrator::embedding_service::EmbeddingService;
@@ -350,6 +351,18 @@ pub struct ToolExecutor {
     file_change_tracker: Option<Arc<Mutex<FileChangeTracker>>>,
     /// Optional fixed turn index to use when recording file changes.
     file_change_turn_index: Option<u32>,
+    /// Optional source-mode metadata for file change attribution.
+    file_change_source_mode: Option<FileChangeSourceMode>,
+    /// Optional actor-kind metadata for file change attribution.
+    file_change_actor_kind: Option<FileChangeActorKind>,
+    /// Optional actor identifier for file change attribution.
+    file_change_actor_id: Option<String>,
+    /// Optional actor label for file change attribution.
+    file_change_actor_label: Option<String>,
+    /// Optional sub-agent depth for file change attribution.
+    file_change_sub_agent_depth: Option<u32>,
+    /// Optional origin session id for file change attribution.
+    file_change_origin_session_id: Option<String>,
     /// Optional permission gate for tool execution approval.
     permission_gate: Option<Arc<crate::services::orchestrator::permission_gate::PermissionGate>>,
     /// Cancellation token propagated from the orchestrator.
@@ -416,6 +429,12 @@ impl ToolExecutor {
             registry: Self::build_registry(),
             file_change_tracker: None,
             file_change_turn_index: None,
+            file_change_source_mode: None,
+            file_change_actor_kind: None,
+            file_change_actor_id: None,
+            file_change_actor_label: None,
+            file_change_sub_agent_depth: None,
+            file_change_origin_session_id: None,
             permission_gate: None,
             cancellation_token: tokio_util::sync::CancellationToken::new(),
             knowledge_pipeline: None,
@@ -449,6 +468,12 @@ impl ToolExecutor {
             registry: Self::build_registry(),
             file_change_tracker: None,
             file_change_turn_index: None,
+            file_change_source_mode: None,
+            file_change_actor_kind: None,
+            file_change_actor_id: None,
+            file_change_actor_label: None,
+            file_change_sub_agent_depth: None,
+            file_change_origin_session_id: None,
             permission_gate: None,
             cancellation_token: tokio_util::sync::CancellationToken::new(),
             knowledge_pipeline: None,
@@ -561,6 +586,33 @@ impl ToolExecutor {
     /// Get the fixed turn index for file change recording.
     pub fn get_file_change_turn_index(&self) -> Option<u32> {
         self.file_change_turn_index
+    }
+
+    pub fn set_file_change_source_mode(&mut self, mode: FileChangeSourceMode) {
+        self.file_change_source_mode = Some(mode);
+    }
+
+    pub fn get_file_change_source_mode(&self) -> Option<FileChangeSourceMode> {
+        self.file_change_source_mode
+    }
+
+    pub fn get_file_change_origin_session_id(&self) -> Option<String> {
+        self.file_change_origin_session_id.clone()
+    }
+
+    pub fn set_file_change_actor_metadata(
+        &mut self,
+        actor_kind: FileChangeActorKind,
+        actor_id: Option<String>,
+        actor_label: Option<String>,
+        sub_agent_depth: Option<u32>,
+        origin_session_id: Option<String>,
+    ) {
+        self.file_change_actor_kind = Some(actor_kind);
+        self.file_change_actor_id = actor_id;
+        self.file_change_actor_label = actor_label;
+        self.file_change_sub_agent_depth = sub_agent_depth;
+        self.file_change_origin_session_id = origin_session_id;
     }
 
     /// Set the cancellation token propagated from the orchestrator.
@@ -677,6 +729,12 @@ impl ToolExecutor {
             core_context: None, // Set by callers who have OrchestratorContext
             file_change_tracker: self.file_change_tracker.clone(),
             file_change_turn_index: self.file_change_turn_index,
+            file_change_source_mode: self.file_change_source_mode,
+            file_change_actor_kind: self.file_change_actor_kind,
+            file_change_actor_id: self.file_change_actor_id.clone(),
+            file_change_actor_label: self.file_change_actor_label.clone(),
+            file_change_sub_agent_depth: self.file_change_sub_agent_depth,
+            file_change_origin_session_id: self.file_change_origin_session_id.clone(),
             permission_gate: self.permission_gate.clone(),
             knowledge_pipeline: self.knowledge_pipeline.clone(),
             knowledge_project_id: self.knowledge_project_id.clone(),

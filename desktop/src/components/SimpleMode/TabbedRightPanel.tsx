@@ -34,6 +34,7 @@ interface TabbedRightPanelProps {
   modeTranscriptLines: StreamLine[];
   // Git tab props
   workspacePath: string | null;
+  rootSessionId: string | null;
   contextSessionId: string | null;
   debugSessionId?: string | null;
 }
@@ -48,6 +49,7 @@ export function TabbedRightPanel({
   executionStatus,
   modeTranscriptLines,
   workspacePath,
+  rootSessionId,
   contextSessionId,
   debugSessionId,
 }: TabbedRightPanelProps) {
@@ -151,7 +153,7 @@ export function TabbedRightPanel({
             </div>
           </div>
         ) : effectiveActiveTab === 'git' ? (
-          <GitPanel streamingOutput={modeTranscriptLines} workspacePath={workspacePath} />
+          <GitPanel streamingOutput={modeTranscriptLines} workspacePath={workspacePath} rootSessionId={rootSessionId} />
         ) : effectiveActiveTab === 'artifacts' ? (
           <DebugArtifactsPanel sessionId={debugSessionId ?? null} />
         ) : (

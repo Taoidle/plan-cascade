@@ -30,6 +30,12 @@ interface FileChangeEvent {
   before_hash: string | null;
   after_hash: string | null;
   description: string;
+  source_mode?: 'chat' | 'plan' | 'task' | 'debug' | null;
+  actor_kind?: 'root_agent' | 'sub_agent' | 'debug_patch' | 'system' | null;
+  actor_id?: string | null;
+  actor_label?: string | null;
+  sub_agent_depth?: number | null;
+  origin_session_id?: string | null;
 }
 
 interface PendingChange {
@@ -111,7 +117,11 @@ function appendCardToVisibleChatTranscript(payload: CardPayload): void {
 
 export function createFileChangeCardBridge(sessionIds: string[], projectRoot: string): FileChangeCardBridge {
   const normalizedSessionIds = new Set(sessionIds.map((value) => value.trim()).filter(Boolean));
-  const primarySessionId = [...normalizedSessionIds][0] ?? '';
+  const preferredRootSessionId =
+    useWorkflowKernelStore.getState().activeRootSessionId ?? useWorkflowKernelStore.getState().sessionId ?? '';
+  const primarySessionId = normalizedSessionIds.has(preferredRootSessionId)
+    ? preferredRootSessionId
+    : ([...normalizedSessionIds][0] ?? '');
   /** Accumulated changes per turn for summary card. */
   const turnChanges = new Map<number, PendingChange[]>();
   /** Debounce timer for batching rapid events. */

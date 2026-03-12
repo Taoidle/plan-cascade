@@ -1758,6 +1758,17 @@ async fn execute_single_step(
                 .with_file_change_tracker(Arc::clone(tracker))
                 .with_file_change_turn_index(turn_index);
         }
+        orchestrator = orchestrator
+            .with_file_change_source_mode(
+                crate::services::file_change_tracker::FileChangeSourceMode::Plan,
+            )
+            .with_file_change_actor_metadata(
+                crate::services::file_change_tracker::FileChangeActorKind::RootAgent,
+                Some(format!("plan-step:{}", step.id)),
+                Some("Main Agent".to_string()),
+                None,
+                runtime.kernel_session_id.clone(),
+            );
         let mut tools = resolve_step_tools(adapter, step);
         if matches!(retry_failure_category, Some(FailureCategory::MaxIterations)) {
             let narrowed = narrow_tools_for_max_iteration_retry(&tools);

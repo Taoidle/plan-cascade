@@ -1250,6 +1250,8 @@ impl RemoteWorkflowFacade {
                 self.app.clone(),
                 self.app.state::<DebugModeState>(),
                 self.app.state::<WorkflowKernelState>(),
+                self.app
+                    .state::<crate::commands::file_changes::FileChangesState>(),
                 ApproveDebugPatchRequest {
                     session_id: debug_session_id,
                     provider: session.provider.clone(),

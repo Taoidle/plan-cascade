@@ -18,6 +18,20 @@
     "restoreTitle": "ターン {{index}} の前の状態にファイルを復元",
     "loadingDiff": "差分を読み込み中...",
     "noDiff": "差分はありません",
+    "mode": {
+      "chat": "チャット",
+      "plan": "計画",
+      "task": "タスク",
+      "debug": "デバッグ",
+      "unknown": "不明"
+    },
+    "actor": {
+      "root_agent": "メイン Agent",
+      "sub_agent": "サブ Agent",
+      "debug_patch": "デバッグパッチ",
+      "system": "システム",
+      "default": "Agent"
+    },
     "restoreComplete": "復元完了",
     "restoreConfirm": "ターン {{index}} の前に復元しますか？",
     "affectedFiles": "以下のファイルが影響を受けます：",

@@ -2,6 +2,9 @@
  * Types for LLM file change tracking and rollback.
  */
 
+export type FileChangeSourceMode = 'chat' | 'plan' | 'task' | 'debug';
+export type FileChangeActorKind = 'root_agent' | 'sub_agent' | 'debug_patch' | 'system';
+
 /** A single file modification record from the backend. */
 export interface FileChange {
   id: string;
@@ -14,6 +17,12 @@ export interface FileChange {
   after_hash: string | null;
   timestamp: number;
   description: string;
+  source_mode?: FileChangeSourceMode | null;
+  actor_kind?: FileChangeActorKind | null;
+  actor_id?: string | null;
+  actor_label?: string | null;
+  sub_agent_depth?: number | null;
+  origin_session_id?: string | null;
 }
 
 /** Changes grouped by conversation turn. */

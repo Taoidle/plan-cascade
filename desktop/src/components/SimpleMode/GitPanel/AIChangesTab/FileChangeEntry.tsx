@@ -48,6 +48,16 @@ export function FileChangeEntry({ change, sessionId, projectRoot }: FileChangeEn
     });
   }, [expanded, change, sessionId, projectRoot, fetchDiff, diffCache]);
 
+  const modeLabel =
+    change.source_mode != null
+      ? t(`aiChanges.mode.${change.source_mode}`, { defaultValue: change.source_mode })
+      : t('aiChanges.mode.unknown', { defaultValue: 'Unknown' });
+  const actorLabel =
+    change.actor_kind != null
+      ? t(`aiChanges.actor.${change.actor_kind}`, { defaultValue: change.actor_kind })
+      : t('aiChanges.actor.default', { defaultValue: 'Agent' });
+  const actorDetail = change.actor_label ?? change.actor_id ?? null;
+
   return (
     <div className="border-t border-gray-100 dark:border-gray-800 first:border-t-0">
       {/* Header row */}
@@ -74,6 +84,20 @@ export function FileChangeEntry({ change, sessionId, projectRoot }: FileChangeEn
         >
           {change.tool_name}
         </span>
+
+        <span className="inline-flex items-center rounded px-1.5 py-0.5 text-2xs font-medium shrink-0 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200">
+          {modeLabel}
+        </span>
+
+        <span className="inline-flex items-center rounded px-1.5 py-0.5 text-2xs font-medium shrink-0 bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300">
+          {actorLabel}
+        </span>
+
+        {change.actor_kind === 'sub_agent' && actorDetail && (
+          <span className="text-2xs text-violet-500 dark:text-violet-300 shrink-0 hidden md:inline truncate max-w-36">
+            {actorDetail}
+          </span>
+        )}
 
         {/* File path */}
         <span className="text-xs font-mono text-gray-700 dark:text-gray-300 truncate flex-1">{change.file_path}</span>

@@ -1580,12 +1580,24 @@ pub async fn execute_standalone(
 
     let mut orchestrator = OrchestratorService::new(orchestrator_config)
         .with_search_provider(&search_provider, search_api_key)
-        .with_permission_gate(permission_state.gate.clone());
+        .with_permission_gate(permission_state.gate.clone())
+        .with_file_change_source_mode(crate::services::file_change_tracker::FileChangeSourceMode::Chat)
+        .with_file_change_actor_metadata(
+            crate::services::file_change_tracker::FileChangeActorKind::RootAgent,
+            Some("chat-root".to_string()),
+            Some("Main Agent".to_string()),
+            None,
+            kernel_session_id.clone(),
+        );
 
     // Wire file change tracker for AI file modification tracking
     {
+        let tracker_session_id = kernel_session_id
+            .clone()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| event_session_id.clone());
         let tracker = file_changes_state
-            .get_or_create(&event_session_id, &project_path)
+            .get_or_create(&tracker_session_id, &project_path)
             .await;
         // Advance turn index and set app handle for event emission
         if let Ok(mut t) = tracker.lock() {
@@ -2191,7 +2203,15 @@ pub async fn execute_standalone_with_session(
     // Create orchestrator with database (IndexStore is auto-wired to ToolExecutor)
     let mut orchestrator = OrchestratorService::new(orchestrator_config)
         .with_database(pool)
-        .with_permission_gate(permission_state.gate.clone());
+        .with_permission_gate(permission_state.gate.clone())
+        .with_file_change_source_mode(crate::services::file_change_tracker::FileChangeSourceMode::Chat)
+        .with_file_change_actor_metadata(
+            crate::services::file_change_tracker::FileChangeActorKind::RootAgent,
+            Some("chat-root".to_string()),
+            Some("Main Agent".to_string()),
+            None,
+            None,
+        );
 
     // Wire file change tracker for AI file modification tracking
     {
@@ -2837,7 +2857,15 @@ pub async fn resume_standalone_execution(
 
     let mut orchestrator = OrchestratorService::new(orchestrator_config)
         .with_database(pool)
-        .with_permission_gate(permission_state.gate.clone());
+        .with_permission_gate(permission_state.gate.clone())
+        .with_file_change_source_mode(crate::services::file_change_tracker::FileChangeSourceMode::Chat)
+        .with_file_change_actor_metadata(
+            crate::services::file_change_tracker::FileChangeActorKind::RootAgent,
+            Some("chat-root".to_string()),
+            Some("Main Agent".to_string()),
+            None,
+            None,
+        );
 
     // Wire file change tracker for AI file modification tracking
     {

@@ -266,6 +266,20 @@ impl TaskSpawner for OrchestratorTaskSpawner {
         if let Some(turn_index) = self.shared_file_change_turn_index {
             sub_agent.tool_executor.set_file_change_turn_index(turn_index);
         }
+        if let Some(source_mode) = self.shared_file_change_source_mode {
+            sub_agent.tool_executor.set_file_change_source_mode(source_mode);
+        }
+        sub_agent.tool_executor.set_file_change_actor_metadata(
+            crate::services::file_change_tracker::FileChangeActorKind::SubAgent,
+            Some(format!(
+                "{}:{}",
+                effective_type.legacy_task_type(),
+                depth + 1
+            )),
+            Some(effective_type.legacy_task_type().to_string()),
+            Some(depth + 1),
+            self.shared_file_change_origin_session_id.clone(),
+        );
         // Propagate permission gate to sub-agent so tool calls are approved
         if let Some(ref gate) = self.shared_permission_gate {
             sub_agent
@@ -712,6 +726,32 @@ impl OrchestratorService {
     /// Set a fixed turn index for file change tracking within this orchestrator.
     pub fn with_file_change_turn_index(mut self, turn_index: u32) -> Self {
         self.tool_executor.set_file_change_turn_index(turn_index);
+        self
+    }
+
+    pub fn with_file_change_source_mode(
+        mut self,
+        mode: crate::services::file_change_tracker::FileChangeSourceMode,
+    ) -> Self {
+        self.tool_executor.set_file_change_source_mode(mode);
+        self
+    }
+
+    pub fn with_file_change_actor_metadata(
+        mut self,
+        actor_kind: crate::services::file_change_tracker::FileChangeActorKind,
+        actor_id: Option<String>,
+        actor_label: Option<String>,
+        sub_agent_depth: Option<u32>,
+        origin_session_id: Option<String>,
+    ) -> Self {
+        self.tool_executor.set_file_change_actor_metadata(
+            actor_kind,
+            actor_id,
+            actor_label,
+            sub_agent_depth,
+            origin_session_id,
+        );
         self
     }
 

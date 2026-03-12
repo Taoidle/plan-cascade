@@ -137,6 +137,7 @@ impl Tool for WriteTool {
                 if let Some(tracker) = &ctx.file_change_tracker {
                     if let Ok(mut t) = tracker.lock() {
                         if let Ok(after_hash) = t.store_content(&write_bytes) {
+                            let metadata = ctx.file_change_metadata();
                             let rel_path = path
                                 .strip_prefix(&ctx.project_root)
                                 .unwrap_or(&path)
@@ -144,7 +145,7 @@ impl Tool for WriteTool {
                                 .to_string();
                             let tool_call_id = format!("write-{}", uuid::Uuid::new_v4());
                             if let Some(turn_index) = ctx.file_change_turn_index {
-                                t.record_change_at(
+                                t.record_change_at_with_metadata(
                                     turn_index,
                                     &tool_call_id,
                                     "Write",
@@ -152,15 +153,19 @@ impl Tool for WriteTool {
                                     before_hash,
                                     Some(&after_hash),
                                     &format!("Wrote {} lines", line_count),
+                                    metadata.as_ref(),
                                 );
                             } else {
-                                t.record_change(
+                                let turn_index = t.turn_index();
+                                t.record_change_at_with_metadata(
+                                    turn_index,
                                     &tool_call_id,
                                     "Write",
                                     &rel_path,
                                     before_hash,
                                     Some(&after_hash),
                                     &format!("Wrote {} lines", line_count),
+                                    metadata.as_ref(),
                                 );
                             }
                         }

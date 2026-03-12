@@ -132,6 +132,7 @@ describe('TabbedRightPanel', () => {
         executionStatus="idle"
         modeTranscriptLines={[]}
         workspacePath="/repo"
+        rootSessionId="root-1"
         contextSessionId={null}
         debugSessionId={null}
       />,
@@ -175,6 +176,7 @@ describe('TabbedRightPanel', () => {
         executionStatus="idle"
         modeTranscriptLines={[]}
         workspacePath="/repo"
+        rootSessionId="root-1"
         contextSessionId={null}
         debugSessionId={null}
       />,
@@ -199,6 +201,7 @@ describe('TabbedRightPanel', () => {
         executionStatus="idle"
         modeTranscriptLines={[]}
         workspacePath="/repo"
+        rootSessionId="root-1"
         contextSessionId={null}
         debugSessionId={null}
       />,
@@ -228,6 +231,7 @@ describe('TabbedRightPanel', () => {
         executionStatus="running"
         modeTranscriptLines={[]}
         workspacePath="/repo"
+        rootSessionId="root-1"
         contextSessionId={null}
         debugSessionId={null}
       />,
@@ -251,6 +255,7 @@ describe('TabbedRightPanel', () => {
         executionStatus="idle"
         modeTranscriptLines={[]}
         workspacePath="/repo"
+        rootSessionId="root-1"
         contextSessionId={null}
         debugSessionId="debug-session-1"
       />,

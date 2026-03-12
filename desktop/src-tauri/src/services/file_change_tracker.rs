@@ -31,6 +31,52 @@ pub struct FileChange {
     pub after_hash: Option<String>,
     pub timestamp: i64,
     pub description: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_mode: Option<FileChangeSourceMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actor_kind: Option<FileChangeActorKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actor_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actor_label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sub_agent_depth: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin_session_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FileChangeSourceMode {
+    Chat,
+    Plan,
+    Task,
+    Debug,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FileChangeActorKind {
+    RootAgent,
+    SubAgent,
+    DebugPatch,
+    System,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct FileChangeMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_mode: Option<FileChangeSourceMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actor_kind: Option<FileChangeActorKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actor_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actor_label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sub_agent_depth: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin_session_id: Option<String>,
 }
 
 /// Changes grouped by conversation turn.
@@ -121,6 +167,18 @@ struct FileChangeEvent {
     before_hash: Option<String>,
     after_hash: Option<String>,
     description: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_mode: Option<FileChangeSourceMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    actor_kind: Option<FileChangeActorKind>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    actor_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    actor_label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sub_agent_depth: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    origin_session_id: Option<String>,
 }
 
 /// Tracks LLM file modifications per session with CAS backing.
@@ -376,6 +434,27 @@ impl FileChangeTracker {
         after: &WorkspaceChangeSnapshot,
         description_prefix: &str,
     ) -> usize {
+        self.record_workspace_delta_between_at_with_metadata(
+            turn_index,
+            tool_call_id_prefix,
+            tool_name,
+            before,
+            after,
+            description_prefix,
+            None,
+        )
+    }
+
+    pub fn record_workspace_delta_between_at_with_metadata(
+        &mut self,
+        turn_index: u32,
+        tool_call_id_prefix: &str,
+        tool_name: &str,
+        before: &WorkspaceChangeSnapshot,
+        after: &WorkspaceChangeSnapshot,
+        description_prefix: &str,
+        metadata: Option<&FileChangeMetadata>,
+    ) -> usize {
         let changes = self.detect_workspace_changes(before, after);
         for (idx, change) in changes.iter().enumerate() {
             let action = match change.change_type {
@@ -388,7 +467,7 @@ impl FileChangeTracker {
             } else {
                 format!("{description_prefix} {action}")
             };
-            self.record_change_at(
+            self.record_change_at_with_metadata(
                 turn_index,
                 &format!("{tool_call_id_prefix}-{idx}"),
                 tool_name,
@@ -396,6 +475,7 @@ impl FileChangeTracker {
                 change.before_hash.clone(),
                 change.after_hash.as_deref(),
                 &description,
+                metadata,
             );
         }
         changes.len()
@@ -413,7 +493,7 @@ impl FileChangeTracker {
         after_hash: Option<&str>,
         description: &str,
     ) {
-        self.record_change_at(
+        self.record_change_at_with_metadata(
             self.current_turn_index,
             tool_call_id,
             tool_name,
@@ -421,6 +501,7 @@ impl FileChangeTracker {
             before_hash,
             after_hash,
             description,
+            None,
         );
     }
 
@@ -434,6 +515,29 @@ impl FileChangeTracker {
         after_hash: Option<&str>,
         description: &str,
     ) {
+        self.record_change_at_with_metadata(
+            turn_index,
+            tool_call_id,
+            tool_name,
+            file_path,
+            before_hash,
+            after_hash,
+            description,
+            None,
+        );
+    }
+
+    pub fn record_change_at_with_metadata(
+        &mut self,
+        turn_index: u32,
+        tool_call_id: &str,
+        tool_name: &str,
+        file_path: &str,
+        before_hash: Option<String>,
+        after_hash: Option<&str>,
+        description: &str,
+        metadata: Option<&FileChangeMetadata>,
+    ) {
         let change = FileChange {
             id: uuid::Uuid::new_v4().to_string(),
             session_id: self.session_id.clone(),
@@ -445,6 +549,12 @@ impl FileChangeTracker {
             after_hash: after_hash.map(|value| value.to_string()),
             timestamp: chrono::Utc::now().timestamp_millis(),
             description: description.to_string(),
+            source_mode: metadata.and_then(|value| value.source_mode),
+            actor_kind: metadata.and_then(|value| value.actor_kind),
+            actor_id: metadata.and_then(|value| value.actor_id.clone()),
+            actor_label: metadata.and_then(|value| value.actor_label.clone()),
+            sub_agent_depth: metadata.and_then(|value| value.sub_agent_depth),
+            origin_session_id: metadata.and_then(|value| value.origin_session_id.clone()),
         };
         // Capture event fields before moving change into the vec
         let event = FileChangeEvent {
@@ -456,6 +566,12 @@ impl FileChangeTracker {
             before_hash: change.before_hash.clone(),
             after_hash: change.after_hash.clone(),
             description: change.description.clone(),
+            source_mode: change.source_mode,
+            actor_kind: change.actor_kind,
+            actor_id: change.actor_id.clone(),
+            actor_label: change.actor_label.clone(),
+            sub_agent_depth: change.sub_agent_depth,
+            origin_session_id: change.origin_session_id.clone(),
         };
         self.changes.push(change);
         // Persist after each change (fire-and-forget)
@@ -1135,6 +1251,71 @@ mod tests {
         let tracker = make_tracker(dir.path());
         assert_eq!(tracker.change_count(), 1);
         assert_eq!(tracker.turn_index(), 2);
+    }
+
+    #[test]
+    fn test_persist_and_reload_with_metadata() {
+        let dir = TempDir::new().unwrap();
+        {
+            let mut tracker = make_tracker(dir.path());
+            tracker.record_change_at_with_metadata(
+                3,
+                "tc-meta",
+                "Write",
+                "a.txt",
+                None,
+                Some("hash1"),
+                "Wrote",
+                Some(&FileChangeMetadata {
+                    source_mode: Some(FileChangeSourceMode::Task),
+                    actor_kind: Some(FileChangeActorKind::SubAgent),
+                    actor_id: Some("story-agent".to_string()),
+                    actor_label: Some("Story Agent".to_string()),
+                    sub_agent_depth: Some(1),
+                    origin_session_id: Some("root-session".to_string()),
+                }),
+            );
+        }
+
+        let tracker = make_tracker(dir.path());
+        let turns = tracker.get_changes_by_turn();
+        assert_eq!(turns.len(), 1);
+        let change = &turns[0].changes[0];
+        assert_eq!(change.source_mode, Some(FileChangeSourceMode::Task));
+        assert_eq!(change.actor_kind, Some(FileChangeActorKind::SubAgent));
+        assert_eq!(change.actor_label.as_deref(), Some("Story Agent"));
+        assert_eq!(change.origin_session_id.as_deref(), Some("root-session"));
+    }
+
+    #[test]
+    fn test_load_legacy_change_file_without_metadata() {
+        let dir = TempDir::new().unwrap();
+        let data_dir = dir.path().join("tracker");
+        fs::create_dir_all(data_dir.join("changes")).unwrap();
+        fs::write(
+            data_dir.join("changes").join("session-1.json"),
+            r#"[{
+                "id":"legacy-1",
+                "session_id":"session-1",
+                "turn_index":2,
+                "tool_call_id":"tool-1",
+                "tool_name":"Write",
+                "file_path":"a.txt",
+                "before_hash":null,
+                "after_hash":"hash1",
+                "timestamp":123,
+                "description":"legacy write"
+            }]"#,
+        )
+        .unwrap();
+
+        let tracker = FileChangeTracker::new_with_data_dir("session-1", dir.path(), &data_dir);
+        let turns = tracker.get_changes_by_turn();
+        assert_eq!(turns.len(), 1);
+        let change = &turns[0].changes[0];
+        assert_eq!(change.file_path, "a.txt");
+        assert!(change.source_mode.is_none());
+        assert!(change.actor_kind.is_none());
     }
 
     #[test]

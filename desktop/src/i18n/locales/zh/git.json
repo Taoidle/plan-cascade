@@ -18,6 +18,20 @@
     "restoreTitle": "将文件恢复到轮次 {{index}} 之前",
     "loadingDiff": "正在加载差异...",
     "noDiff": "无差异内容",
+    "mode": {
+      "chat": "聊天",
+      "plan": "规划",
+      "task": "任务",
+      "debug": "排障",
+      "unknown": "未知"
+    },
+    "actor": {
+      "root_agent": "主 Agent",
+      "sub_agent": "子 Agent",
+      "debug_patch": "调试补丁",
+      "system": "系统",
+      "default": "Agent"
+    },
     "restoreComplete": "恢复完成",
     "restoreConfirm": "恢复到轮次 {{index}} 之前？",
     "affectedFiles": "以下文件将受到影响：",

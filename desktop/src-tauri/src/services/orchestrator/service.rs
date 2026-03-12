@@ -493,6 +493,11 @@ struct OrchestratorTaskSpawner {
         Option<Arc<std::sync::Mutex<crate::services::file_change_tracker::FileChangeTracker>>>,
     /// Fixed turn index for all file changes emitted by this sub-agent tree.
     shared_file_change_turn_index: Option<u32>,
+    /// Shared source mode for file change attribution.
+    shared_file_change_source_mode:
+        Option<crate::services::file_change_tracker::FileChangeSourceMode>,
+    /// Shared origin session id for file change attribution.
+    shared_file_change_origin_session_id: Option<String>,
     /// Shared pause flag from the parent orchestrator.
     /// Sub-agents inherit this so that pausing the parent also pauses sub-agents.
     shared_paused: Arc<AtomicBool>,

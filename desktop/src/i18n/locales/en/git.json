@@ -18,6 +18,20 @@
     "restoreTitle": "Restore files to before Turn {{index}}",
     "loadingDiff": "Loading diff...",
     "noDiff": "No diff available",
+    "mode": {
+      "chat": "Chat",
+      "plan": "Plan",
+      "task": "Task",
+      "debug": "Debug",
+      "unknown": "Unknown"
+    },
+    "actor": {
+      "root_agent": "Main Agent",
+      "sub_agent": "Sub-agent",
+      "debug_patch": "Debug Patch",
+      "system": "System",
+      "default": "Agent"
+    },
     "restoreComplete": "Restore Complete",
     "restoreConfirm": "Restore to before Turn {{index}}?",
     "affectedFiles": "The following files will be affected:",

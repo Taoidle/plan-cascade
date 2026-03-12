@@ -9,7 +9,7 @@
 
 pub mod observability;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -3521,8 +3521,11 @@ impl WorkflowKernelState {
                             mode_storage_name(mode)
                         )
                     })?;
+                let preserved_cards =
+                    preserved_card_lines_for_partial_replace(&record.lines, replace_index, &appended_lines);
                 record.lines.truncate(replace_index);
                 record.lines.extend(appended_lines);
+                record.lines.extend(preserved_cards);
             }
         }
 
@@ -3609,6 +3612,33 @@ fn transcript_line_turn_boundary(value: &Value) -> Option<&str> {
         .as_object()
         .and_then(|object| object.get("turnBoundary"))
         .and_then(Value::as_str)
+}
+
+fn preserved_card_lines_for_partial_replace(
+    existing_lines: &[Value],
+    replace_index: usize,
+    appended_lines: &[Value],
+) -> Vec<Value> {
+    if transcript_line_turn_boundary(&existing_lines[replace_index]) == Some("user") {
+        return Vec::new();
+    }
+
+    let appended_ids: HashSet<u64> = appended_lines
+        .iter()
+        .filter_map(transcript_line_id)
+        .collect();
+
+    existing_lines
+        .iter()
+        .skip(replace_index + 1)
+        .filter(|line| {
+            transcript_line_type(line) == Some("card")
+                && transcript_line_id(line)
+                    .map(|line_id| !appended_ids.contains(&line_id))
+                    .unwrap_or(true)
+        })
+        .cloned()
+        .collect()
 }
 
 fn transcript_line_turn_id(value: &Value) -> Option<u64> {
@@ -5111,6 +5141,117 @@ mod tests {
 
         let checkpoint = state.checkpoints.last().expect("checkpoint snapshot");
         assert_eq!(checkpoint.reason_code, "operation_cancelled");
+    }
+
+    #[tokio::test]
+    async fn assistant_side_transcript_replace_preserves_trailing_cards() {
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let kernel = WorkflowKernelState::new_with_storage_dir(temp_dir.path().to_path_buf());
+
+        let session = kernel
+            .open_session(Some(WorkflowMode::Chat), None)
+            .await
+            .expect("open session");
+        let session_id = session.session_id.clone();
+
+        kernel
+            .patch_mode_transcript(
+                &session_id,
+                WorkflowMode::Chat,
+                Some(0),
+                vec![
+                    serde_json::json!({
+                        "id": 1,
+                        "type": "info",
+                        "content": "user",
+                        "turnBoundary": "user",
+                        "turnId": 1
+                    }),
+                    serde_json::json!({
+                        "id": 2,
+                        "type": "text",
+                        "content": "tool output",
+                        "turnBoundary": "assistant",
+                        "turnId": 1
+                    }),
+                    serde_json::json!({
+                        "id": 3,
+                        "type": "card",
+                        "content": "{\"cardType\":\"file_change\"}",
+                        "cardPayload": {
+                            "cardType": "file_change",
+                            "cardId": "card-1",
+                            "interactive": false,
+                            "data": {}
+                        },
+                        "turnId": 1
+                    }),
+                ],
+            )
+            .await
+            .expect("seed transcript");
+
+        let updated = kernel
+            .patch_mode_transcript(
+                &session_id,
+                WorkflowMode::Chat,
+                Some(2),
+                vec![
+                    serde_json::json!({
+                        "id": 2,
+                        "type": "text",
+                        "content": "tool output updated",
+                        "turnBoundary": "assistant",
+                        "turnId": 1
+                    }),
+                    serde_json::json!({
+                        "id": 4,
+                        "type": "tool",
+                        "content": "[tool] read started",
+                        "turnId": 1
+                    }),
+                ],
+            )
+            .await
+            .expect("replace assistant tail");
+
+        assert_eq!(
+            updated.lines,
+            vec![
+                serde_json::json!({
+                    "id": 1,
+                    "type": "info",
+                    "content": "user",
+                    "turnBoundary": "user",
+                    "turnId": 1
+                }),
+                serde_json::json!({
+                    "id": 2,
+                    "type": "text",
+                    "content": "tool output updated",
+                    "turnBoundary": "assistant",
+                    "turnId": 1
+                }),
+                serde_json::json!({
+                    "id": 4,
+                    "type": "tool",
+                    "content": "[tool] read started",
+                    "turnId": 1
+                }),
+                serde_json::json!({
+                    "id": 3,
+                    "type": "card",
+                    "content": "{\"cardType\":\"file_change\"}",
+                    "cardPayload": {
+                        "cardType": "file_change",
+                        "cardId": "card-1",
+                        "interactive": false,
+                        "data": {}
+                    },
+                    "turnId": 1
+                }),
+            ]
+        );
     }
 
     #[tokio::test]

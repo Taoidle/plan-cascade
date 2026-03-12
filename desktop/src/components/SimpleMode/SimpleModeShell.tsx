@@ -2173,6 +2173,7 @@ export function SimpleModeShell() {
             <div className="h-full" style={{ width: rightPanelWidth }}>
               <KernelTranscriptRightPanel
                 sessionId={workflowKernelSessionId}
+                rootSessionId={workflowKernelSessionId ?? activeRootSessionId}
                 mode={workflowMode}
                 activeTab={rightPanelTab}
                 onTabChange={setRightPanelTab}
@@ -2249,6 +2250,7 @@ function KernelTranscriptChatPane({
 
 function KernelTranscriptRightPanel({
   sessionId,
+  rootSessionId,
   mode,
   activeTab,
   onTabChange,
@@ -2260,6 +2262,7 @@ function KernelTranscriptRightPanel({
   debugSessionId,
 }: {
   sessionId: string | null;
+  rootSessionId: string | null;
   mode: WorkflowMode;
   activeTab: 'output' | 'git' | 'context' | 'artifacts';
   onTabChange: (tab: 'output' | 'git' | 'context' | 'artifacts') => void;
@@ -2289,6 +2292,7 @@ function KernelTranscriptRightPanel({
       executionStatus={executionStatus}
       modeTranscriptLines={lines}
       workspacePath={workspacePath}
+      rootSessionId={rootSessionId}
       contextSessionId={contextSessionId}
       debugSessionId={debugSessionId}
     />

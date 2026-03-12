@@ -1441,6 +1441,8 @@ fn apply_debug_patch_operations(
     session: &DebugModeSession,
     project_root: &Path,
     operations: &[DebugPatchOperation],
+    file_change_tracker: Option<&std::sync::Arc<std::sync::Mutex<crate::services::file_change_tracker::FileChangeTracker>>>,
+    file_change_turn_index: Option<u32>,
 ) -> Result<(PatchApplicationReport, String), String> {
     if operations.is_empty() {
         return Err("No executable patch operations were attached to this fix proposal.".to_string());
@@ -1536,6 +1538,34 @@ fn apply_debug_patch_operations(
                 target_path.to_string_lossy()
             )
         })?;
+
+        if let Some(tracker) = file_change_tracker {
+            if let Ok(mut tracker_guard) = tracker.lock() {
+                let before_hash = previous_contents
+                    .as_ref()
+                    .and_then(|value| tracker_guard.store_content(value.as_bytes()).ok());
+                let after_hash = tracker_guard.store_content(next_contents.as_bytes()).ok();
+                let metadata = crate::services::file_change_tracker::FileChangeMetadata {
+                    source_mode: Some(crate::services::file_change_tracker::FileChangeSourceMode::Debug),
+                    actor_kind: Some(crate::services::file_change_tracker::FileChangeActorKind::DebugPatch),
+                    actor_id: Some(operation.id.clone()),
+                    actor_label: Some("Debug Patch".to_string()),
+                    sub_agent_depth: None,
+                    origin_session_id: session.kernel_session_id.clone().or_else(|| Some(session.session_id.clone())),
+                };
+                let turn_index = file_change_turn_index.unwrap_or_else(|| tracker_guard.turn_index());
+                tracker_guard.record_change_at_with_metadata(
+                    turn_index,
+                    &format!("debug-patch-{}-{}", operation.id, index),
+                    "DebugPatch",
+                    &operation.file_path,
+                    before_hash,
+                    after_hash.as_deref(),
+                    &format!("{} {}", operation.id, operation.kind),
+                    Some(&metadata),
+                );
+            }
+        }
 
         applied_operations.push(AppliedPatchOperationRecord {
             id: if operation.id.trim().is_empty() {
@@ -2642,6 +2672,7 @@ pub async fn approve_debug_patch(
     app: tauri::AppHandle,
     state: tauri::State<'_, DebugModeState>,
     kernel_state: tauri::State<'_, WorkflowKernelState>,
+    file_changes_state: tauri::State<'_, crate::commands::file_changes::FileChangesState>,
     request: ApproveDebugPatchRequest,
 ) -> Result<CommandResponse<DebugModeSession>, String> {
     let Some(mut session) = (match state.get_or_load_session_snapshot(&request.session_id).await {
@@ -2768,11 +2799,30 @@ pub async fn approve_debug_patch(
     emit_kernel_updates_for_linked_sessions(&app, kernel_state.inner(), &linked_sessions, "approve_debug_patch_patching").await;
     let _ = emit_debug_progress(&app, &session, Some("patch_review_card"), Some("debug_patching")).await;
 
+    let tracker_session_id = session
+        .kernel_session_id
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| session.session_id.clone());
+    let file_change_tracker = file_changes_state
+        .get_or_create(&tracker_session_id, &project_root.to_string_lossy())
+        .await;
+    let file_change_turn_index = if let Ok(mut tracker) = file_change_tracker.lock() {
+        tracker.set_app_handle(app.clone());
+        let next = tracker.turn_index().saturating_add(1);
+        tracker.set_turn_index(next);
+        Some(next)
+    } else {
+        None
+    };
+
     let (patch_report, patch_report_artifact_path) = match apply_debug_patch_operations(
         state.inner(),
         &session,
         &project_root,
         &fix_proposal.patch_operations,
+        Some(&file_change_tracker),
+        file_change_turn_index,
     ) {
         Ok(value) => value,
         Err(error) => {
@@ -3402,12 +3452,25 @@ mod tests {
         fs::create_dir_all(project_root.join("src")).expect("create project dirs");
         let target_file = project_root.join("src/checkout.tsx");
         fs::write(&target_file, "const label = 'Pay now';\n").expect("seed file");
+        let canonical_project_root = fs::canonicalize(&project_root).expect("canonical project root");
 
         let storage = tempfile::tempdir().expect("storage");
         let state = DebugModeState::new_with_storage_dir(storage.path().to_path_buf());
         let mut session = build_test_session();
-        session.project_path = Some(project_root.to_string_lossy().to_string());
+        session.kernel_session_id = Some("root-session".to_string());
+        session.project_path = Some(canonical_project_root.to_string_lossy().to_string());
         session.state.project_path = session.project_path.clone();
+        let tracker_data_dir = storage.path().join("tracker");
+        let tracker = std::sync::Arc::new(std::sync::Mutex::new(
+            crate::services::file_change_tracker::FileChangeTracker::new_with_data_dir(
+                "root-session",
+                &canonical_project_root,
+                &tracker_data_dir,
+            ),
+        ));
+        if let Ok(mut guard) = tracker.lock() {
+            guard.set_turn_index(4);
+        }
 
         let operations = vec![DebugPatchOperation {
             id: "replace-checkout-copy".to_string(),
@@ -3422,7 +3485,15 @@ mod tests {
         }];
 
         let (report, artifact_path) =
-            apply_debug_patch_operations(&state, &session, &project_root, &operations).expect("apply patch");
+            apply_debug_patch_operations(
+                &state,
+                &session,
+                &canonical_project_root,
+                &operations,
+                Some(&tracker),
+                Some(4),
+            )
+                .expect("apply patch");
 
         let updated = fs::read_to_string(&target_file).expect("read updated file");
         assert!(updated.contains("Confirm payment"));
@@ -3430,6 +3501,19 @@ mod tests {
         assert!(PathBuf::from(&artifact_path).exists());
         assert_eq!(report.operations[0].file_path, "src/checkout.tsx");
         assert!(report.operations[0].backup_artifact_path.is_some());
+        let guard = tracker.lock().expect("lock tracker");
+        let turns = guard.get_changes_by_turn();
+        assert_eq!(turns.len(), 1);
+        let change = &turns[0].changes[0];
+        assert_eq!(
+            change.source_mode,
+            Some(crate::services::file_change_tracker::FileChangeSourceMode::Debug)
+        );
+        assert_eq!(
+            change.actor_kind,
+            Some(crate::services::file_change_tracker::FileChangeActorKind::DebugPatch)
+        );
+        assert_eq!(change.origin_session_id.as_deref(), Some("root-session"));
     }
 
     #[test]

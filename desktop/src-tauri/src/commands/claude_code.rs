@@ -200,6 +200,14 @@ pub async fn send_message(
                 .as_ref()
                 .map(|(_, project_root, _)| project_root.clone());
             let tracker_turn_index = tracker_bundle.as_ref().map(|(_, _, turn_index)| *turn_index);
+            let tracker_metadata = crate::services::file_change_tracker::FileChangeMetadata {
+                source_mode: Some(crate::services::file_change_tracker::FileChangeSourceMode::Chat),
+                actor_kind: Some(crate::services::file_change_tracker::FileChangeActorKind::RootAgent),
+                actor_id: Some("claude-chat".to_string()),
+                actor_label: Some("Main Agent".to_string()),
+                sub_agent_depth: None,
+                origin_session_id: request.kernel_session_id.clone(),
+            };
             eprintln!(
                 "[DEBUG] send_message: spawning event forwarder for session {} execution {}",
                 session_id, execution_id
@@ -333,13 +341,14 @@ pub async fn send_message(
                                                 if let Ok(after_snapshot) =
                                                     guard.capture_workspace_snapshot()
                                                 {
-                                                    guard.record_workspace_delta_between_at(
+                                                    guard.record_workspace_delta_between_at_with_metadata(
                                                         turn_index,
                                                         &format!("claude-{tool_id}"),
                                                         "Bash",
                                                         &before_snapshot,
                                                         &after_snapshot,
                                                         "Claude Code Bash",
+                                                        Some(&tracker_metadata),
                                                     );
                                                 }
                                             }
@@ -379,7 +388,7 @@ pub async fn send_message(
                                                             format!("Claude Code {} modified file", tool_name)
                                                         }
                                                     };
-                                                    guard.record_change_at(
+                                                    guard.record_change_at_with_metadata(
                                                         turn_index,
                                                         &format!("claude-{tool_id}-{idx}"),
                                                         &tool_name,
@@ -387,6 +396,7 @@ pub async fn send_message(
                                                         before_hash,
                                                         after_hash.as_deref(),
                                                         &description,
+                                                        Some(&tracker_metadata),
                                                     );
                                                 }
                                             }

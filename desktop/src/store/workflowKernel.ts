@@ -75,6 +75,52 @@ function cloneTranscriptLines(lines: unknown[]): unknown[] {
   );
 }
 
+function transcriptLineId(line: unknown): number | null {
+  if (!line || typeof line !== 'object') return null;
+  const value = (line as { id?: unknown }).id;
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function transcriptLineType(line: unknown): string | null {
+  if (!line || typeof line !== 'object') return null;
+  const value = (line as { type?: unknown }).type;
+  return typeof value === 'string' ? value : null;
+}
+
+function transcriptTurnBoundary(line: unknown): string | null {
+  if (!line || typeof line !== 'object') return null;
+  const value = (line as { turnBoundary?: unknown }).turnBoundary;
+  return typeof value === 'string' ? value : null;
+}
+
+function collectPreservedCardLines(
+  existingLines: unknown[],
+  replaceIndex: number,
+  appendedLines: unknown[],
+): unknown[] {
+  const anchorLine = existingLines[replaceIndex];
+  if (transcriptTurnBoundary(anchorLine) === 'user') {
+    return [];
+  }
+
+  const appendedIds = new Set<number>();
+  for (const line of appendedLines) {
+    const lineId = transcriptLineId(line);
+    if (lineId !== null) {
+      appendedIds.add(lineId);
+    }
+  }
+  return cloneTranscriptLines(
+    existingLines.slice(replaceIndex + 1).filter((line) => {
+      if (transcriptLineType(line) !== 'card') {
+        return false;
+      }
+      const lineId = transcriptLineId(line);
+      return lineId === null || !appendedIds.has(lineId);
+    }),
+  );
+}
+
 function upsertTranscriptState(
   current: TranscriptMap,
   sessionId: string,
@@ -113,9 +159,12 @@ function applyTranscriptPatch(existingLines: unknown[], payload: WorkflowModeTra
     return cloneTranscriptLines(payload.lines ?? payload.appendedLines);
   }
 
+  const preservedCardLines = collectPreservedCardLines(existingLines, replaceIndex, payload.appendedLines);
+
   return [
     ...cloneTranscriptLines(existingLines.slice(0, replaceIndex)),
     ...cloneTranscriptLines(payload.appendedLines),
+    ...preservedCardLines,
   ];
 }
 

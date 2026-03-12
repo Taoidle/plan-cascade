@@ -498,4 +498,67 @@ describe('workflowKernel store', () => {
       { id: 1, type: 'info', content: 'edited user', turnBoundary: 'user', turnId: 1 },
     ]);
   });
+
+  it('preserves trailing cards when assistant-side transcript patches arrive', async () => {
+    await useWorkflowKernelStore.getState().subscribeToUpdates();
+    useWorkflowKernelStore.setState({
+      modeTranscriptsBySession: {
+        'kernel-6': {
+          chat: {
+            revision: 1,
+            loaded: true,
+            unread: false,
+            lines: [
+              { id: 1, type: 'info', content: 'user', turnBoundary: 'user', turnId: 1 },
+              { id: 2, type: 'text', content: 'tool output', turnBoundary: 'assistant', turnId: 1 },
+              {
+                id: 3,
+                type: 'card',
+                content: '{"cardType":"file_change"}',
+                cardPayload: { cardType: 'file_change', cardId: 'card-1', interactive: false, data: {} },
+                turnId: 1,
+              },
+            ],
+          },
+        },
+      },
+    });
+
+    emitTranscriptEvent({
+      sessionId: 'kernel-6',
+      mode: 'chat',
+      revision: 2,
+      appendedLines: [
+        { id: 2, type: 'text', content: 'tool output updated', turnBoundary: 'assistant', turnId: 1 },
+        { id: 4, type: 'tool', content: '[tool] read started', turnId: 1 },
+      ],
+      replaceFromLineId: 2,
+      lines: [
+        { id: 1, type: 'info', content: 'user', turnBoundary: 'user', turnId: 1 },
+        { id: 2, type: 'text', content: 'tool output updated', turnBoundary: 'assistant', turnId: 1 },
+        { id: 4, type: 'tool', content: '[tool] read started', turnId: 1 },
+        {
+          id: 3,
+          type: 'card',
+          content: '{"cardType":"file_change"}',
+          cardPayload: { cardType: 'file_change', cardId: 'card-1', interactive: false, data: {} },
+          turnId: 1,
+        },
+      ],
+      source: 'test',
+    });
+
+    expect(useWorkflowKernelStore.getState().getCachedModeTranscript('kernel-6', 'chat').lines).toEqual([
+      { id: 1, type: 'info', content: 'user', turnBoundary: 'user', turnId: 1 },
+      { id: 2, type: 'text', content: 'tool output updated', turnBoundary: 'assistant', turnId: 1 },
+      { id: 4, type: 'tool', content: '[tool] read started', turnId: 1 },
+      {
+        id: 3,
+        type: 'card',
+        content: '{"cardType":"file_change"}',
+        cardPayload: { cardType: 'file_change', cardId: 'card-1', interactive: false, data: {} },
+        turnId: 1,
+      },
+    ]);
+  });
 });
