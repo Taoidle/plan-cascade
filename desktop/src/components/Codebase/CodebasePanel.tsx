@@ -10,6 +10,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { listen } from '@tauri-apps/api/event';
+import { normalizeWorkspacePath } from '../../lib/pathUtils';
 import { useCodebaseStore } from '../../store/codebase';
 import type { CodebaseIndexStatus, IndexStatusEvent } from '../../lib/codebaseApi';
 import { CodebaseDetail } from './CodebaseDetail';
@@ -123,9 +124,10 @@ export function CodebasePanel() {
   // Listen to index-progress events for real-time status updates
   useEffect(() => {
     const unlisten = listen<IndexStatusEvent>('index-progress', (event) => {
+      const normalizedProjectPath = normalizeWorkspacePath(event.payload.project_path) ?? event.payload.project_path;
       setLiveStatuses((prev) => ({
         ...prev,
-        [event.payload.project_path]: event.payload,
+        [normalizedProjectPath]: event.payload,
       }));
     });
 
@@ -141,14 +143,16 @@ export function CodebasePanel() {
   }, [deleteTarget, deleteProject]);
 
   const getStatusForProject = (projectPath: string, snapshotStatus?: CodebaseIndexStatus): CodebaseIndexStatus => {
-    const live = liveStatuses[projectPath]?.status;
+    const normalizedProjectPath = normalizeWorkspacePath(projectPath) ?? projectPath;
+    const live = liveStatuses[normalizedProjectPath]?.status;
     if (live) return live;
     return snapshotStatus ?? 'idle';
   };
 
   const formatPath = (path: string): string => {
-    const parts = path.split('/');
-    return parts.length > 2 ? `.../${parts.slice(-2).join('/')}` : path;
+    const displayPath = path.replace(/^\\\\\?\\/, '');
+    const parts = displayPath.split(/[\\/]/);
+    return parts.length > 2 ? `.../${parts.slice(-2).join('/')}` : displayPath;
   };
 
   return (

@@ -383,6 +383,7 @@ fn test_send_message_request() {
     let request = SendMessageRequest {
         session_id: "sess-001".to_string(),
         prompt: "Please help me with this code".to_string(),
+        kernel_session_id: None,
     };
 
     assert_eq!(request.session_id, "sess-001");
@@ -394,6 +395,7 @@ fn test_send_message_request_serialization() {
     let request = SendMessageRequest {
         session_id: "sess-001".to_string(),
         prompt: "Test prompt".to_string(),
+        kernel_session_id: None,
     };
 
     let json = serde_json::to_string(&request).unwrap();

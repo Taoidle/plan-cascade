@@ -20,17 +20,18 @@
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 use tokio::sync::RwLock;
 
 use crate::commands::proxy::resolve_provider_proxy;
 use crate::commands::webhook::WebhookState;
 use crate::models::response::CommandResponse;
 use crate::services::remote::gateway::RemoteGatewayService;
-use crate::services::remote::session_bridge::{BridgeServices, SessionBridge};
+use crate::services::remote::session_bridge::{BridgeRuntimeConfig, BridgeServices, SessionBridge};
 use crate::services::remote::types::{
-    GatewayStatus, RemoteAuditEntry, RemoteGatewayConfig, RemoteSessionMapping,
-    TelegramAdapterConfig, UpdateRemoteConfigRequest, UpdateTelegramConfigRequest,
+    ConfigUpdateResult, GatewayStatus, RemoteAuditEntry, RemoteGatewayConfig,
+    RemoteSessionMapping, TelegramAdapterConfig, UpdateRemoteConfigRequest,
+    UpdateTelegramConfigRequest,
 };
 use crate::state::AppState;
 use crate::storage::KeyringService;
@@ -110,6 +111,7 @@ pub async fn start_remote_gateway(
     remote_state: State<'_, RemoteState>,
     app_state: State<'_, AppState>,
     webhook_state: State<'_, WebhookState>,
+    app: AppHandle,
 ) -> Result<CommandResponse<()>, String> {
     // Read configs from database
     let config_result = app_state
@@ -119,16 +121,18 @@ pub async fn start_remote_gateway(
                 .and_then(|json| serde_json::from_str(&json).ok())
                 .unwrap_or_default();
 
-            let mut telegram_config: Option<TelegramAdapterConfig> = db
+            let mut telegram_config: TelegramAdapterConfig = db
                 .get_setting(TELEGRAM_CONFIG_KEY)?
-                .and_then(|json| serde_json::from_str(&json).ok());
+                .and_then(|json| serde_json::from_str(&json).ok())
+                .unwrap_or_default();
 
             // Hydrate secrets from keyring
             let keyring = KeyringService::new();
-            if let Some(ref mut tg) = telegram_config {
-                tg.bot_token = keyring.get_api_key(KEYRING_BOT_TOKEN).ok().flatten();
-                tg.access_password = keyring.get_api_key(KEYRING_ACCESS_PASSWORD).ok().flatten();
-            }
+            telegram_config.bot_token = keyring.get_api_key(KEYRING_BOT_TOKEN).ok().flatten();
+            telegram_config.access_password = keyring
+                .get_api_key(KEYRING_ACCESS_PASSWORD)
+                .ok()
+                .flatten();
 
             // Resolve proxy for remote_telegram provider
             let proxy = resolve_provider_proxy(&keyring, db, "remote_telegram");
@@ -154,8 +158,8 @@ pub async fn start_remote_gateway(
     let services = BridgeServices {
         keyring: Arc::new(KeyringService::new()),
         orchestrators: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
-        allowed_paths: vec![],
-        rate_limit_interval_ms: 2000,
+        runtime_config: Arc::new(BridgeRuntimeConfig::new(vec![], 2000)),
+        workflow_kernel: Some(app.state::<crate::services::workflow_kernel::WorkflowKernelState>().inner().clone()),
     };
 
     // Create session bridge with services
@@ -170,7 +174,14 @@ pub async fn start_remote_gateway(
     }
 
     // Create gateway
-    let mut gateway = RemoteGatewayService::new(gateway_config, telegram_config, bridge, db);
+    let mut gateway = RemoteGatewayService::new(
+        gateway_config,
+        Some(telegram_config),
+        bridge,
+        db,
+        Some(app.state::<crate::services::workflow_kernel::WorkflowKernelState>().inner().clone()),
+        Some(app.clone()),
+    );
     match webhook_state.get_or_init(app_state.inner()).await {
         Ok(webhook_service) => {
             gateway.set_webhook_service(webhook_service);
@@ -240,7 +251,12 @@ pub async fn update_remote_config(
     request: UpdateRemoteConfigRequest,
     app_state: State<'_, AppState>,
     remote_state: State<'_, RemoteState>,
-) -> Result<CommandResponse<()>, String> {
+) -> Result<CommandResponse<ConfigUpdateResult>, String> {
+    let requested_enabled = request.enabled;
+    let requested_adapter = request.adapter.clone();
+    let requested_auto_start = request.auto_start;
+    let requested_allowed_project_roots = request.allowed_project_roots.clone();
+
     // Read existing config
     let save_result = app_state
         .with_database(|db| {
@@ -250,14 +266,17 @@ pub async fn update_remote_config(
                 .unwrap_or_default();
 
             // Apply updates
-            if let Some(enabled) = request.enabled {
+            if let Some(enabled) = requested_enabled {
                 config.enabled = enabled;
             }
-            if let Some(adapter) = request.adapter {
+            if let Some(adapter) = requested_adapter.clone() {
                 config.adapter = adapter;
             }
-            if let Some(auto_start) = request.auto_start {
+            if let Some(auto_start) = requested_auto_start {
                 config.auto_start = auto_start;
+            }
+            if let Some(allowed_project_roots) = requested_allowed_project_roots.clone() {
+                config.allowed_project_roots = allowed_project_roots;
             }
 
             // Save
@@ -275,12 +294,16 @@ pub async fn update_remote_config(
 
     match save_result {
         Ok(config) => {
+            let mut result = ConfigUpdateResult::applied();
             // Update running gateway config if active
             let guard = remote_state.gateway.read().await;
             if let Some(gateway) = guard.as_ref() {
+                if requested_adapter.is_some() || matches!(requested_enabled, Some(false)) {
+                    result.restart_required = true;
+                }
                 let _ = gateway.update_config(config).await;
             }
-            Ok(CommandResponse::ok(()))
+            Ok(CommandResponse::ok(result))
         }
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -338,10 +361,18 @@ pub async fn update_telegram_config(
     request: UpdateTelegramConfigRequest,
     app_state: State<'_, AppState>,
     remote_state: State<'_, RemoteState>,
-) -> Result<CommandResponse<()>, String> {
+) -> Result<CommandResponse<ConfigUpdateResult>, String> {
+    let requested_bot_token = request.bot_token.clone();
+    let requested_allowed_chat_ids = request.allowed_chat_ids.clone();
+    let requested_allowed_user_ids = request.allowed_user_ids.clone();
+    let requested_require_password = request.require_password;
+    let requested_access_password = request.access_password.clone();
+    let requested_max_message_length = request.max_message_length;
+    let requested_streaming_mode = request.streaming_mode.clone();
+
     // Store secrets in keyring
     let keyring = KeyringService::new();
-    if let Some(ref token) = request.bot_token {
+    if let Some(ref token) = requested_bot_token {
         if !token.is_empty() && token != "***" {
             if let Err(e) = keyring.set_api_key(KEYRING_BOT_TOKEN, token) {
                 return Ok(CommandResponse::err(format!(
@@ -351,7 +382,7 @@ pub async fn update_telegram_config(
             }
         }
     }
-    if let Some(ref password) = request.access_password {
+    if let Some(ref password) = requested_access_password {
         if !password.is_empty() && password != "***" {
             if let Err(e) = keyring.set_api_key(KEYRING_ACCESS_PASSWORD, password) {
                 return Ok(CommandResponse::err(format!(
@@ -371,19 +402,19 @@ pub async fn update_telegram_config(
                 .unwrap_or_default();
 
             // Apply updates
-            if let Some(ids) = request.allowed_chat_ids {
+            if let Some(ids) = requested_allowed_chat_ids.clone() {
                 config.allowed_chat_ids = ids;
             }
-            if let Some(ids) = request.allowed_user_ids {
+            if let Some(ids) = requested_allowed_user_ids.clone() {
                 config.allowed_user_ids = ids;
             }
-            if let Some(rp) = request.require_password {
+            if let Some(rp) = requested_require_password {
                 config.require_password = rp;
             }
-            if let Some(mml) = request.max_message_length {
+            if let Some(mml) = requested_max_message_length {
                 config.max_message_length = mml;
             }
-            if let Some(sm) = request.streaming_mode {
+            if let Some(sm) = requested_streaming_mode.clone() {
                 config.streaming_mode = sm;
             }
 
@@ -404,13 +435,22 @@ pub async fn update_telegram_config(
         .await;
 
     match save_result {
-        Ok(config) => {
+        Ok(mut config) => {
+            let mut result = ConfigUpdateResult::applied();
             // Update running gateway's telegram config if active
             let guard = remote_state.gateway.read().await;
             if let Some(gateway) = guard.as_ref() {
+                if requested_bot_token.is_some() {
+                    result.restart_required = true;
+                }
+                config.bot_token = keyring.get_api_key(KEYRING_BOT_TOKEN).ok().flatten();
+                config.access_password = keyring
+                    .get_api_key(KEYRING_ACCESS_PASSWORD)
+                    .ok()
+                    .flatten();
                 let _ = gateway.update_telegram_config(config).await;
             }
-            Ok(CommandResponse::ok(()))
+            Ok(CommandResponse::ok(result))
         }
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
@@ -533,6 +573,7 @@ pub async fn try_auto_start_gateway(
     remote_state: &RemoteState,
     app_state: &AppState,
     webhook_state: &WebhookState,
+    app: &AppHandle,
 ) -> Result<bool, String> {
     // Read gateway config from database
     let config_result = app_state
@@ -566,15 +607,17 @@ pub async fn try_auto_start_gateway(
     // Read Telegram config and hydrate secrets
     let full_config_result = app_state
         .with_database(|db| {
-            let mut telegram_config: Option<TelegramAdapterConfig> = db
+            let mut telegram_config: TelegramAdapterConfig = db
                 .get_setting(TELEGRAM_CONFIG_KEY)?
-                .and_then(|json| serde_json::from_str(&json).ok());
+                .and_then(|json| serde_json::from_str(&json).ok())
+                .unwrap_or_default();
 
             let keyring = KeyringService::new();
-            if let Some(ref mut tg) = telegram_config {
-                tg.bot_token = keyring.get_api_key(KEYRING_BOT_TOKEN).ok().flatten();
-                tg.access_password = keyring.get_api_key(KEYRING_ACCESS_PASSWORD).ok().flatten();
-            }
+            telegram_config.bot_token = keyring.get_api_key(KEYRING_BOT_TOKEN).ok().flatten();
+            telegram_config.access_password = keyring
+                .get_api_key(KEYRING_ACCESS_PASSWORD)
+                .ok()
+                .flatten();
 
             let proxy = resolve_provider_proxy(&keyring, db, "remote_telegram");
 
@@ -605,8 +648,8 @@ pub async fn try_auto_start_gateway(
     let services = BridgeServices {
         keyring: Arc::new(KeyringService::new()),
         orchestrators: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
-        allowed_paths: vec![],
-        rate_limit_interval_ms: 2000,
+        runtime_config: Arc::new(BridgeRuntimeConfig::new(vec![], 2000)),
+        workflow_kernel: Some(app.state::<crate::services::workflow_kernel::WorkflowKernelState>().inner().clone()),
     };
 
     // Create session bridge with services and load existing mappings
@@ -617,7 +660,14 @@ pub async fn try_auto_start_gateway(
     }
 
     // Create and start gateway
-    let mut gateway = RemoteGatewayService::new(gw_config, telegram_config, bridge, db);
+    let mut gateway = RemoteGatewayService::new(
+        gw_config,
+        Some(telegram_config),
+        bridge,
+        db,
+        Some(app.state::<crate::services::workflow_kernel::WorkflowKernelState>().inner().clone()),
+        Some(app.clone()),
+    );
     match webhook_state.get_or_init(app_state).await {
         Ok(webhook_service) => {
             gateway.set_webhook_service(webhook_service);
@@ -651,7 +701,6 @@ pub async fn try_auto_start_gateway(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::remote::types::{RemoteAdapterType, StreamingMode};
 
     #[test]
     fn test_remote_state_new() {
@@ -716,6 +765,7 @@ mod tests {
             enabled: Some(true),
             adapter: None,
             auto_start: None,
+            allowed_project_roots: None,
         };
         assert!(request.enabled.is_some());
         assert!(request.adapter.is_none());

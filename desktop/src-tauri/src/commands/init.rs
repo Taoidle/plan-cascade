@@ -191,6 +191,7 @@ pub async fn init_app(
                 &remote_state,
                 &state,
                 &webhook_state,
+                &app,
             )
             .await
             {

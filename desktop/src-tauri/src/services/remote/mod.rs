@@ -21,5 +21,6 @@ pub mod gateway;
 pub mod response_mapper;
 pub mod session_bridge;
 pub mod types;
+pub mod workflow_facade;
 
 pub use types::*;

@@ -26,7 +26,19 @@ const PERMISSION_RESPONSE_TIMEOUT_SECS: u64 = 300;
 
 struct PendingPermissionRequest {
     session_id: String,
+    tool_name: String,
+    arguments: String,
+    risk: String,
     sender: oneshot::Sender<PermissionResponse>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingPermissionRequestSnapshot {
+    pub request_id: String,
+    pub session_id: String,
+    pub tool_name: String,
+    pub arguments: String,
+    pub risk: String,
 }
 
 /// Central permission gate shared across the orchestrator and its sub-agents.
@@ -258,6 +270,9 @@ impl PermissionGate {
                 request_id.clone(),
                 PendingPermissionRequest {
                     session_id: session_id.to_string(),
+                    tool_name: tool_name.to_string(),
+                    arguments: serde_json::to_string(args).unwrap_or_default(),
+                    risk: decision.risk.as_str().to_string(),
                     sender: resp_tx,
                 },
             );
@@ -345,6 +360,32 @@ impl PermissionGate {
     pub async fn cancel_session_requests(&self, session_id: &str) {
         let mut pending = self.pending_requests.lock().await;
         pending.retain(|_, req| req.session_id != session_id);
+    }
+
+    pub async fn pending_requests_for_sessions(
+        &self,
+        session_ids: &[String],
+    ) -> Vec<PendingPermissionRequestSnapshot> {
+        let session_ids: HashSet<&str> = session_ids
+            .iter()
+            .map(|value| value.as_str())
+            .filter(|value| !value.trim().is_empty())
+            .collect();
+        if session_ids.is_empty() {
+            return Vec::new();
+        }
+        let pending = self.pending_requests.lock().await;
+        pending
+            .iter()
+            .filter(|(_, request)| session_ids.contains(request.session_id.as_str()))
+            .map(|(request_id, request)| PendingPermissionRequestSnapshot {
+                request_id: request_id.clone(),
+                session_id: request.session_id.clone(),
+                tool_name: request.tool_name.clone(),
+                arguments: request.arguments.clone(),
+                risk: request.risk.clone(),
+            })
+            .collect()
     }
 
     /// Clean up all permission state for a session.

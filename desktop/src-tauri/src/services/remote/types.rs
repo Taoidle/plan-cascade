@@ -3,7 +3,11 @@
 //! Core types for the remote session control feature including configuration,
 //! commands, status tracking, session mapping, and error handling.
 
-use serde::{Deserialize, Serialize};
+use crate::services::orchestrator::permissions::PermissionLevel;
+use crate::services::task_mode::context_provider::ContextSourceConfig;
+use crate::services::workflow_kernel::WorkflowMode;
+use serde::{Deserialize, Deserializer, Serialize};
+use std::collections::HashMap;
 use std::fmt;
 
 // ---------------------------------------------------------------------------
@@ -31,6 +35,8 @@ pub struct RemoteGatewayConfig {
     pub enabled: bool,
     pub adapter: RemoteAdapterType,
     pub auto_start: bool,
+    #[serde(default)]
+    pub allowed_project_roots: Vec<RemoteWorkspaceEntry>,
 }
 
 impl Default for RemoteGatewayConfig {
@@ -39,7 +45,77 @@ impl Default for RemoteGatewayConfig {
             enabled: false,
             adapter: RemoteAdapterType::Telegram,
             auto_start: false,
+            allowed_project_roots: Vec::new(),
         }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct RemoteWorkspaceEntry {
+    pub path: String,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub default_provider: Option<String>,
+    #[serde(default)]
+    pub default_model: Option<String>,
+}
+
+impl<'de> Deserialize<'de> for RemoteWorkspaceEntry {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum RemoteWorkspaceEntryDef {
+            Path(String),
+            Full {
+                path: String,
+                #[serde(default)]
+                label: Option<String>,
+                #[serde(default)]
+                default_provider: Option<String>,
+                #[serde(default)]
+                default_model: Option<String>,
+            },
+        }
+
+        match RemoteWorkspaceEntryDef::deserialize(deserializer)? {
+            RemoteWorkspaceEntryDef::Path(path) => Ok(Self {
+                path,
+                label: None,
+                default_provider: None,
+                default_model: None,
+            }),
+            RemoteWorkspaceEntryDef::Full {
+                path,
+                label,
+                default_provider,
+                default_model,
+            } => Ok(Self {
+                path,
+                label,
+                default_provider,
+                default_model,
+            }),
+        }
+    }
+}
+
+impl RemoteWorkspaceEntry {
+    pub fn display_name(&self) -> String {
+        self.label
+            .clone()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| {
+                std::path::Path::new(&self.path)
+                    .file_name()
+                    .and_then(|value| value.to_str())
+                    .filter(|value| !value.trim().is_empty())
+                    .unwrap_or(&self.path)
+                    .to_string()
+            })
     }
 }
 
@@ -100,6 +176,24 @@ impl Default for StreamingMode {
 /// Remote command parsed from user message
 #[derive(Debug, Clone, PartialEq)]
 pub enum RemoteCommand {
+    Start,
+    Home,
+    Menu,
+    SwitchMode { mode: WorkflowMode },
+    PlanGenerate,
+    PlanApprove,
+    TaskConfirmConfig,
+    TaskGeneratePrd,
+    TaskApprovePrd,
+    DebugApprovePatch,
+    SetContextPreset { preset: String },
+    ToggleContextSource { source: String },
+    SetPermissionLevel { level: PermissionLevel },
+    RespondPermission {
+        request_id: String,
+        allowed: bool,
+        always_allow: bool,
+    },
     /// /new <path> [provider] [model] - Create new session
     NewSession {
         project_path: String,
@@ -118,8 +212,14 @@ pub enum RemoteCommand {
     Cancel,
     /// /close - Close current session
     CloseSession,
+    /// /whoami - Show current Telegram identity and chat details
+    WhoAmI,
     /// /help - Show available commands
     Help,
+    Context,
+    Permission,
+    Resume,
+    Artifacts,
 }
 
 // ---------------------------------------------------------------------------
@@ -221,6 +321,10 @@ pub struct RemoteSessionMapping {
 pub enum SessionType {
     ClaudeCode,
     Standalone { provider: String, model: String },
+    WorkflowRoot {
+        kernel_session_id: String,
+        active_mode: WorkflowMode,
+    },
 }
 
 impl fmt::Display for SessionType {
@@ -230,6 +334,10 @@ impl fmt::Display for SessionType {
             SessionType::Standalone { provider, model } => {
                 write!(f, "Standalone({}/{})", provider, model)
             }
+            SessionType::WorkflowRoot {
+                kernel_session_id,
+                active_mode,
+            } => write!(f, "Workflow({:?}/{})", active_mode, kernel_session_id),
         }
     }
 }
@@ -238,16 +346,104 @@ impl fmt::Display for SessionType {
 // Message Types
 // ---------------------------------------------------------------------------
 
-/// Incoming message from remote platform
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum RemoteIncomingEventType {
+    TextMessage,
+    CallbackAction,
+    CommandMenuAction,
+}
+
+/// Incoming message/event from remote platform
 #[derive(Debug, Clone)]
-pub struct IncomingRemoteMessage {
+pub struct IncomingRemoteEvent {
     pub adapter_type: RemoteAdapterType,
+    pub event_type: RemoteIncomingEventType,
     pub chat_id: i64,
     pub user_id: i64,
     pub username: Option<String>,
     pub text: String,
     pub message_id: i64,
     pub timestamp: chrono::DateTime<chrono::Utc>,
+    pub callback_id: Option<String>,
+    pub callback_data: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RemoteActionButton {
+    pub id: String,
+    pub label: String,
+    #[serde(default)]
+    pub style: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RemoteAttachmentRef {
+    pub label: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RemoteActionCard {
+    pub title: String,
+    pub body: String,
+    #[serde(default)]
+    pub actions: Vec<RemoteActionButton>,
+    #[serde(default)]
+    pub metadata: HashMap<String, String>,
+    #[serde(default)]
+    pub attachment_refs: Vec<RemoteAttachmentRef>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum RemoteUiMessage {
+    PlainText(String),
+    ActionCard(RemoteActionCard),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum RemotePendingInteraction {
+    SessionWizard,
+    ContextWizard,
+    PermissionWizard,
+    PlanClarification { session_id: String },
+    PlanReview { session_id: String },
+    TaskConfiguration { session_id: String },
+    TaskPrdApproval { session_id: String },
+    DebugPatchApproval { session_id: String },
+    ToolApproval {
+        request_id: String,
+        tool_name: String,
+        risk: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RemoteRenderedMessageRef {
+    pub message_id: i64,
+    pub kind: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RemoteWorkflowSession {
+    pub chat_id: i64,
+    pub user_id: i64,
+    pub kernel_session_id: String,
+    pub active_mode: WorkflowMode,
+    #[serde(default)]
+    pub linked_mode_sessions: HashMap<String, String>,
+    pub project_path: Option<String>,
+    pub workspace_label: Option<String>,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub base_url: Option<String>,
+    pub permission_level: PermissionLevel,
+    pub context_sources: Option<ContextSourceConfig>,
+    pub streaming_mode: StreamingMode,
+    pub pending_interaction: Option<RemotePendingInteraction>,
+    #[serde(default)]
+    pub last_rendered_message_refs: Vec<RemoteRenderedMessageRef>,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 /// Response collected from a local session execution
@@ -329,6 +525,7 @@ pub struct UpdateRemoteConfigRequest {
     pub enabled: Option<bool>,
     pub adapter: Option<RemoteAdapterType>,
     pub auto_start: Option<bool>,
+    pub allowed_project_roots: Option<Vec<RemoteWorkspaceEntry>>,
 }
 
 /// Request to update Telegram adapter config
@@ -341,6 +538,31 @@ pub struct UpdateTelegramConfigRequest {
     pub access_password: Option<String>,
     pub max_message_length: Option<usize>,
     pub streaming_mode: Option<StreamingMode>,
+}
+
+/// Result of updating a remote-related configuration payload.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ConfigUpdateResult {
+    #[serde(default)]
+    pub applied: bool,
+    #[serde(default)]
+    pub restart_required: bool,
+}
+
+impl ConfigUpdateResult {
+    pub fn applied() -> Self {
+        Self {
+            applied: true,
+            restart_required: false,
+        }
+    }
+
+    pub fn restart_required() -> Self {
+        Self {
+            applied: false,
+            restart_required: true,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -372,6 +594,7 @@ mod tests {
         assert!(!config.enabled);
         assert_eq!(config.adapter, RemoteAdapterType::Telegram);
         assert!(!config.auto_start);
+        assert!(config.allowed_project_roots.is_empty());
     }
 
     #[test]
@@ -380,6 +603,12 @@ mod tests {
             enabled: true,
             adapter: RemoteAdapterType::Telegram,
             auto_start: true,
+            allowed_project_roots: vec![RemoteWorkspaceEntry {
+                path: "/tmp".to_string(),
+                label: Some("Temp".to_string()),
+                default_provider: None,
+                default_model: None,
+            }],
         };
         let json = serde_json::to_string(&config).unwrap();
         assert!(json.contains("\"enabled\":true"));
@@ -388,6 +617,15 @@ mod tests {
         let parsed: RemoteGatewayConfig = serde_json::from_str(&json).unwrap();
         assert!(parsed.enabled);
         assert!(parsed.auto_start);
+        assert_eq!(
+            parsed.allowed_project_roots,
+            vec![RemoteWorkspaceEntry {
+                path: "/tmp".to_string(),
+                label: Some("Temp".to_string()),
+                default_provider: None,
+                default_model: None,
+            }]
+        );
     }
 
     #[test]
@@ -752,11 +990,26 @@ mod tests {
             enabled: Some(true),
             adapter: Some(RemoteAdapterType::Telegram),
             auto_start: None,
+            allowed_project_roots: Some(vec![RemoteWorkspaceEntry {
+                path: "/tmp".to_string(),
+                label: None,
+                default_provider: None,
+                default_model: None,
+            }]),
         };
         let json = serde_json::to_string(&request).unwrap();
         let parsed: UpdateRemoteConfigRequest = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.enabled, Some(true));
         assert!(parsed.auto_start.is_none());
+        assert_eq!(
+            parsed.allowed_project_roots,
+            Some(vec![RemoteWorkspaceEntry {
+                path: "/tmp".to_string(),
+                label: None,
+                default_provider: None,
+                default_model: None,
+            }])
+        );
     }
 
     #[test]
@@ -777,6 +1030,15 @@ mod tests {
     }
 
     #[test]
+    fn test_config_update_result_serialize() {
+        let result = ConfigUpdateResult::restart_required();
+        let json = serde_json::to_string(&result).unwrap();
+        let parsed: ConfigUpdateResult = serde_json::from_str(&json).unwrap();
+        assert!(!parsed.applied);
+        assert!(parsed.restart_required);
+    }
+
+    #[test]
     fn test_remote_command_equality() {
         assert_eq!(RemoteCommand::Help, RemoteCommand::Help);
         assert_eq!(RemoteCommand::Status, RemoteCommand::Status);
@@ -784,5 +1046,27 @@ mod tests {
         assert_eq!(RemoteCommand::ListSessions, RemoteCommand::ListSessions);
         assert_eq!(RemoteCommand::CloseSession, RemoteCommand::CloseSession);
         assert_ne!(RemoteCommand::Help, RemoteCommand::Status);
+    }
+
+    #[test]
+    fn test_workspace_entry_display_name_prefers_label() {
+        let entry = RemoteWorkspaceEntry {
+            path: "/tmp/project-alpha".to_string(),
+            label: Some("Alpha".to_string()),
+            default_provider: None,
+            default_model: None,
+        };
+        assert_eq!(entry.display_name(), "Alpha");
+    }
+
+    #[test]
+    fn test_workspace_entry_display_name_falls_back_to_basename() {
+        let entry = RemoteWorkspaceEntry {
+            path: "/tmp/project-alpha".to_string(),
+            label: None,
+            default_provider: None,
+            default_model: None,
+        };
+        assert_eq!(entry.display_name(), "project-alpha");
     }
 }

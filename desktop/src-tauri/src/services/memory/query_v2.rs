@@ -1158,24 +1158,29 @@ mod tests {
                 ..Default::default()
             },
         );
-        let deleted = futures::executor::block_on(deleted).unwrap();
+        let deleted = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(deleted)
+            .unwrap();
         assert_eq!(deleted.len(), 1);
         assert_eq!(deleted[0].status.as_deref(), Some("deleted"));
 
         let restore_summary = restore_deleted_memories_v2(&store, &["memory-a".to_string()]).unwrap();
         assert_eq!(restore_summary.updated, 1);
 
-        let restored = futures::executor::block_on(list_memory_entries_v2(
-            &store,
-            UnifiedMemoryQueryRequestV2 {
-                project_path: "/scope-test".to_string(),
-                scopes: vec![MemoryScopeV2::Project],
-                statuses: vec![MemoryStatusV2::Active],
-                min_importance: 0.0,
-                ..Default::default()
-            },
-        ))
-        .unwrap();
+        let restored = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(list_memory_entries_v2(
+                &store,
+                UnifiedMemoryQueryRequestV2 {
+                    project_path: "/scope-test".to_string(),
+                    scopes: vec![MemoryScopeV2::Project],
+                    statuses: vec![MemoryStatusV2::Active],
+                    min_importance: 0.0,
+                    ..Default::default()
+                },
+            ))
+            .unwrap();
         assert_eq!(restored.len(), 1);
         assert_eq!(restored[0].status.as_deref(), Some("active"));
 
@@ -1183,17 +1188,19 @@ mod tests {
         let purge_summary = purge_memories_v2(&store, &["memory-a".to_string()]).unwrap();
         assert_eq!(purge_summary.updated, 1);
 
-        let remaining = futures::executor::block_on(list_memory_entries_v2(
-            &store,
-            UnifiedMemoryQueryRequestV2 {
-                project_path: "/scope-test".to_string(),
-                scopes: vec![MemoryScopeV2::Project],
-                statuses: vec![MemoryStatusV2::Deleted, MemoryStatusV2::Active],
-                min_importance: 0.0,
-                ..Default::default()
-            },
-        ))
-        .unwrap();
+        let remaining = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(list_memory_entries_v2(
+                &store,
+                UnifiedMemoryQueryRequestV2 {
+                    project_path: "/scope-test".to_string(),
+                    scopes: vec![MemoryScopeV2::Project],
+                    statuses: vec![MemoryStatusV2::Deleted, MemoryStatusV2::Active],
+                    min_importance: 0.0,
+                    ..Default::default()
+                },
+            ))
+            .unwrap();
         assert!(remaining.is_empty());
     }
 

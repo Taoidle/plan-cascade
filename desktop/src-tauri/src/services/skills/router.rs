@@ -457,7 +457,9 @@ pub async fn rerank_skill_matches(
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use crate::services::llm::types::{LlmResponse, LlmResult, ProviderConfig, ToolDefinition};
+    use crate::services::llm::types::{
+        LlmResponse, LlmResult, ProviderConfig, StopReason, ToolDefinition, UsageStats,
+    };
     use tokio::sync::mpsc;
     use plan_cascade_core::streaming::UnifiedStreamEvent;
 
@@ -484,11 +486,16 @@ mod tests {
                 model: self.config.model.clone(),
                 content: Some(self.text.clone()),
                 thinking: None,
-                usage: None,
-                finish_reason: None,
-                stop_reason: None,
+                usage: UsageStats {
+                    input_tokens: 0,
+                    output_tokens: 0,
+                    thinking_tokens: None,
+                    cache_read_tokens: None,
+                    cache_creation_tokens: None,
+                },
+                stop_reason: StopReason::EndTurn,
                 tool_calls: vec![],
-                raw_response: None,
+                search_citations: vec![],
             })
         }
         async fn stream_message(

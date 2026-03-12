@@ -88,6 +88,16 @@ pub async fn update_settings(
     let should_sync_webhook_locale = update.language.is_some();
     match state.update_config(update).await {
         Ok(config) => {
+            let config_for_base_urls = config.clone();
+            if let Err(error) = state
+                .with_database(move |db| {
+                    sync_provider_base_urls(db, &config_for_base_urls)?;
+                    Ok(())
+                })
+                .await
+            {
+                tracing::warn!("Failed to sync provider base URLs from settings: {}", error);
+            }
             if let Err(error) = apply_runtime_preferences(&app, shell_state.inner(), &config) {
                 tracing::warn!("Failed to apply runtime shell preferences: {}", error);
             }
@@ -100,6 +110,18 @@ pub async fn update_settings(
         }
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
+}
+
+fn sync_provider_base_urls(
+    db: &crate::storage::Database,
+    config: &AppConfig,
+) -> crate::utils::error::AppResult<()> {
+    for provider in ["glm", "minimax", "qwen"] {
+        let key = format!("provider_{}_base_url", provider);
+        let value = config.provider_base_url(provider).unwrap_or_default();
+        db.set_setting(&key, &value)?;
+    }
+    Ok(())
 }
 
 /// Get knowledge-related runtime feature flags persisted in DB settings.
@@ -472,6 +494,9 @@ pub async fn import_all_settings(
                 default_provider: Some(new_config.default_provider),
                 default_model: Some(new_config.default_model),
                 model_by_provider: Some(new_config.model_by_provider),
+                glm_endpoint: Some(new_config.glm_endpoint),
+                minimax_endpoint: Some(new_config.minimax_endpoint),
+                qwen_endpoint: Some(new_config.qwen_endpoint),
                 analytics_enabled: Some(new_config.analytics_enabled),
                 auto_save_interval: Some(new_config.auto_save_interval),
                 max_recent_projects: Some(new_config.max_recent_projects),

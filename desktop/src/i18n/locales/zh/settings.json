@@ -1099,6 +1099,8 @@
     "save": "保存",
     "saving": "保存中...",
     "saveSuccess": "配置已保存",
+    "saveApplied": "配置已应用",
+    "saveRestartRequired": "配置已保存，重启网关后才能应用全部变更。",
     "dismiss": "关闭",
 
     "gateway": {
@@ -1112,6 +1114,7 @@
       "activeSessions": "活跃会话",
       "reconnecting": "正在重连...",
       "reconnectAttempt": "重连尝试 {{current}}/{{max}}",
+      "lastErrorAt": "最近错误时间",
       "reconnectFailed": "{{max}} 次尝试后重连失败",
       "reconnectSuccess": "重连成功",
       "autoStartSuccess": "网关已在启动时自动开启",
@@ -1124,7 +1127,14 @@
     "config": {
       "title": "网关配置",
       "enabled": "启用远程控制",
-      "autoStart": "启动时自动开启"
+      "autoStart": "启动时自动开启",
+      "allowedRoots": "允许的项目根目录",
+      "allowedRootsPlaceholder": "绝对路径...",
+      "allowedRootsHint": "远程命令只能访问这些目录，且至少需要配置一个路径。",
+      "importFromSessions": "从已打开工作区导入",
+      "importNoWorkspaces": "当前没有可导入的已打开工作区。",
+      "importNoNewWorkspaces": "所有已打开工作区都已在列表中。",
+      "importedWorkspaces": "已从会话管理导入 {{count}} 个工作区。"
     },
 
     "telegram": {
@@ -1146,6 +1156,8 @@
       "modeWaitForComplete": "等待完成",
       "modePeriodicUpdate": "定期更新",
       "modeLiveEdit": "实时编辑",
+      "periodicInterval": "更新间隔（秒）",
+      "liveEditThrottle": "编辑节流（毫秒）",
       "allowedPaths": "允许的项目路径"
     },
 

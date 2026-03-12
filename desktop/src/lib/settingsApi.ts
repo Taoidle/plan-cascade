@@ -23,6 +23,9 @@ export interface AppConfig {
   default_provider: string;
   default_model: string;
   model_by_provider: Record<string, string>;
+  glm_endpoint: string;
+  minimax_endpoint: string;
+  qwen_endpoint: string;
   analytics_enabled: boolean;
   auto_save_interval: number;
   max_recent_projects: number;
@@ -36,6 +39,9 @@ export interface SettingsUpdate {
   default_provider?: string;
   default_model?: string;
   model_by_provider?: Record<string, string>;
+  glm_endpoint?: string;
+  minimax_endpoint?: string;
+  qwen_endpoint?: string;
   analytics_enabled?: boolean;
   auto_save_interval?: number;
   max_recent_projects?: number;

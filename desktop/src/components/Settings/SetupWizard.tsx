@@ -992,6 +992,9 @@ async function saveSettings() {
         default_provider: settings.provider,
         default_model: resolvedDefaultModel,
         model_by_provider: settings.modelByProvider,
+        glm_endpoint: settings.glmEndpoint,
+        minimax_endpoint: settings.minimaxEndpoint,
+        qwen_endpoint: settings.qwenEndpoint,
       });
     }
   } catch (error) {

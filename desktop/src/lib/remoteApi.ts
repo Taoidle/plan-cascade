@@ -19,6 +19,11 @@ export type StreamingMode =
   | { PeriodicUpdate: { interval_secs: number } }
   | { LiveEdit: { throttle_ms: number } };
 
+export interface ConfigUpdateResult {
+  applied: boolean;
+  restart_required: boolean;
+}
+
 export interface GatewayStatus {
   running: boolean;
   adapter_type: RemoteAdapterType | null;
@@ -27,12 +32,23 @@ export interface GatewayStatus {
   total_commands_processed: number;
   last_command_at: string | null;
   error: string | null;
+  reconnect_attempts: number;
+  last_error_at: string | null;
+  reconnecting: boolean;
 }
 
 export interface RemoteGatewayConfig {
   enabled: boolean;
   adapter: RemoteAdapterType;
   auto_start: boolean;
+  allowed_project_roots: RemoteWorkspaceEntry[];
+}
+
+export interface RemoteWorkspaceEntry {
+  path: string;
+  label?: string | null;
+  default_provider?: string | null;
+  default_model?: string | null;
 }
 
 export interface TelegramAdapterConfig {
@@ -45,11 +61,16 @@ export interface TelegramAdapterConfig {
   streaming_mode: StreamingMode;
 }
 
+export type RemoteSessionType =
+  | 'ClaudeCode'
+  | { Standalone: { provider: string; model: string } }
+  | { WorkflowRoot: { kernel_session_id: string; active_mode: string } };
+
 export interface RemoteSessionMapping {
   chat_id: number;
   user_id: number;
   local_session_id: string | null;
-  session_type: string;
+  session_type: RemoteSessionType;
   created_at: string;
   project_path?: string | null;
 }
@@ -76,6 +97,7 @@ export interface UpdateRemoteConfigRequest {
   enabled?: boolean;
   adapter?: RemoteAdapterType;
   auto_start?: boolean;
+  allowed_project_roots?: RemoteWorkspaceEntry[];
 }
 
 export interface UpdateTelegramConfigRequest {
@@ -155,9 +177,11 @@ export async function getRemoteConfig(): Promise<CommandResponse<RemoteGatewayCo
 /**
  * Update remote gateway configuration.
  */
-export async function updateRemoteConfig(request: UpdateRemoteConfigRequest): Promise<CommandResponse<void>> {
+export async function updateRemoteConfig(
+  request: UpdateRemoteConfigRequest,
+): Promise<CommandResponse<ConfigUpdateResult>> {
   try {
-    return await invoke<CommandResponse<void>>('update_remote_config', { request });
+    return await invoke<CommandResponse<ConfigUpdateResult>>('update_remote_config', { request });
   } catch (error) {
     return {
       success: false,
@@ -185,9 +209,11 @@ export async function getTelegramConfig(): Promise<CommandResponse<TelegramAdapt
 /**
  * Update Telegram adapter configuration.
  */
-export async function updateTelegramConfig(request: UpdateTelegramConfigRequest): Promise<CommandResponse<void>> {
+export async function updateTelegramConfig(
+  request: UpdateTelegramConfigRequest,
+): Promise<CommandResponse<ConfigUpdateResult>> {
   try {
-    return await invoke<CommandResponse<void>>('update_telegram_config', { request });
+    return await invoke<CommandResponse<ConfigUpdateResult>>('update_telegram_config', { request });
   } catch (error) {
     return {
       success: false,

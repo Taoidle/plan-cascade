@@ -84,6 +84,49 @@ impl StandaloneState {
     }
 }
 
+fn normalize_index_project_path_key(path: &str) -> String {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    let mut normalized = trimmed.replace('\\', "/");
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(stripped) = normalized.strip_prefix("//?/UNC/") {
+            normalized = format!("//{}", stripped);
+        } else if let Some(stripped) = normalized.strip_prefix("//?/") {
+            normalized = stripped.to_string();
+        }
+        normalized.make_ascii_lowercase();
+    }
+
+    while normalized.len() > 1 && normalized.ends_with('/') {
+        normalized.pop();
+    }
+
+    normalized
+}
+
+async fn resolve_indexed_project_path(mgr: &IndexManager, project_path: &str) -> String {
+    let normalized_target = normalize_index_project_path_key(project_path);
+    if normalized_target.is_empty() {
+        return project_path.to_string();
+    }
+
+    if let Ok(projects) = mgr.index_store().list_indexed_projects() {
+        if let Some(project) = projects
+            .into_iter()
+            .find(|project| normalize_index_project_path_key(&project.project_path) == normalized_target)
+        {
+            return project.project_path;
+        }
+    }
+
+    project_path.to_string()
+}
+
 /// Provider information returned to frontend
 #[derive(serde::Serialize)]
 pub struct ProviderInfo {
@@ -968,14 +1011,14 @@ pub async fn get_index_status(
     project_path: Option<String>,
     standalone_state: State<'_, StandaloneState>,
 ) -> Result<CommandResponse<IndexStatusEvent>, String> {
-    let dir = if let Some(p) = project_path {
+    let requested_dir = if let Some(p) = project_path {
         p
     } else {
         let wd = standalone_state.working_directory.read().await;
         wd.to_string_lossy().to_string()
     };
 
-    if dir.is_empty() {
+    if requested_dir.is_empty() {
         return Ok(CommandResponse::ok(IndexStatusEvent {
             project_path: String::new(),
             status: "idle".to_string(),
@@ -991,6 +1034,7 @@ pub async fn get_index_status(
 
     let mgr_lock = standalone_state.index_manager.read().await;
     if let Some(mgr) = &*mgr_lock {
+        let dir = resolve_indexed_project_path(mgr, &requested_dir).await;
         // Pure read-only query — indexing is triggered by set_working_directory
         // and init_app, not by status polls. This prevents the race condition
         // where multiple rapid get_index_status calls spawn duplicate indexers.
@@ -999,7 +1043,7 @@ pub async fn get_index_status(
         Ok(CommandResponse::ok(status))
     } else {
         Ok(CommandResponse::ok(IndexStatusEvent {
-            project_path: dir,
+            project_path: requested_dir,
             status: "idle".to_string(),
             indexed_files: 0,
             total_files: 0,
@@ -1019,19 +1063,20 @@ pub async fn trigger_reindex(
     project_path: Option<String>,
     standalone_state: State<'_, StandaloneState>,
 ) -> Result<CommandResponse<bool>, String> {
-    let dir = if let Some(p) = project_path {
+    let requested_dir = if let Some(p) = project_path {
         p
     } else {
         let wd = standalone_state.working_directory.read().await;
         wd.to_string_lossy().to_string()
     };
 
-    if dir.is_empty() {
+    if requested_dir.is_empty() {
         return Ok(CommandResponse::err("No directory specified".to_string()));
     }
 
     let mgr_lock = standalone_state.index_manager.read().await;
     if let Some(mgr) = &*mgr_lock {
+        let dir = resolve_indexed_project_path(mgr, &requested_dir).await;
         mgr.trigger_reindex(&dir).await;
         Ok(CommandResponse::ok(true))
     } else {
@@ -3306,5 +3351,26 @@ mod tests {
 
         let req: ExecuteWithSessionRequest = serde_json::from_str(json).unwrap();
         assert_eq!(req.max_total_tokens, Some(2_000_000));
+    }
+
+    #[test]
+    fn test_normalize_index_project_path_key_trims_and_normalizes_separators() {
+        assert_eq!(
+            normalize_index_project_path_key(" /tmp/demo\\\\project/ "),
+            "/tmp/demo/project"
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn test_normalize_index_project_path_key_strips_verbatim_prefix() {
+        assert_eq!(
+            normalize_index_project_path_key(r"\\?\D:\CLionProjects\SuperMos"),
+            "d:/clionprojects/supermos"
+        );
+        assert_eq!(
+            normalize_index_project_path_key(r"D:\CLionProjects\SuperMos"),
+            "d:/clionprojects/supermos"
+        );
     }
 }

@@ -19,6 +19,15 @@ pub struct AppConfig {
     /// Per-provider last selected model (backend source of truth for binding).
     #[serde(default = "default_model_by_provider")]
     pub model_by_provider: HashMap<String, String>,
+    /// GLM endpoint selection persisted for backend-only workflows.
+    #[serde(default = "default_glm_endpoint")]
+    pub glm_endpoint: String,
+    /// MiniMax endpoint selection persisted for backend-only workflows.
+    #[serde(default = "default_minimax_endpoint")]
+    pub minimax_endpoint: String,
+    /// Qwen endpoint selection persisted for backend-only workflows.
+    #[serde(default = "default_qwen_endpoint")]
+    pub qwen_endpoint: String,
     /// Enable analytics tracking
     pub analytics_enabled: bool,
     /// Auto-save interval in seconds
@@ -52,6 +61,18 @@ fn default_model_by_provider() -> HashMap<String, String> {
     map
 }
 
+fn default_glm_endpoint() -> String {
+    "standard".to_string()
+}
+
+fn default_minimax_endpoint() -> String {
+    "international".to_string()
+}
+
+fn default_qwen_endpoint() -> String {
+    "china".to_string()
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -60,6 +81,9 @@ impl Default for AppConfig {
             default_provider: "anthropic".to_string(),
             default_model: "claude-sonnet-4-6-20260219".to_string(),
             model_by_provider: default_model_by_provider(),
+            glm_endpoint: default_glm_endpoint(),
+            minimax_endpoint: default_minimax_endpoint(),
+            qwen_endpoint: default_qwen_endpoint(),
             analytics_enabled: true,
             auto_save_interval: 30,
             max_recent_projects: 10,
@@ -78,6 +102,9 @@ pub struct SettingsUpdate {
     pub default_provider: Option<String>,
     pub default_model: Option<String>,
     pub model_by_provider: Option<HashMap<String, String>>,
+    pub glm_endpoint: Option<String>,
+    pub minimax_endpoint: Option<String>,
+    pub qwen_endpoint: Option<String>,
     pub analytics_enabled: Option<bool>,
     pub auto_save_interval: Option<u32>,
     pub max_recent_projects: Option<u32>,
@@ -107,6 +134,33 @@ impl AppConfig {
             return self.default_model.clone();
         }
         String::new()
+    }
+
+    pub fn provider_base_url(&self, provider: &str) -> Option<String> {
+        match Self::canonical_provider_name(provider).as_str() {
+            "glm" => match self.glm_endpoint.as_str() {
+                "coding" => Some("https://open.bigmodel.cn/api/coding/paas/v4/chat/completions".to_string()),
+                "international" => Some("https://api.z.ai/api/paas/v4/chat/completions".to_string()),
+                "international-coding" => {
+                    Some("https://api.z.ai/api/coding/paas/v4/chat/completions".to_string())
+                }
+                _ => None,
+            },
+            "minimax" => match self.minimax_endpoint.as_str() {
+                "china" => Some("https://api.minimaxi.com/v1/chat/completions".to_string()),
+                _ => None,
+            },
+            "qwen" => match self.qwen_endpoint.as_str() {
+                "singapore" => {
+                    Some("https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions".to_string())
+                }
+                "us" => {
+                    Some("https://dashscope-us.aliyuncs.com/compatible-mode/v1/chat/completions".to_string())
+                }
+                _ => None,
+            },
+            _ => None,
+        }
     }
 
     /// Apply a partial update to the configuration
@@ -154,6 +208,15 @@ impl AppConfig {
                 self.model_by_provider
                     .insert(canonical, self.default_model.clone());
             }
+        }
+        if let Some(endpoint) = update.glm_endpoint {
+            self.glm_endpoint = endpoint;
+        }
+        if let Some(endpoint) = update.minimax_endpoint {
+            self.minimax_endpoint = endpoint;
+        }
+        if let Some(endpoint) = update.qwen_endpoint {
+            self.qwen_endpoint = endpoint;
         }
         if let Some(enabled) = update.analytics_enabled {
             self.analytics_enabled = enabled;
@@ -219,6 +282,9 @@ mod tests {
         assert_eq!(config.language, "en");
         assert_eq!(config.default_provider, "anthropic");
         assert_eq!(config.default_model, "claude-sonnet-4-6-20260219");
+        assert_eq!(config.glm_endpoint, "standard");
+        assert_eq!(config.minimax_endpoint, "international");
+        assert_eq!(config.qwen_endpoint, "china");
         assert!(config.close_to_background_enabled);
         assert_eq!(
             config.model_by_provider.get("anthropic"),
@@ -234,6 +300,7 @@ mod tests {
             language: Some("zh".to_string()),
             default_provider: Some("openai".to_string()),
             default_model: Some("gpt-5.1".to_string()),
+            minimax_endpoint: Some("china".to_string()),
             ..Default::default()
         };
         config.apply_update(update);
@@ -241,6 +308,7 @@ mod tests {
         assert_eq!(config.language, "zh");
         assert_eq!(config.default_provider, "openai");
         assert_eq!(config.default_model, "gpt-5.1");
+        assert_eq!(config.minimax_endpoint, "china");
         assert!(config.close_to_background_enabled);
         assert_eq!(
             config.model_by_provider.get("openai"),
@@ -270,6 +338,26 @@ mod tests {
     fn test_validate_valid_config() {
         let config = AppConfig::default();
         assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_provider_base_url_from_endpoint_settings() {
+        let mut config = AppConfig::default();
+        config.minimax_endpoint = "china".to_string();
+        config.glm_endpoint = "international".to_string();
+        config.qwen_endpoint = "us".to_string();
+        assert_eq!(
+            config.provider_base_url("minimax").as_deref(),
+            Some("https://api.minimaxi.com/v1/chat/completions")
+        );
+        assert_eq!(
+            config.provider_base_url("glm").as_deref(),
+            Some("https://api.z.ai/api/paas/v4/chat/completions")
+        );
+        assert_eq!(
+            config.provider_base_url("qwen").as_deref(),
+            Some("https://dashscope-us.aliyuncs.com/compatible-mode/v1/chat/completions")
+        );
     }
 
     #[test]

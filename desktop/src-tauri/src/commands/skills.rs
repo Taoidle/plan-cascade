@@ -1571,6 +1571,9 @@ mod tests {
             success_rate: 1.0,
             keywords: vec![],
             enabled: true,
+            review_status: SkillReviewStatus::PendingReview,
+            review_notes: None,
+            reviewed_at: None,
             created_at: "2026-01-01 00:00:00".to_string(),
             updated_at: "2026-01-01 00:00:00".to_string(),
         };

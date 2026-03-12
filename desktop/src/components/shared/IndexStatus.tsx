@@ -11,6 +11,7 @@ import { clsx } from 'clsx';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { useTranslation } from 'react-i18next';
+import { workspacePathsEqual } from '../../lib/pathUtils';
 import { useSettingsStore } from '../../store/settings';
 import { useLspStore } from '../../store/lsp';
 
@@ -127,7 +128,7 @@ export function IndexStatus({ compact = false, className }: IndexStatusProps) {
     // Listen for real-time progress events
     let unlisten: UnlistenFn | null = null;
     listen<IndexStatusEvent>('index-progress', (event) => {
-      if (!cancelled) {
+      if (!cancelled && workspacePathsEqual(event.payload.project_path, workspacePath)) {
         applyEvent(event.payload);
       }
     })

@@ -6,9 +6,17 @@
 pub mod telegram;
 
 use async_trait::async_trait;
-use tokio::sync::mpsc;
+use std::sync::Arc;
+use tokio::sync::{mpsc, RwLock};
+use tokio::task::JoinHandle;
 
-use super::types::{IncomingRemoteMessage, RemoteAdapterType, RemoteError};
+use super::types::{
+    IncomingRemoteEvent, RemoteActionCard, RemoteAdapterType, RemoteError, RemoteUiMessage,
+};
+use super::TelegramAdapterConfig;
+use crate::services::proxy::ProxyConfig;
+
+pub type RemoteAdapterHandle = JoinHandle<Result<(), RemoteError>>;
 
 /// Remote adapter trait for platform-specific message handling.
 ///
@@ -29,8 +37,8 @@ pub trait RemoteAdapter: Send + Sync {
     /// The adapter should spawn its own task for the message loop.
     async fn start(
         &self,
-        command_tx: mpsc::Sender<IncomingRemoteMessage>,
-    ) -> Result<(), RemoteError>;
+        command_tx: mpsc::Sender<IncomingRemoteEvent>,
+    ) -> Result<RemoteAdapterHandle, RemoteError>;
 
     /// Stop the adapter gracefully.
     async fn stop(&self) -> Result<(), RemoteError>;
@@ -65,8 +73,48 @@ pub trait RemoteAdapter: Send + Sync {
         Ok(0)
     }
 
+    async fn send_action_card(&self, chat_id: i64, card: &RemoteActionCard) -> Result<(), RemoteError> {
+        let mut body = format!("{}\n\n{}", card.title, card.body);
+        if !card.actions.is_empty() {
+            body.push_str("\n\nActions:");
+            for action in &card.actions {
+                body.push_str(&format!("\n- {}", action.label));
+            }
+        }
+        self.send_message(chat_id, &body).await
+    }
+
+    async fn send_ui_message(&self, chat_id: i64, message: &RemoteUiMessage) -> Result<(), RemoteError> {
+        match message {
+            RemoteUiMessage::PlainText(text) => self.send_message(chat_id, text).await,
+            RemoteUiMessage::ActionCard(card) => self.send_action_card(chat_id, card).await,
+        }
+    }
+
+    async fn answer_callback(&self, _callback_id: &str) -> Result<(), RemoteError> {
+        Ok(())
+    }
+
     /// Check adapter health/connectivity.
     ///
     /// For Telegram, this calls the getMe API to verify the bot token.
     async fn health_check(&self) -> Result<(), RemoteError>;
+}
+
+pub struct RemoteAdapterFactory;
+
+impl RemoteAdapterFactory {
+    pub async fn create(
+        adapter_type: &RemoteAdapterType,
+        telegram_config: Arc<RwLock<TelegramAdapterConfig>>,
+        proxy: Option<&ProxyConfig>,
+    ) -> Result<Arc<dyn RemoteAdapter>, RemoteError> {
+        match adapter_type {
+            RemoteAdapterType::Telegram => {
+                Ok(Arc::new(
+                    telegram::TelegramAdapter::new(telegram_config, proxy).await?,
+                ))
+            }
+        }
+    }
 }

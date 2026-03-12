@@ -4,6 +4,8 @@
 //! Full implementation in story-002.
 
 use super::types::RemoteCommand;
+use crate::services::orchestrator::permissions::PermissionLevel;
+use crate::services::workflow_kernel::WorkflowMode;
 
 /// Stateless command parser for remote messages.
 pub struct CommandRouter;
@@ -24,7 +26,35 @@ impl CommandRouter {
     pub fn parse(text: &str) -> RemoteCommand {
         let text = text.trim();
 
-        if text.starts_with("/new ") || text == "/new" {
+        if matches!(text, "/start" | "/home") {
+            RemoteCommand::Home
+        } else if text == "/menu" {
+            RemoteCommand::Menu
+        } else if text == "/chat" {
+            RemoteCommand::SwitchMode {
+                mode: WorkflowMode::Chat,
+            }
+        } else if text == "/plan" {
+            RemoteCommand::SwitchMode {
+                mode: WorkflowMode::Plan,
+            }
+        } else if text == "/task" {
+            RemoteCommand::SwitchMode {
+                mode: WorkflowMode::Task,
+            }
+        } else if text == "/debug" {
+            RemoteCommand::SwitchMode {
+                mode: WorkflowMode::Debug,
+            }
+        } else if text == "/context" {
+            RemoteCommand::Context
+        } else if text == "/permission" {
+            RemoteCommand::Permission
+        } else if text == "/resume" {
+            RemoteCommand::Resume
+        } else if text == "/artifacts" {
+            RemoteCommand::Artifacts
+        } else if text.starts_with("/new ") || text == "/new" {
             let args_str = if text.len() > 5 { text[5..].trim() } else { "" };
             let args: Vec<&str> = args_str.splitn(3, ' ').collect();
             RemoteCommand::NewSession {
@@ -44,6 +74,8 @@ impl CommandRouter {
             RemoteCommand::Cancel
         } else if text == "/close" {
             RemoteCommand::CloseSession
+        } else if text == "/whoami" {
+            RemoteCommand::WhoAmI
         } else if text == "/help" {
             RemoteCommand::Help
         } else if text.starts_with("/send ") {
@@ -57,12 +89,108 @@ impl CommandRouter {
             }
         }
     }
+
+    pub fn parse_callback(callback: &str) -> Option<RemoteCommand> {
+        if let Some(request_id) = callback.trim().strip_prefix("remote:approval:allow-once:") {
+            return Some(RemoteCommand::RespondPermission {
+                request_id: request_id.to_string(),
+                allowed: true,
+                always_allow: false,
+            });
+        }
+        if let Some(request_id) = callback.trim().strip_prefix("remote:approval:always-allow:") {
+            return Some(RemoteCommand::RespondPermission {
+                request_id: request_id.to_string(),
+                allowed: true,
+                always_allow: true,
+            });
+        }
+        if let Some(request_id) = callback.trim().strip_prefix("remote:approval:deny:") {
+            return Some(RemoteCommand::RespondPermission {
+                request_id: request_id.to_string(),
+                allowed: false,
+                always_allow: false,
+            });
+        }
+        match callback.trim() {
+            "remote:home" | "remote:menu" => Some(RemoteCommand::Home),
+            "remote:status" => Some(RemoteCommand::Status),
+            "remote:context" => Some(RemoteCommand::Context),
+            "remote:permission" => Some(RemoteCommand::Permission),
+            "remote:resume" => Some(RemoteCommand::Resume),
+            "remote:artifacts" => Some(RemoteCommand::Artifacts),
+            "remote:cancel" => Some(RemoteCommand::Cancel),
+            "remote:sessions" => Some(RemoteCommand::ListSessions),
+            "remote:whoami" => Some(RemoteCommand::WhoAmI),
+            "remote:help" => Some(RemoteCommand::Help),
+            "remote:plan:generate" => Some(RemoteCommand::PlanGenerate),
+            "remote:plan:approve" => Some(RemoteCommand::PlanApprove),
+            "remote:task:confirm-config" => Some(RemoteCommand::TaskConfirmConfig),
+            "remote:task:generate-prd" => Some(RemoteCommand::TaskGeneratePrd),
+            "remote:task:approve-prd" => Some(RemoteCommand::TaskApprovePrd),
+            "remote:debug:approve-patch" => Some(RemoteCommand::DebugApprovePatch),
+            "remote:context:preset:default" => Some(RemoteCommand::SetContextPreset {
+                preset: "default".to_string(),
+            }),
+            "remote:context:preset:focused" => Some(RemoteCommand::SetContextPreset {
+                preset: "focused".to_string(),
+            }),
+            "remote:context:preset:knowledge" => Some(RemoteCommand::SetContextPreset {
+                preset: "knowledge".to_string(),
+            }),
+            "remote:context:preset:memory" => Some(RemoteCommand::SetContextPreset {
+                preset: "memory".to_string(),
+            }),
+            "remote:context:preset:skills" => Some(RemoteCommand::SetContextPreset {
+                preset: "skills".to_string(),
+            }),
+            "remote:context:toggle:knowledge" => Some(RemoteCommand::ToggleContextSource {
+                source: "knowledge".to_string(),
+            }),
+            "remote:context:toggle:memory" => Some(RemoteCommand::ToggleContextSource {
+                source: "memory".to_string(),
+            }),
+            "remote:context:toggle:skills" => Some(RemoteCommand::ToggleContextSource {
+                source: "skills".to_string(),
+            }),
+            "remote:permission:set:strict" => Some(RemoteCommand::SetPermissionLevel {
+                level: PermissionLevel::Strict,
+            }),
+            "remote:permission:set:standard" => Some(RemoteCommand::SetPermissionLevel {
+                level: PermissionLevel::Standard,
+            }),
+            "remote:permission:set:permissive" => Some(RemoteCommand::SetPermissionLevel {
+                level: PermissionLevel::Permissive,
+            }),
+            "remote:mode:switch:chat" => Some(RemoteCommand::SwitchMode {
+                mode: WorkflowMode::Chat,
+            }),
+            "remote:mode:switch:plan" => Some(RemoteCommand::SwitchMode {
+                mode: WorkflowMode::Plan,
+            }),
+            "remote:mode:switch:task" => Some(RemoteCommand::SwitchMode {
+                mode: WorkflowMode::Task,
+            }),
+            "remote:mode:switch:debug" => Some(RemoteCommand::SwitchMode {
+                mode: WorkflowMode::Debug,
+            }),
+            _ => None,
+        }
+    }
 }
 
 /// Help text displayed when user sends /help
 pub const HELP_TEXT: &str = r#"Plan Cascade Remote Control
 
 Available commands:
+  /start, /home                    -- Open remote control console
+  /chat | /plan | /task | /debug  -- Switch active mode
+  /context                         -- Show context configuration
+  /permission                      -- Show permission configuration
+  /whoami                          -- Show your chat/user IDs for whitelist setup
+  /resume                          -- Resume current workflow session
+  /artifacts                       -- Show recent artifacts
+  Plan/Task/Debug review actions  -- Use inline buttons for generate/approve steps
   /new <path> [provider] [model]  -- Create new session
   /send <message>                 -- Send message (or just type directly)
   /sessions                       -- List active sessions
@@ -70,9 +198,18 @@ Available commands:
   /status                         -- Current session status
   /cancel                         -- Cancel running execution
   /close                          -- Close current session
+  /auth <password>                -- Authenticate when password gate is enabled
   /help                           -- Show this help
 
+Quick start:
+  1. Send /whoami and add your user_id to Allowed User IDs in Settings
+  2. If password gate is enabled, send /auth <password>
+  3. Send /start to open the console
+  4. Send /new or /new ~/projects/myapp to open a workspace
+  5. Use /chat, /plan, /task, or /debug and then type normally
+
 Examples:
+  /whoami
   /new ~/projects/myapp
   /new ~/projects/api anthropic claude-sonnet-4-5-20250929
   How do I fix the login bug?
@@ -83,6 +220,7 @@ Examples:
 mod tests {
     use super::*;
     use crate::services::remote::types::RemoteCommand;
+    use crate::services::workflow_kernel::WorkflowMode;
 
     // -----------------------------------------------------------------------
     // Slash command parsing
@@ -205,6 +343,34 @@ mod tests {
         assert_eq!(cmd, RemoteCommand::Help);
     }
 
+    #[test]
+    fn test_parse_whoami() {
+        let cmd = CommandRouter::parse("/whoami");
+        assert_eq!(cmd, RemoteCommand::WhoAmI);
+    }
+
+    #[test]
+    fn test_parse_mode_commands() {
+        assert_eq!(
+            CommandRouter::parse("/chat"),
+            RemoteCommand::SwitchMode {
+                mode: WorkflowMode::Chat,
+            }
+        );
+        assert_eq!(
+            CommandRouter::parse("/plan"),
+            RemoteCommand::SwitchMode {
+                mode: WorkflowMode::Plan,
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_home_and_menu() {
+        assert_eq!(CommandRouter::parse("/start"), RemoteCommand::Home);
+        assert_eq!(CommandRouter::parse("/menu"), RemoteCommand::Menu);
+    }
+
     // -----------------------------------------------------------------------
     // Plain text and edge cases
     // -----------------------------------------------------------------------
@@ -303,14 +469,18 @@ mod tests {
 
     #[test]
     fn test_help_text_contains_all_commands() {
+        assert!(HELP_TEXT.contains("/start"));
+        assert!(HELP_TEXT.contains("/chat"));
         assert!(HELP_TEXT.contains("/new"));
         assert!(HELP_TEXT.contains("/send"));
+        assert!(HELP_TEXT.contains("/whoami"));
         assert!(HELP_TEXT.contains("/sessions"));
         assert!(HELP_TEXT.contains("/switch"));
         assert!(HELP_TEXT.contains("/status"));
         assert!(HELP_TEXT.contains("/cancel"));
         assert!(HELP_TEXT.contains("/close"));
         assert!(HELP_TEXT.contains("/help"));
+        assert!(HELP_TEXT.contains("/auth <password>"));
     }
 
     #[test]
@@ -343,6 +513,38 @@ mod tests {
             RemoteCommand::SendMessage {
                 content: "/Status".to_string(),
             }
+        );
+    }
+
+    #[test]
+    fn test_parse_callback() {
+        assert_eq!(
+            CommandRouter::parse_callback("remote:mode:switch:debug"),
+            Some(RemoteCommand::SwitchMode {
+                mode: WorkflowMode::Debug,
+            })
+        );
+        assert_eq!(
+            CommandRouter::parse_callback("remote:status"),
+            Some(RemoteCommand::Status)
+        );
+        assert_eq!(
+            CommandRouter::parse_callback("remote:whoami"),
+            Some(RemoteCommand::WhoAmI)
+        );
+        assert_eq!(
+            CommandRouter::parse_callback("remote:approval:allow-once:req-1"),
+            Some(RemoteCommand::RespondPermission {
+                request_id: "req-1".to_string(),
+                allowed: true,
+                always_allow: false,
+            })
+        );
+        assert_eq!(
+            CommandRouter::parse_callback("remote:permission:set:permissive"),
+            Some(RemoteCommand::SetPermissionLevel {
+                level: PermissionLevel::Permissive,
+            })
         );
     }
 }

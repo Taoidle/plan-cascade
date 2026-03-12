@@ -10,7 +10,160 @@ import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import { CheckCircledIcon, CrossCircledIcon, TrashIcon, PlusIcon } from '@radix-ui/react-icons';
 import { useRemoteStore } from '../../store/remote';
-import type { UpdateTelegramConfigRequest } from '../../lib/remoteApi';
+import { useSettingsStore } from '../../store/settings';
+import { useWorkflowKernelStore } from '../../store/workflowKernel';
+import type {
+  RemoteSessionType,
+  RemoteWorkspaceEntry,
+  StreamingMode,
+  UpdateTelegramConfigRequest,
+} from '../../lib/remoteApi';
+import type { WorkflowSessionCatalogItem } from '../../types/workflowKernel';
+
+function parseStreamingMode(mode: StreamingMode): {
+  mode: 'WaitForComplete' | 'PeriodicUpdate' | 'LiveEdit';
+  intervalSecs: number;
+  throttleMs: number;
+} {
+  if (mode === 'WaitForComplete') {
+    return {
+      mode,
+      intervalSecs: 5,
+      throttleMs: 1200,
+    };
+  }
+  if ('PeriodicUpdate' in mode) {
+    return {
+      mode: 'PeriodicUpdate',
+      intervalSecs: mode.PeriodicUpdate.interval_secs,
+      throttleMs: 1200,
+    };
+  }
+  return {
+    mode: 'LiveEdit',
+    intervalSecs: 5,
+    throttleMs: mode.LiveEdit.throttle_ms,
+  };
+}
+
+function buildStreamingMode(
+  mode: 'WaitForComplete' | 'PeriodicUpdate' | 'LiveEdit',
+  intervalSecs: number,
+  throttleMs: number,
+): StreamingMode {
+  if (mode === 'PeriodicUpdate') {
+    return { PeriodicUpdate: { interval_secs: intervalSecs } };
+  }
+  if (mode === 'LiveEdit') {
+    return { LiveEdit: { throttle_ms: throttleMs } };
+  }
+  return 'WaitForComplete';
+}
+
+function normalizeWorkspacePath(path: string): string {
+  return path.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+}
+
+function deriveWorkspaceLabel(path: string, displayTitle?: string | null): string | null {
+  const title = displayTitle?.trim();
+  if (title) {
+    return title;
+  }
+  const normalized = normalizeWorkspacePath(path);
+  const basename = normalized.split('/').filter(Boolean).slice(-1)[0];
+  return basename || null;
+}
+
+function formatRemoteSessionType(sessionType: RemoteSessionType | string): string {
+  if (typeof sessionType === 'string') {
+    return sessionType;
+  }
+  if ('Standalone' in sessionType) {
+    const { provider, model } = sessionType.Standalone;
+    return `Standalone(${provider}/${model})`;
+  }
+  if ('WorkflowRoot' in sessionType) {
+    const { active_mode, kernel_session_id } = sessionType.WorkflowRoot;
+    return `Workflow(${active_mode}/${kernel_session_id})`;
+  }
+  return 'Unknown';
+}
+
+function mergeImportedRoots(
+  existingRoots: RemoteWorkspaceEntry[],
+  workspacePath: string,
+  displayTitle?: string | null,
+): { nextRoots: RemoteWorkspaceEntry[]; added: number } {
+  const normalizedPath = normalizeWorkspacePath(workspacePath);
+  if (!normalizedPath) {
+    return { nextRoots: existingRoots, added: 0 };
+  }
+
+  const existingIndex = existingRoots.findIndex((root) => normalizeWorkspacePath(root.path) === normalizedPath);
+  if (existingIndex >= 0) {
+    const existing = existingRoots[existingIndex];
+    if (existing.label?.trim()) {
+      return { nextRoots: existingRoots, added: 0 };
+    }
+    const nextRoots = [...existingRoots];
+    nextRoots[existingIndex] = {
+      ...existing,
+      label: deriveWorkspaceLabel(normalizedPath, displayTitle),
+    };
+    return { nextRoots, added: 0 };
+  }
+
+  return {
+    nextRoots: [
+      ...existingRoots,
+      {
+        path: normalizedPath,
+        label: deriveWorkspaceLabel(normalizedPath, displayTitle),
+        default_provider: null,
+        default_model: null,
+      },
+    ],
+    added: 1,
+  };
+}
+
+function mergeSessionCatalogRoots(
+  existingRoots: RemoteWorkspaceEntry[],
+  currentWorkspacePath: string,
+  sessionCatalog: WorkflowSessionCatalogItem[],
+): { nextRoots: RemoteWorkspaceEntry[]; added: number; discovered: number } {
+  let nextRoots = existingRoots;
+  let added = 0;
+  let discovered = 0;
+
+  const candidates = [
+    currentWorkspacePath
+      ? {
+          workspacePath: currentWorkspacePath,
+          displayTitle: null,
+        }
+      : null,
+    ...sessionCatalog
+      .filter((session) => !!session.workspacePath?.trim())
+      .map((session) => ({
+        workspacePath: session.workspacePath as string,
+        displayTitle: session.displayTitle,
+      })),
+  ].filter((value): value is { workspacePath: string; displayTitle: string | null } => !!value);
+
+  for (const candidate of candidates) {
+    const normalizedPath = normalizeWorkspacePath(candidate.workspacePath);
+    if (!normalizedPath) {
+      continue;
+    }
+    discovered += 1;
+    const merged = mergeImportedRoots(nextRoots, normalizedPath, candidate.displayTitle);
+    nextRoots = merged.nextRoots;
+    added += merged.added;
+  }
+
+  return { nextRoots, added, discovered };
+}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -39,6 +192,9 @@ export function RemoteSection() {
     fetchAuditLog,
     clearError,
   } = useRemoteStore();
+  const workspacePath = useSettingsStore((state) => state.workspacePath);
+  const workflowSessionCatalog = useWorkflowKernelStore((state) => state.sessionCatalog);
+  const getSessionCatalogState = useWorkflowKernelStore((state) => state.getSessionCatalogState);
 
   // Local form state
   const [enabled, setEnabled] = useState(false);
@@ -52,8 +208,19 @@ export function RemoteSection() {
   const [chatIds, setChatIds] = useState<number[]>([]);
   const [newUserId, setNewUserId] = useState('');
   const [userIds, setUserIds] = useState<number[]>([]);
-  const [streamingMode, setStreamingMode] = useState<string>('WaitForComplete');
-  const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [allowedRoots, setAllowedRoots] = useState<RemoteWorkspaceEntry[]>([]);
+  const [newAllowedRootPath, setNewAllowedRootPath] = useState('');
+  const [newAllowedRootLabel, setNewAllowedRootLabel] = useState('');
+  const [newAllowedRootProvider, setNewAllowedRootProvider] = useState('');
+  const [newAllowedRootModel, setNewAllowedRootModel] = useState('');
+  const [streamingMode, setStreamingMode] = useState<'WaitForComplete' | 'PeriodicUpdate' | 'LiveEdit'>(
+    'WaitForComplete',
+  );
+  const [periodicIntervalSecs, setPeriodicIntervalSecs] = useState(5);
+  const [liveEditThrottleMs, setLiveEditThrottleMs] = useState(1200);
+  const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'warning' | 'error'; text: string } | null>(
+    null,
+  );
 
   // Load data on mount
   useEffect(() => {
@@ -69,6 +236,7 @@ export function RemoteSection() {
     if (remoteConfig) {
       setEnabled(remoteConfig.enabled);
       setAutoStart(remoteConfig.auto_start);
+      setAllowedRoots(remoteConfig.allowed_project_roots ?? []);
     }
   }, [remoteConfig]);
 
@@ -79,13 +247,10 @@ export function RemoteSection() {
       setHasAccessPassword(!!telegramConfig.access_password && telegramConfig.access_password !== '');
       setChatIds(telegramConfig.allowed_chat_ids);
       setUserIds(telegramConfig.allowed_user_ids);
-      if (typeof telegramConfig.streaming_mode === 'string') {
-        setStreamingMode(telegramConfig.streaming_mode);
-      } else if (telegramConfig.streaming_mode && 'PeriodicUpdate' in telegramConfig.streaming_mode) {
-        setStreamingMode('PeriodicUpdate');
-      } else if (telegramConfig.streaming_mode && 'LiveEdit' in telegramConfig.streaming_mode) {
-        setStreamingMode('LiveEdit');
-      }
+      const parsed = parseStreamingMode(telegramConfig.streaming_mode);
+      setStreamingMode(parsed.mode);
+      setPeriodicIntervalSecs(parsed.intervalSecs);
+      setLiveEditThrottleMs(parsed.throttleMs);
     }
   }, [telegramConfig]);
 
@@ -100,17 +265,23 @@ export function RemoteSection() {
   }, [gatewayStatus?.running, fetchGatewayStatus, fetchSessions]);
 
   const handleSaveGatewayConfig = useCallback(async () => {
-    const success = await saveConfig({ enabled, auto_start: autoStart });
-    if (success) {
-      setStatusMessage({ type: 'success', text: t('remote.saveSuccess', 'Configuration saved') });
+    const result = await saveConfig({ enabled, auto_start: autoStart, allowed_project_roots: allowedRoots });
+    if (result) {
+      setStatusMessage({
+        type: result.restart_required ? 'warning' : 'success',
+        text: result.restart_required
+          ? t('remote.saveRestartRequired', 'Configuration saved. Restart the gateway to apply all changes.')
+          : t('remote.saveApplied', 'Configuration applied'),
+      });
     }
-  }, [enabled, autoStart, saveConfig, t]);
+  }, [allowedRoots, autoStart, enabled, saveConfig, t]);
 
   const handleSaveTelegramConfig = useCallback(async () => {
     const request: UpdateTelegramConfigRequest = {
       allowed_chat_ids: chatIds,
       allowed_user_ids: userIds,
       require_password: requirePassword,
+      streaming_mode: buildStreamingMode(streamingMode, periodicIntervalSecs, liveEditThrottleMs),
     };
     if (botToken && botToken !== '***') {
       request.bot_token = botToken;
@@ -118,13 +289,29 @@ export function RemoteSection() {
     if (accessPassword && accessPassword !== '***') {
       request.access_password = accessPassword;
     }
-    const success = await saveTelegramConfig(request);
-    if (success) {
+    const result = await saveTelegramConfig(request);
+    if (result) {
       setBotToken('');
       setAccessPassword('');
-      setStatusMessage({ type: 'success', text: t('remote.saveSuccess', 'Configuration saved') });
+      setStatusMessage({
+        type: result.restart_required ? 'warning' : 'success',
+        text: result.restart_required
+          ? t('remote.saveRestartRequired', 'Configuration saved. Restart the gateway to apply all changes.')
+          : t('remote.saveApplied', 'Configuration applied'),
+      });
     }
-  }, [chatIds, userIds, requirePassword, botToken, accessPassword, saveTelegramConfig, t]);
+  }, [
+    accessPassword,
+    botToken,
+    chatIds,
+    liveEditThrottleMs,
+    periodicIntervalSecs,
+    requirePassword,
+    saveTelegramConfig,
+    streamingMode,
+    t,
+    userIds,
+  ]);
 
   const handleAddChatId = useCallback(() => {
     const id = parseInt(newChatId, 10);
@@ -156,6 +343,61 @@ export function RemoteSection() {
     [userIds],
   );
 
+  const handleAddAllowedRoot = useCallback(() => {
+    const path = newAllowedRootPath.trim();
+    if (!path || allowedRoots.some((root) => root.path === path)) {
+      return;
+    }
+    setAllowedRoots([
+      ...allowedRoots,
+      {
+        path,
+        label: newAllowedRootLabel.trim() || null,
+        default_provider: newAllowedRootProvider.trim() || null,
+        default_model: newAllowedRootModel.trim() || null,
+      },
+    ]);
+    setNewAllowedRootPath('');
+    setNewAllowedRootLabel('');
+    setNewAllowedRootProvider('');
+    setNewAllowedRootModel('');
+  }, [allowedRoots, newAllowedRootLabel, newAllowedRootModel, newAllowedRootPath, newAllowedRootProvider]);
+
+  const handleRemoveAllowedRoot = useCallback(
+    (value: string) => {
+      setAllowedRoots(allowedRoots.filter((root) => root.path !== value));
+    },
+    [allowedRoots],
+  );
+
+  const handleImportFromSessions = useCallback(async () => {
+    const latestCatalogState = await getSessionCatalogState();
+    const latestCatalog = latestCatalogState?.sessions ?? workflowSessionCatalog;
+    const { nextRoots, added, discovered } = mergeSessionCatalogRoots(allowedRoots, workspacePath, latestCatalog);
+    setAllowedRoots(nextRoots);
+    if (discovered === 0) {
+      setStatusMessage({
+        type: 'warning',
+        text: t('remote.config.importNoWorkspaces', 'No open workspaces available to import.'),
+      });
+      return;
+    }
+    if (added === 0) {
+      setStatusMessage({
+        type: 'warning',
+        text: t('remote.config.importNoNewWorkspaces', 'All open workspaces are already included.'),
+      });
+      return;
+    }
+    setStatusMessage({
+      type: 'success',
+      text: t('remote.config.importedWorkspaces', {
+        defaultValue: 'Imported {{count}} workspace(s) from session management.',
+        count: added,
+      }),
+    });
+  }, [allowedRoots, getSessionCatalogState, t, workflowSessionCatalog, workspacePath]);
+
   return (
     <div className="space-y-8">
       {/* Error Display */}
@@ -176,11 +418,15 @@ export function RemoteSection() {
             'flex items-center gap-2 p-3 rounded-lg text-sm',
             statusMessage.type === 'success'
               ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300'
-              : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300',
+              : statusMessage.type === 'warning'
+                ? 'bg-yellow-50 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-300'
+                : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300',
           )}
         >
           {statusMessage.type === 'success' ? (
             <CheckCircledIcon className="w-4 h-4 shrink-0" />
+          ) : statusMessage.type === 'warning' ? (
+            <CrossCircledIcon className="w-4 h-4 shrink-0" />
           ) : (
             <CrossCircledIcon className="w-4 h-4 shrink-0" />
           )}
@@ -198,15 +444,17 @@ export function RemoteSection() {
             <div className="flex items-center gap-2">
               <div className={clsx('w-3 h-3 rounded-full', gatewayStatus?.running ? 'bg-green-500' : 'bg-gray-400')} />
               <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                {gatewayStatus?.running
-                  ? t('remote.gateway.running', 'Running')
-                  : t('remote.gateway.stopped', 'Stopped')}
+                {gatewayStatus?.reconnecting
+                  ? t('remote.gateway.reconnecting', 'Reconnecting...')
+                  : gatewayStatus?.running
+                    ? t('remote.gateway.running', 'Running')
+                    : t('remote.gateway.stopped', 'Stopped')}
               </span>
             </div>
             <div className="flex gap-2">
               <button
                 onClick={() => startGateway()}
-                disabled={saving || gatewayStatus?.running}
+                disabled={saving || gatewayStatus?.running || gatewayStatus?.reconnecting}
                 className={clsx(
                   'px-3 py-1.5 rounded-md text-sm font-medium',
                   'bg-green-600 text-white hover:bg-green-700',
@@ -228,6 +476,11 @@ export function RemoteSection() {
               </button>
             </div>
           </div>
+          {gatewayStatus?.error && (
+            <div className="rounded-md bg-red-50 dark:bg-red-900/20 px-3 py-2 text-sm text-red-700 dark:text-red-300">
+              {gatewayStatus.error}
+            </div>
+          )}
           {gatewayStatus?.running && (
             <div className="grid grid-cols-3 gap-4 text-sm text-gray-600 dark:text-gray-400">
               <div>
@@ -249,6 +502,27 @@ export function RemoteSection() {
                   {t('remote.gateway.activeSessions', 'Active Sessions')}
                 </span>
                 <span className="font-mono">{gatewayStatus.active_remote_sessions}</span>
+              </div>
+            </div>
+          )}
+          {(gatewayStatus?.reconnecting || gatewayStatus?.last_error_at) && (
+            <div className="grid grid-cols-2 gap-4 text-sm text-gray-600 dark:text-gray-400">
+              <div>
+                <span className="block text-xs uppercase tracking-wide">
+                  {t('remote.gateway.reconnectAttempt', 'Reconnect attempt {{current}} of {{max}}', {
+                    current: gatewayStatus.reconnect_attempts ?? 0,
+                    max: 5,
+                  })}
+                </span>
+                <span className="font-mono">{gatewayStatus.reconnect_attempts ?? 0}</span>
+              </div>
+              <div>
+                <span className="block text-xs uppercase tracking-wide">
+                  {t('remote.gateway.lastErrorAt', 'Last Error')}
+                </span>
+                <span className="font-mono">
+                  {gatewayStatus.last_error_at ? new Date(gatewayStatus.last_error_at).toLocaleString() : '-'}
+                </span>
               </div>
             </div>
           )}
@@ -283,6 +557,115 @@ export function RemoteSection() {
               {t('remote.config.autoStart', 'Auto-start on launch')}
             </span>
           </label>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              {t('remote.config.allowedRoots', 'Allowed Project Roots')}
+            </label>
+            <div className="flex justify-end mb-2">
+              <button
+                onClick={() => void handleImportFromSessions()}
+                disabled={saving}
+                className={clsx(
+                  'px-3 py-1.5 rounded-lg text-sm font-medium',
+                  'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200',
+                  'hover:bg-gray-200 dark:hover:bg-gray-600',
+                  'disabled:opacity-50 disabled:cursor-not-allowed',
+                )}
+              >
+                {t('remote.config.importFromSessions', 'Import Open Workspaces')}
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-2 mb-2">
+              {allowedRoots.map((root) => (
+                <span
+                  key={root.path}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-gray-100 dark:bg-gray-700 text-sm"
+                >
+                  <span className="font-medium">
+                    {root.label?.trim() || root.path.split('/').filter(Boolean).slice(-1)[0] || root.path}
+                  </span>
+                  <span className="text-gray-500 dark:text-gray-400">{root.path}</span>
+                  {(root.default_provider || root.default_model) && (
+                    <span className="text-gray-500 dark:text-gray-400">
+                      {root.default_provider || '-'} / {root.default_model || '-'}
+                    </span>
+                  )}
+                  <button
+                    onClick={() => handleRemoveAllowedRoot(root.path)}
+                    className="text-gray-400 hover:text-red-500"
+                  >
+                    <CrossCircledIcon className="w-3 h-3" />
+                  </button>
+                </span>
+              ))}
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              <input
+                type="text"
+                value={newAllowedRootLabel}
+                onChange={(e) => setNewAllowedRootLabel(e.target.value)}
+                placeholder={t('remote.config.allowedRootsLabelPlaceholder', 'Workspace label (optional)')}
+                className={clsx(
+                  'px-3 py-2 rounded-lg text-sm',
+                  'bg-white dark:bg-gray-800',
+                  'border border-gray-300 dark:border-gray-600',
+                  'focus:outline-none focus:ring-2 focus:ring-primary-500',
+                )}
+              />
+              <input
+                type="text"
+                value={newAllowedRootPath}
+                onChange={(e) => setNewAllowedRootPath(e.target.value)}
+                placeholder={t('remote.config.allowedRootsPlaceholder', 'Absolute path...')}
+                className={clsx(
+                  'px-3 py-2 rounded-lg text-sm',
+                  'bg-white dark:bg-gray-800',
+                  'border border-gray-300 dark:border-gray-600',
+                  'focus:outline-none focus:ring-2 focus:ring-primary-500',
+                )}
+                onKeyDown={(e) => e.key === 'Enter' && handleAddAllowedRoot()}
+              />
+              <input
+                type="text"
+                value={newAllowedRootProvider}
+                onChange={(e) => setNewAllowedRootProvider(e.target.value)}
+                placeholder={t('remote.config.allowedRootsProviderPlaceholder', 'Default provider (optional)')}
+                className={clsx(
+                  'px-3 py-2 rounded-lg text-sm',
+                  'bg-white dark:bg-gray-800',
+                  'border border-gray-300 dark:border-gray-600',
+                  'focus:outline-none focus:ring-2 focus:ring-primary-500',
+                )}
+              />
+              <input
+                type="text"
+                value={newAllowedRootModel}
+                onChange={(e) => setNewAllowedRootModel(e.target.value)}
+                placeholder={t('remote.config.allowedRootsModelPlaceholder', 'Default model (optional)')}
+                className={clsx(
+                  'px-3 py-2 rounded-lg text-sm',
+                  'bg-white dark:bg-gray-800',
+                  'border border-gray-300 dark:border-gray-600',
+                  'focus:outline-none focus:ring-2 focus:ring-primary-500',
+                )}
+              />
+            </div>
+            <div className="flex justify-end mt-2">
+              <button
+                onClick={handleAddAllowedRoot}
+                aria-label={t('remote.config.addWorkspace', 'Add workspace')}
+                className="px-3 py-2 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600"
+              >
+                <PlusIcon className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              {t(
+                'remote.config.allowedRootsHint',
+                'Only these directories can be opened from remote commands. At least one path is required.',
+              )}
+            </p>
+          </div>
           <button
             onClick={handleSaveGatewayConfig}
             disabled={saving}
@@ -458,7 +841,7 @@ export function RemoteSection() {
             </label>
             <select
               value={streamingMode}
-              onChange={(e) => setStreamingMode(e.target.value)}
+              onChange={(e) => setStreamingMode(e.target.value as 'WaitForComplete' | 'PeriodicUpdate' | 'LiveEdit')}
               className={clsx(
                 'w-full px-3 py-2 rounded-lg text-sm',
                 'bg-white dark:bg-gray-800',
@@ -471,6 +854,44 @@ export function RemoteSection() {
               <option value="LiveEdit">{t('remote.telegram.modeLiveEdit', 'Live Edit')}</option>
             </select>
           </div>
+          {streamingMode === 'PeriodicUpdate' && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                {t('remote.telegram.periodicInterval', 'Update Interval (seconds)')}
+              </label>
+              <input
+                type="number"
+                min={1}
+                value={periodicIntervalSecs}
+                onChange={(e) => setPeriodicIntervalSecs(Math.max(1, parseInt(e.target.value || '1', 10)))}
+                className={clsx(
+                  'w-full px-3 py-2 rounded-lg text-sm',
+                  'bg-white dark:bg-gray-800',
+                  'border border-gray-300 dark:border-gray-600',
+                  'focus:outline-none focus:ring-2 focus:ring-primary-500',
+                )}
+              />
+            </div>
+          )}
+          {streamingMode === 'LiveEdit' && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                {t('remote.telegram.liveEditThrottle', 'Edit Throttle (ms)')}
+              </label>
+              <input
+                type="number"
+                min={100}
+                value={liveEditThrottleMs}
+                onChange={(e) => setLiveEditThrottleMs(Math.max(100, parseInt(e.target.value || '100', 10)))}
+                className={clsx(
+                  'w-full px-3 py-2 rounded-lg text-sm',
+                  'bg-white dark:bg-gray-800',
+                  'border border-gray-300 dark:border-gray-600',
+                  'focus:outline-none focus:ring-2 focus:ring-primary-500',
+                )}
+              />
+            </div>
+          )}
 
           <button
             onClick={handleSaveTelegramConfig}
@@ -505,7 +926,7 @@ export function RemoteSection() {
                 <div>
                   <div className="text-sm font-medium text-gray-700 dark:text-gray-300">Chat {session.chat_id}</div>
                   <div className="text-xs text-gray-500 dark:text-gray-400">
-                    Session: {session.local_session_id ?? 'N/A'} | Type: {session.session_type}
+                    Session: {session.local_session_id ?? 'N/A'} | Type: {formatRemoteSessionType(session.session_type)}
                     {session.project_path && <span className="ml-1">| Path: {session.project_path}</span>}
                   </div>
                 </div>

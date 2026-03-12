@@ -16,6 +16,7 @@ import {
   listRemoteSessions,
   disconnectRemoteSession,
   getRemoteAuditLog,
+  type ConfigUpdateResult,
   type GatewayStatus,
   type RemoteGatewayConfig,
   type TelegramAdapterConfig,
@@ -47,9 +48,9 @@ interface RemoteState {
   startGateway: () => Promise<boolean>;
   stopGateway: () => Promise<boolean>;
   fetchConfig: () => Promise<void>;
-  saveConfig: (config: UpdateRemoteConfigRequest) => Promise<boolean>;
+  saveConfig: (config: UpdateRemoteConfigRequest) => Promise<ConfigUpdateResult | null>;
   fetchTelegramConfig: () => Promise<void>;
-  saveTelegramConfig: (config: UpdateTelegramConfigRequest) => Promise<boolean>;
+  saveTelegramConfig: (config: UpdateTelegramConfigRequest) => Promise<ConfigUpdateResult | null>;
   fetchSessions: () => Promise<void>;
   disconnectSession: (chatId: number) => Promise<boolean>;
   fetchAuditLog: (limit?: number, offset?: number) => Promise<void>;
@@ -72,7 +73,7 @@ export const useRemoteStore = create<RemoteState>((set) => ({
       if (response.success && response.data) {
         set({ gatewayStatus: response.data });
       }
-    } catch (e) {
+    } catch {
       // Silently fail for status polling
     }
   },
@@ -140,7 +141,7 @@ export const useRemoteStore = create<RemoteState>((set) => ({
     set({ saving: true, error: null });
     try {
       const response = await updateRemoteConfig(config);
-      if (response.success) {
+      if (response.success && response.data) {
         // Refresh config
         const configResp = await getRemoteConfig();
         if (configResp.success && configResp.data) {
@@ -148,14 +149,14 @@ export const useRemoteStore = create<RemoteState>((set) => ({
         } else {
           set({ saving: false });
         }
-        return true;
+        return response.data;
       } else {
         set({ saving: false, error: response.error ?? 'Failed to save config' });
-        return false;
+        return null;
       }
     } catch (e) {
       set({ saving: false, error: e instanceof Error ? e.message : String(e) });
-      return false;
+      return null;
     }
   },
 
@@ -177,21 +178,21 @@ export const useRemoteStore = create<RemoteState>((set) => ({
     set({ saving: true, error: null });
     try {
       const response = await updateTelegramConfig(config);
-      if (response.success) {
+      if (response.success && response.data) {
         const tgResp = await getTelegramConfig();
         if (tgResp.success && tgResp.data) {
           set({ telegramConfig: tgResp.data, saving: false });
         } else {
           set({ saving: false });
         }
-        return true;
+        return response.data;
       } else {
         set({ saving: false, error: response.error ?? 'Failed to save Telegram config' });
-        return false;
+        return null;
       }
     } catch (e) {
       set({ saving: false, error: e instanceof Error ? e.message : String(e) });
-      return false;
+      return null;
     }
   },
 
@@ -201,7 +202,7 @@ export const useRemoteStore = create<RemoteState>((set) => ({
       if (response.success && response.data) {
         set({ remoteSessions: response.data });
       }
-    } catch (e) {
+    } catch {
       // Silently fail for sessions polling
     }
   },

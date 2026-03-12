@@ -5,15 +5,20 @@
 //! rate limiting, path sandboxing, and session lifecycle.
 
 use super::adapters::RemoteAdapter;
-use super::types::{RemoteError, RemoteResponse, RemoteSessionMapping, SessionType, StreamingMode};
+use super::types::{
+    RemoteActionButton, RemoteActionCard, RemoteError, RemoteResponse, RemoteSessionMapping,
+    SessionType, StreamingMode,
+};
 use crate::commands::proxy::resolve_provider_proxy;
 use crate::commands::standalone::{
     get_api_key_with_aliases, get_search_api_key_with_aliases, normalize_provider_name,
     provider_type_from_name,
 };
+use crate::models::settings::AppConfig;
 use crate::services::llm::{ProviderConfig, ProviderType};
 use crate::services::orchestrator::{OrchestratorConfig, OrchestratorService};
 use crate::services::streaming::UnifiedStreamEvent;
+use crate::services::workflow_kernel::{ChatRuntimeDispatch, WorkflowKernelState};
 use crate::storage::{ConfigService, Database, KeyringService};
 use rusqlite::params;
 use std::collections::HashMap;
@@ -37,10 +42,40 @@ pub struct BridgeServices {
     pub keyring: Arc<KeyringService>,
     /// Live orchestrator instances keyed by session_id
     pub orchestrators: Arc<RwLock<HashMap<String, Arc<OrchestratorService>>>>,
-    /// Allowed project paths (empty = allow all)
-    pub allowed_paths: Vec<PathBuf>,
-    /// Minimum interval (ms) between messages per chat (rate limiting)
-    pub rate_limit_interval_ms: u64,
+    /// Runtime-configurable values used by the bridge.
+    pub runtime_config: Arc<BridgeRuntimeConfig>,
+    /// Optional workflow kernel bridge for syncing remote chat executions.
+    pub workflow_kernel: Option<WorkflowKernelState>,
+}
+
+/// Runtime bridge configuration that can be updated without recreating the bridge.
+pub struct BridgeRuntimeConfig {
+    allowed_paths: RwLock<Vec<PathBuf>>,
+    rate_limit_interval_ms: RwLock<u64>,
+}
+
+impl BridgeRuntimeConfig {
+    pub fn new(allowed_paths: Vec<PathBuf>, rate_limit_interval_ms: u64) -> Self {
+        Self {
+            allowed_paths: RwLock::new(allowed_paths),
+            rate_limit_interval_ms: RwLock::new(rate_limit_interval_ms),
+        }
+    }
+
+    pub async fn allowed_paths(&self) -> Vec<PathBuf> {
+        self.allowed_paths.read().await.clone()
+    }
+
+    pub async fn set_allowed_paths(&self, allowed_paths: Vec<PathBuf>) {
+        *self.allowed_paths.write().await = allowed_paths;
+    }
+
+    pub fn rate_limit_interval_ms(&self) -> u64 {
+        self.rate_limit_interval_ms
+            .try_read()
+            .map(|guard| *guard)
+            .unwrap_or(0)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -242,6 +277,7 @@ impl SessionBridge {
         content: &str,
         streaming_mode: &StreamingMode,
         adapter: Option<&(dyn RemoteAdapter + '_)>,
+        workflow_session_id: Option<&str>,
     ) -> Result<RemoteResponse, RemoteError> {
         // Rate limit check
         self.check_rate_limit(chat_id)?;
@@ -291,6 +327,20 @@ impl SessionBridge {
 
         // Create channel for streaming events
         let (tx, rx) = mpsc::channel::<UnifiedStreamEvent>(100);
+        let run_id = uuid::Uuid::new_v4().to_string();
+
+        if let (Some(workflow_kernel), Some(root_session_id)) =
+            (svc.workflow_kernel.as_ref(), workflow_session_id)
+        {
+            let _ = workflow_kernel
+                .register_chat_runtime_dispatch(ChatRuntimeDispatch {
+                    session_id: root_session_id.to_string(),
+                    backend_kind: "standalone".to_string(),
+                    binding_session_id: session_id.clone(),
+                    run_id: Some(run_id.clone()),
+                })
+                .await;
+        }
 
         // Spawn execution
         let orch = orchestrator.clone();
@@ -299,14 +349,43 @@ impl SessionBridge {
 
         // Collect results based on streaming mode
         let result = match streaming_mode {
-            StreamingMode::WaitForComplete => self.collect_wait_for_complete(rx, exec_handle).await,
+            StreamingMode::WaitForComplete => {
+                self.collect_wait_for_complete(
+                    rx,
+                    exec_handle,
+                    chat_id,
+                    adapter,
+                    svc.workflow_kernel.as_ref(),
+                    workflow_session_id,
+                    &session_id,
+                )
+                .await
+            }
             StreamingMode::PeriodicUpdate { interval_secs } => {
-                self.collect_periodic_update(rx, exec_handle, chat_id, *interval_secs, adapter)
-                    .await
+                self.collect_periodic_update(
+                    rx,
+                    exec_handle,
+                    chat_id,
+                    *interval_secs,
+                    adapter,
+                    svc.workflow_kernel.as_ref(),
+                    workflow_session_id,
+                    &session_id,
+                )
+                .await
             }
             StreamingMode::LiveEdit { throttle_ms } => {
-                self.collect_live_edit(rx, exec_handle, chat_id, *throttle_ms, adapter)
-                    .await
+                self.collect_live_edit(
+                    rx,
+                    exec_handle,
+                    chat_id,
+                    *throttle_ms,
+                    adapter,
+                    svc.workflow_kernel.as_ref(),
+                    workflow_session_id,
+                    &session_id,
+                )
+                .await
             }
         };
 
@@ -343,7 +422,7 @@ impl SessionBridge {
         let svc = self.services.as_ref();
 
         // Validate and resolve project path
-        let resolved_path = self.validate_project_path(project_path, svc)?;
+        let resolved_path = self.validate_project_path(project_path, svc).await?;
 
         // Resolve provider / model
         let (canonical_provider, provider_type, resolved_model) =
@@ -515,7 +594,7 @@ impl SessionBridge {
         let interval_ms = self
             .services
             .as_ref()
-            .map(|s| s.rate_limit_interval_ms)
+            .map(|s| s.runtime_config.rate_limit_interval_ms())
             .unwrap_or(0);
         if interval_ms == 0 {
             return Ok(());
@@ -539,7 +618,7 @@ impl SessionBridge {
     }
 
     /// Validate and resolve a project path with sandbox checking.
-    fn validate_project_path(
+    async fn validate_project_path(
         &self,
         path: &str,
         svc: Option<&BridgeServices>,
@@ -573,20 +652,25 @@ impl SessionBridge {
 
         // Sandbox check
         if let Some(svc) = svc {
-            if !svc.allowed_paths.is_empty() {
-                let allowed = svc.allowed_paths.iter().any(|allowed| {
+            let allowed_paths = svc.runtime_config.allowed_paths().await;
+            if allowed_paths.is_empty() {
+                return Err(RemoteError::PathSandboxViolation(
+                    "No allowed project roots configured".to_string(),
+                ));
+            }
+
+            let allowed = allowed_paths.iter().any(|allowed| {
                     if let Ok(allowed_canonical) = allowed.canonicalize() {
                         canonical.starts_with(&allowed_canonical)
                     } else {
                         false
                     }
                 });
-                if !allowed {
-                    return Err(RemoteError::PathSandboxViolation(format!(
-                        "Path '{}' is outside allowed directories",
-                        canonical.display()
-                    )));
-                }
+            if !allowed {
+                return Err(RemoteError::PathSandboxViolation(format!(
+                    "Path '{}' is outside allowed directories",
+                    canonical.display()
+                )));
             }
         }
 
@@ -599,25 +683,63 @@ impl SessionBridge {
         provider: Option<&str>,
         model: Option<&str>,
     ) -> Result<(&'static str, ProviderType, String), RemoteError> {
-        let provider_str = provider.unwrap_or(DEFAULT_PROVIDER);
+        let config = ConfigService::new().ok().map(|svc| svc.get_config_clone());
+        Self::resolve_provider_model_from_app_config(provider, model, config.as_ref())
+    }
+
+    fn resolve_provider_model_from_app_config(
+        provider: Option<&str>,
+        model: Option<&str>,
+        config: Option<&AppConfig>,
+    ) -> Result<(&'static str, ProviderType, String), RemoteError> {
+        let configured_default_provider = config
+            .map(|cfg| cfg.default_provider.trim())
+            .filter(|value| !value.is_empty())
+            .unwrap_or(DEFAULT_PROVIDER);
+        let provider_str = provider
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(configured_default_provider);
         let canonical = normalize_provider_name(provider_str).ok_or_else(|| {
             RemoteError::ConfigError(format!("Unknown provider: '{}'", provider_str))
         })?;
         let provider_type = provider_type_from_name(canonical).ok_or_else(|| {
             RemoteError::ConfigError(format!("Cannot resolve provider type for: '{}'", canonical))
         })?;
-        let resolved_model = model.unwrap_or(DEFAULT_MODEL).to_string();
+        let resolved_model = model
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+            .or_else(|| {
+                config.and_then(|cfg| {
+                    let provider_model = cfg.model_for_provider(canonical);
+                    (!provider_model.trim().is_empty()).then_some(provider_model)
+                })
+            })
+            .or_else(|| {
+                config
+                    .map(|cfg| cfg.default_model.trim().to_string())
+                    .filter(|value| !value.is_empty())
+            })
+            .unwrap_or_else(|| DEFAULT_MODEL.to_string());
         Ok((canonical, provider_type, resolved_model))
     }
 
     /// Resolve base_url for a provider from DB settings.
     fn resolve_base_url(&self, canonical_provider: &str) -> Option<String> {
         let key = format!("provider_{}_base_url", canonical_provider);
-        self.db
+        let db_value = self
+            .db
             .get_setting(&key)
             .ok()
             .flatten()
-            .filter(|url| !url.is_empty())
+            .filter(|url| !url.is_empty());
+        if db_value.is_some() {
+            return db_value;
+        }
+        ConfigService::new()
+            .ok()
+            .and_then(|svc| svc.get_config().provider_base_url(canonical_provider))
     }
 
     /// Get or lazily rebuild orchestrator for a session.
@@ -652,6 +774,12 @@ impl SessionBridge {
                 let canonical = normalize_provider_name(provider).unwrap_or("anthropic");
                 let pt = provider_type_from_name(canonical).unwrap_or(ProviderType::Anthropic);
                 (canonical, pt, model.clone())
+            }
+            SessionType::WorkflowRoot { .. } => {
+                return Err(RemoteError::ConfigError(
+                    "Workflow-backed remote sessions are not yet restorable through SessionBridge"
+                        .to_string(),
+                ));
             }
             SessionType::ClaudeCode => {
                 return Err(RemoteError::ConfigError(
@@ -776,6 +904,17 @@ impl SessionBridge {
             .join("analysis-runs")
     }
 
+    pub async fn update_allowed_paths(
+        &self,
+        allowed_paths: Vec<PathBuf>,
+    ) -> Result<(), RemoteError> {
+        let svc = self.services.as_ref().ok_or_else(|| {
+            RemoteError::ConfigError("Bridge services not configured".to_string())
+        })?;
+        svc.runtime_config.set_allowed_paths(allowed_paths).await;
+        Ok(())
+    }
+
     // -----------------------------------------------------------------------
     // Streaming mode collectors
     // -----------------------------------------------------------------------
@@ -785,12 +924,24 @@ impl SessionBridge {
         &self,
         mut rx: mpsc::Receiver<UnifiedStreamEvent>,
         exec_handle: tokio::task::JoinHandle<crate::services::orchestrator::ExecutionResult>,
+        chat_id: i64,
+        adapter: Option<&(dyn RemoteAdapter + '_)>,
+        workflow_kernel: Option<&WorkflowKernelState>,
+        workflow_session_id: Option<&str>,
+        binding_session_id: &str,
     ) -> Result<RemoteResponse, RemoteError> {
         let mut text = String::new();
         let mut thinking = String::new();
         let mut tool_summaries = Vec::new();
 
         while let Some(event) = rx.recv().await {
+            Self::sync_workflow_chat_event(
+                workflow_kernel,
+                workflow_session_id,
+                binding_session_id,
+                &event,
+            )
+            .await;
             match event {
                 UnifiedStreamEvent::TextDelta { content } => text.push_str(&content),
                 UnifiedStreamEvent::TextReplace { content } => text = content,
@@ -807,6 +958,27 @@ impl SessionBridge {
                         tool_name,
                         truncate_str(&arguments, 100)
                     ));
+                }
+                UnifiedStreamEvent::ToolPermissionRequest {
+                    request_id,
+                    tool_name,
+                    arguments,
+                    risk,
+                    ..
+                } => {
+                    if let Some(adapter) = adapter {
+                        let _ = adapter
+                            .send_action_card(
+                                chat_id,
+                                &Self::build_permission_request_card(
+                                    &request_id,
+                                    &tool_name,
+                                    &risk,
+                                    &arguments,
+                                ),
+                            )
+                            .await;
+                    }
                 }
                 UnifiedStreamEvent::Error { message, .. } => {
                     return Err(RemoteError::ExecutionFailed(message));
@@ -867,6 +1039,9 @@ impl SessionBridge {
         chat_id: i64,
         interval_secs: u32,
         adapter: Option<&(dyn RemoteAdapter + '_)>,
+        workflow_kernel: Option<&WorkflowKernelState>,
+        workflow_session_id: Option<&str>,
+        binding_session_id: &str,
     ) -> Result<RemoteResponse, RemoteError> {
         let mut text = String::new();
         let mut thinking = String::new();
@@ -875,6 +1050,13 @@ impl SessionBridge {
         let interval = std::time::Duration::from_secs(interval_secs as u64);
 
         while let Some(event) = rx.recv().await {
+            Self::sync_workflow_chat_event(
+                workflow_kernel,
+                workflow_session_id,
+                binding_session_id,
+                &event,
+            )
+            .await;
             match event {
                 UnifiedStreamEvent::TextDelta { content } => text.push_str(&content),
                 UnifiedStreamEvent::TextReplace { content } => text = content,
@@ -891,6 +1073,27 @@ impl SessionBridge {
                         tool_name,
                         truncate_str(&arguments, 100)
                     ));
+                }
+                UnifiedStreamEvent::ToolPermissionRequest {
+                    request_id,
+                    tool_name,
+                    arguments,
+                    risk,
+                    ..
+                } => {
+                    if let Some(adapter) = adapter {
+                        let _ = adapter
+                            .send_action_card(
+                                chat_id,
+                                &Self::build_permission_request_card(
+                                    &request_id,
+                                    &tool_name,
+                                    &risk,
+                                    &arguments,
+                                ),
+                            )
+                            .await;
+                    }
                 }
                 UnifiedStreamEvent::Error { message, .. } => {
                     return Err(RemoteError::ExecutionFailed(message));
@@ -958,6 +1161,9 @@ impl SessionBridge {
         chat_id: i64,
         throttle_ms: u64,
         adapter: Option<&(dyn RemoteAdapter + '_)>,
+        workflow_kernel: Option<&WorkflowKernelState>,
+        workflow_session_id: Option<&str>,
+        binding_session_id: &str,
     ) -> Result<RemoteResponse, RemoteError> {
         let mut text = String::new();
         let mut thinking = String::new();
@@ -967,6 +1173,13 @@ impl SessionBridge {
         let throttle = std::time::Duration::from_millis(throttle_ms);
 
         while let Some(event) = rx.recv().await {
+            Self::sync_workflow_chat_event(
+                workflow_kernel,
+                workflow_session_id,
+                binding_session_id,
+                &event,
+            )
+            .await;
             match event {
                 UnifiedStreamEvent::TextDelta { content } => text.push_str(&content),
                 UnifiedStreamEvent::TextReplace { content } => text = content,
@@ -983,6 +1196,27 @@ impl SessionBridge {
                         tool_name,
                         truncate_str(&arguments, 100)
                     ));
+                }
+                UnifiedStreamEvent::ToolPermissionRequest {
+                    request_id,
+                    tool_name,
+                    arguments,
+                    risk,
+                    ..
+                } => {
+                    if let Some(adapter) = adapter {
+                        let _ = adapter
+                            .send_action_card(
+                                chat_id,
+                                &Self::build_permission_request_card(
+                                    &request_id,
+                                    &tool_name,
+                                    &risk,
+                                    &arguments,
+                                ),
+                            )
+                            .await;
+                    }
                 }
                 UnifiedStreamEvent::Error { message, .. } => {
                     return Err(RemoteError::ExecutionFailed(message));
@@ -1068,6 +1302,54 @@ impl SessionBridge {
             already_sent: true,
         })
     }
+
+    fn build_permission_request_card(
+        request_id: &str,
+        tool_name: &str,
+        risk: &str,
+        arguments: &str,
+    ) -> RemoteActionCard {
+        RemoteActionCard {
+            title: "Permission Request".to_string(),
+            body: format!(
+                "Tool: {tool_name}\nRisk: {risk}\nArguments: {}",
+                truncate_str(arguments, 500)
+            ),
+            actions: vec![
+                RemoteActionButton {
+                    id: format!("remote:approval:allow-once:{request_id}"),
+                    label: "Approve Once".to_string(),
+                    style: None,
+                },
+                RemoteActionButton {
+                    id: format!("remote:approval:always-allow:{request_id}"),
+                    label: "Always Allow".to_string(),
+                    style: None,
+                },
+                RemoteActionButton {
+                    id: format!("remote:approval:deny:{request_id}"),
+                    label: "Deny".to_string(),
+                    style: None,
+                },
+            ],
+            metadata: HashMap::new(),
+            attachment_refs: Vec::new(),
+        }
+    }
+
+    async fn sync_workflow_chat_event(
+        workflow_kernel: Option<&WorkflowKernelState>,
+        workflow_session_id: Option<&str>,
+        binding_session_id: &str,
+        event: &UnifiedStreamEvent,
+    ) {
+        if workflow_session_id.is_none() {
+            return;
+        }
+        if let Some(kernel) = workflow_kernel {
+            let _ = kernel.sync_chat_runtime_event(binding_session_id, event).await;
+        }
+    }
 }
 
 /// Truncate a string to a maximum length, appending "..." if truncated.
@@ -1082,6 +1364,10 @@ fn truncate_str(s: &str, max_len: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn runtime_config(allowed_paths: Vec<PathBuf>, rate_limit_interval_ms: u64) -> Arc<BridgeRuntimeConfig> {
+        Arc::new(BridgeRuntimeConfig::new(allowed_paths, rate_limit_interval_ms))
+    }
 
     #[tokio::test]
     async fn test_session_bridge_new() {
@@ -1133,42 +1419,44 @@ mod tests {
         let services = BridgeServices {
             keyring: Arc::new(KeyringService::new()),
             orchestrators: Arc::new(RwLock::new(HashMap::new())),
-            allowed_paths: vec![PathBuf::from("/tmp")],
-            rate_limit_interval_ms: 0,
+            runtime_config: runtime_config(vec![PathBuf::from("/tmp")], 0),
+            workflow_kernel: None,
         };
         let bridge = SessionBridge::new_with_services(db, services);
 
         // /tmp should be allowed
-        let result = bridge.validate_project_path("/tmp", bridge.services.as_ref());
+        let result = bridge.validate_project_path("/tmp", bridge.services.as_ref()).await;
         assert!(result.is_ok());
 
         // /etc should be denied (if it exists)
         if std::path::Path::new("/etc").exists() {
-            let result = bridge.validate_project_path("/etc", bridge.services.as_ref());
+            let result = bridge.validate_project_path("/etc", bridge.services.as_ref()).await;
             assert!(matches!(result, Err(RemoteError::PathSandboxViolation(_))));
         }
     }
 
     #[tokio::test]
-    async fn test_path_sandbox_empty_allows_all() {
+    async fn test_path_sandbox_empty_requires_configuration() {
         let db = Arc::new(Database::new_in_memory().unwrap());
         let services = BridgeServices {
             keyring: Arc::new(KeyringService::new()),
             orchestrators: Arc::new(RwLock::new(HashMap::new())),
-            allowed_paths: vec![], // Empty = allow all
-            rate_limit_interval_ms: 0,
+            runtime_config: runtime_config(vec![], 0),
+            workflow_kernel: None,
         };
         let bridge = SessionBridge::new_with_services(db, services);
 
-        let result = bridge.validate_project_path("/tmp", bridge.services.as_ref());
-        assert!(result.is_ok());
+        let result = bridge.validate_project_path("/tmp", bridge.services.as_ref()).await;
+        assert!(matches!(result, Err(RemoteError::PathSandboxViolation(_))));
     }
 
-    #[test]
-    fn test_path_nonexistent() {
+    #[tokio::test]
+    async fn test_path_nonexistent() {
         let db = Arc::new(Database::new_in_memory().unwrap());
         let bridge = SessionBridge::new(db);
-        let result = bridge.validate_project_path("/nonexistent_path_xyz_123", None);
+        let result = bridge
+            .validate_project_path("/nonexistent_path_xyz_123", None)
+            .await;
         assert!(matches!(result, Err(RemoteError::ConfigError(_))));
     }
 
@@ -1178,8 +1466,8 @@ mod tests {
         let services = BridgeServices {
             keyring: Arc::new(KeyringService::new()),
             orchestrators: Arc::new(RwLock::new(HashMap::new())),
-            allowed_paths: vec![],
-            rate_limit_interval_ms: 5000, // 5 second interval
+            runtime_config: runtime_config(vec![], 5000),
+            workflow_kernel: None,
         };
         let bridge = SessionBridge::new_with_services(db, services);
 
@@ -1196,31 +1484,69 @@ mod tests {
 
     #[test]
     fn test_resolve_provider_model_default() {
-        let db = Arc::new(Database::new_in_memory().unwrap());
-        let bridge = SessionBridge::new(db);
-        let (canonical, pt, model) = bridge.resolve_provider_model(None, None).unwrap();
+        let config = AppConfig::default();
+        let (canonical, pt, model) =
+            SessionBridge::resolve_provider_model_from_app_config(None, None, Some(&config))
+                .unwrap();
         assert_eq!(canonical, "anthropic");
         assert_eq!(pt, ProviderType::Anthropic);
-        assert_eq!(model, DEFAULT_MODEL);
+        assert_eq!(model, config.default_model);
     }
 
     #[test]
     fn test_resolve_provider_model_explicit() {
-        let db = Arc::new(Database::new_in_memory().unwrap());
-        let bridge = SessionBridge::new(db);
-        let (canonical, pt, model) = bridge
-            .resolve_provider_model(Some("openai"), Some("gpt-4"))
-            .unwrap();
+        let config = AppConfig::default();
+        let (canonical, pt, model) = SessionBridge::resolve_provider_model_from_app_config(
+            Some("openai"),
+            Some("gpt-4"),
+            Some(&config),
+        )
+        .unwrap();
         assert_eq!(canonical, "openai");
         assert_eq!(pt, ProviderType::OpenAI);
         assert_eq!(model, "gpt-4");
     }
 
     #[test]
+    fn test_resolve_provider_model_uses_configured_default_provider() {
+        let mut config = AppConfig::default();
+        config.default_provider = "minimax".to_string();
+        config.default_model = "MiniMax-M2.5".to_string();
+        config
+            .model_by_provider
+            .insert("minimax".to_string(), "MiniMax-M2.5".to_string());
+        let (canonical, pt, model) =
+            SessionBridge::resolve_provider_model_from_app_config(None, None, Some(&config))
+                .unwrap();
+        assert_eq!(canonical, "minimax");
+        assert_eq!(pt, ProviderType::Minimax);
+        assert_eq!(model, "MiniMax-M2.5");
+    }
+
+    #[test]
+    fn test_resolve_provider_model_uses_provider_specific_model_from_config() {
+        let mut config = AppConfig::default();
+        config
+            .model_by_provider
+            .insert("openai".to_string(), "gpt-4.1".to_string());
+        let (canonical, pt, model) = SessionBridge::resolve_provider_model_from_app_config(
+            Some("openai"),
+            None,
+            Some(&config),
+        )
+        .unwrap();
+        assert_eq!(canonical, "openai");
+        assert_eq!(pt, ProviderType::OpenAI);
+        assert_eq!(model, "gpt-4.1");
+    }
+
+    #[test]
     fn test_resolve_provider_model_unknown() {
-        let db = Arc::new(Database::new_in_memory().unwrap());
-        let bridge = SessionBridge::new(db);
-        let result = bridge.resolve_provider_model(Some("unknown_provider"), None);
+        let result = SessionBridge::resolve_provider_model_from_app_config(
+            Some("unknown_provider"),
+            None,
+            None,
+        );
         assert!(matches!(result, Err(RemoteError::ConfigError(_))));
     }
 
@@ -1306,7 +1632,7 @@ mod tests {
         let bridge = SessionBridge::new(db);
         let _ = bridge.create_session(123, 456, "/tmp", None, None).await;
         let result = bridge
-            .send_message(123, "hello", &StreamingMode::WaitForComplete, None)
+            .send_message(123, "hello", &StreamingMode::WaitForComplete, None, None)
             .await;
         // Should fail because no services are configured
         assert!(matches!(result, Err(RemoteError::ConfigError(_))));
@@ -1318,12 +1644,12 @@ mod tests {
         let services = BridgeServices {
             keyring: Arc::new(KeyringService::new()),
             orchestrators: Arc::new(RwLock::new(HashMap::new())),
-            allowed_paths: vec![],
-            rate_limit_interval_ms: 0,
+            runtime_config: runtime_config(vec![], 0),
+            workflow_kernel: None,
         };
         let bridge = SessionBridge::new_with_services(db, services);
         let result = bridge
-            .send_message(123, "hello", &StreamingMode::WaitForComplete, None)
+            .send_message(123, "hello", &StreamingMode::WaitForComplete, None, None)
             .await;
         assert!(matches!(result, Err(RemoteError::NoActiveSession)));
     }

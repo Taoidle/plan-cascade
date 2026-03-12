@@ -1099,6 +1099,8 @@
     "save": "Save",
     "saving": "Saving...",
     "saveSuccess": "Configuration saved",
+    "saveApplied": "Configuration applied",
+    "saveRestartRequired": "Configuration saved. Restart the gateway to apply all changes.",
     "dismiss": "Dismiss",
 
     "gateway": {
@@ -1112,6 +1114,7 @@
       "activeSessions": "Active Sessions",
       "reconnecting": "Reconnecting...",
       "reconnectAttempt": "Reconnect attempt {{current}} of {{max}}",
+      "lastErrorAt": "Last Error",
       "reconnectFailed": "Reconnect failed after {{max}} attempts",
       "reconnectSuccess": "Reconnected successfully",
       "autoStartSuccess": "Gateway auto-started on launch",
@@ -1124,7 +1127,14 @@
     "config": {
       "title": "Gateway Configuration",
       "enabled": "Enable Remote Control",
-      "autoStart": "Auto-start on launch"
+      "autoStart": "Auto-start on launch",
+      "allowedRoots": "Allowed Project Roots",
+      "allowedRootsPlaceholder": "Absolute path...",
+      "allowedRootsHint": "Only these directories can be opened from remote commands. At least one path is required.",
+      "importFromSessions": "Import Open Workspaces",
+      "importNoWorkspaces": "No open workspaces available to import.",
+      "importNoNewWorkspaces": "All open workspaces are already included.",
+      "importedWorkspaces": "Imported {{count}} workspace(s) from session management."
     },
 
     "telegram": {
@@ -1146,6 +1156,8 @@
       "modeWaitForComplete": "Wait for Complete",
       "modePeriodicUpdate": "Periodic Update",
       "modeLiveEdit": "Live Edit",
+      "periodicInterval": "Update Interval (seconds)",
+      "liveEditThrottle": "Edit Throttle (ms)",
       "allowedPaths": "Allowed Project Paths"
     },
 
