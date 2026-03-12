@@ -35,6 +35,8 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
     setAutoPanelHoverEnabled,
     closeToBackgroundEnabled,
     setCloseToBackgroundEnabled,
+    worktreeAutoCleanupOnSessionDelete,
+    setWorktreeAutoCleanupOnSessionDelete,
     knowledgeAutoEnsureDocsCollection,
     setKnowledgeAutoEnsureDocsCollection,
     kbQueryRunsV2,
@@ -366,6 +368,38 @@ export function GeneralSection({ onCloseDialog }: GeneralSectionProps = {}) {
           <div>
             <div className="font-medium text-gray-900 dark:text-white text-sm">{t('general.backgroundRun.enable')}</div>
             <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">{t(backgroundBehaviorDescriptionKey)}</div>
+          </div>
+        </label>
+      </section>
+
+      <section className="space-y-4">
+        <h3 className="text-sm font-medium text-gray-900 dark:text-white">
+          {t('general.worktreeLifecycle.title', { defaultValue: 'Worktree Lifecycle' })}
+        </h3>
+        <label
+          className={clsx(
+            'flex items-start gap-4 p-4 rounded-lg border cursor-pointer',
+            'transition-colors',
+            'border-gray-200 dark:border-gray-700',
+            'hover:bg-gray-50 dark:hover:bg-gray-800',
+          )}
+        >
+          <input
+            type="checkbox"
+            checked={worktreeAutoCleanupOnSessionDelete}
+            onChange={(e) => setWorktreeAutoCleanupOnSessionDelete(e.target.checked)}
+            className="mt-1 text-primary-600"
+          />
+          <div>
+            <div className="font-medium text-gray-900 dark:text-white text-sm">
+              {t('general.worktreeLifecycle.autoCleanup', { defaultValue: 'Auto-clean managed worktrees on delete' })}
+            </div>
+            <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+              {t('general.worktreeLifecycle.autoCleanupHelp', {
+                defaultValue:
+                  'When enabled, deleting a workflow session will default to deleting its managed worktree under ~/.plan-cascade/worktrees.',
+              })}
+            </div>
           </div>
         </label>
       </section>

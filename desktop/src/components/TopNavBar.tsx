@@ -6,7 +6,7 @@
  * Replaces the vertical IconRail for a more space-efficient layout.
  */
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
@@ -57,9 +57,11 @@ const MODE_ICONS: Record<Mode, typeof LightningBoltIcon> = {
 
 interface TopNavBarProps {
   onOpenCommandPalette: () => void;
+  centerSlot?: ReactNode;
+  actionsSlot?: ReactNode;
 }
 
-export function TopNavBar({ onOpenCommandPalette }: TopNavBarProps) {
+export function TopNavBar({ onOpenCommandPalette, centerSlot, actionsSlot }: TopNavBarProps) {
   const { t } = useTranslation();
   const { mode, setMode } = useModeStore();
   const { status } = useExecutionStore();
@@ -110,7 +112,7 @@ export function TopNavBar({ onOpenCommandPalette }: TopNavBarProps) {
     <Tooltip.Provider delayDuration={300}>
       <header
         className={clsx(
-          'shrink-0 flex items-center justify-between h-10 px-3',
+          'shrink-0 flex items-center gap-3 h-10 px-3',
           'border-b border-gray-200 dark:border-gray-800',
           'bg-white dark:bg-gray-900',
         )}
@@ -238,8 +240,11 @@ export function TopNavBar({ onOpenCommandPalette }: TopNavBarProps) {
           {isRunning && <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />}
         </div>
 
+        <div className="min-w-0 flex-1">{centerSlot ?? null}</div>
+
         {/* Right: Search + Settings */}
         <div className="flex items-center gap-1">
+          {actionsSlot ?? null}
           <Tooltip.Root>
             <Tooltip.Trigger asChild>
               <button

@@ -4,6 +4,60 @@
 
 use serde::{Deserialize, Serialize};
 
+fn now_rfc3339() -> String {
+    chrono::Utc::now().to_rfc3339()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum WorktreeRuntimeKind {
+    #[default]
+    Managed,
+    Legacy,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum WorktreeCleanupPolicy {
+    #[default]
+    Manual,
+    DeleteOnSessionDelete,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PullRequestState {
+    Draft,
+    #[default]
+    Open,
+    Merged,
+    Closed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ForgeProvider {
+    Github,
+    Gitlab,
+    Gitea,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestInfo {
+    pub provider: Option<ForgeProvider>,
+    pub remote_name: Option<String>,
+    pub base_branch: Option<String>,
+    pub head_branch: Option<String>,
+    pub title: Option<String>,
+    pub body: Option<String>,
+    pub url: Option<String>,
+    pub number: Option<u64>,
+    pub state: Option<PullRequestState>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
 /// Status of a worktree
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -75,6 +129,27 @@ pub struct Worktree {
     pub error: Option<String>,
     /// Associated planning config
     pub planning_config: Option<PlanningConfig>,
+    /// Stable repo fingerprint for managed worktrees
+    #[serde(default)]
+    pub repo_id: Option<String>,
+    /// Root repository path that owns this worktree
+    #[serde(default)]
+    pub root_path: Option<String>,
+    /// Session currently bound to this worktree
+    #[serde(default)]
+    pub session_id: Option<String>,
+    /// Whether this worktree is managed under ~/.plan-cascade/worktrees
+    #[serde(default)]
+    pub runtime_kind: WorktreeRuntimeKind,
+    /// Cleanup behavior for session-bound worktrees
+    #[serde(default)]
+    pub cleanup_policy: WorktreeCleanupPolicy,
+    /// Optional PR metadata tracked for this worktree
+    #[serde(default)]
+    pub pr_info: Option<PullRequestInfo>,
+    /// Optional display label shown in session/runtime UIs
+    #[serde(default)]
+    pub display_label: Option<String>,
 }
 
 impl Worktree {
@@ -98,6 +173,13 @@ impl Worktree {
             updated_at: now,
             error: None,
             planning_config: None,
+            repo_id: None,
+            root_path: None,
+            session_id: None,
+            runtime_kind: WorktreeRuntimeKind::Managed,
+            cleanup_policy: WorktreeCleanupPolicy::Manual,
+            pr_info: None,
+            display_label: None,
         }
     }
 
@@ -111,7 +193,7 @@ impl Worktree {
     pub fn set_error(&mut self, message: impl Into<String>) {
         self.status = WorktreeStatus::Error;
         self.error = Some(message.into());
-        self.updated_at = chrono::Utc::now().to_rfc3339();
+        self.updated_at = now_rfc3339();
     }
 }
 
@@ -209,6 +291,147 @@ pub struct CreateWorktreeRequest {
     /// Execution mode (auto, manual)
     #[serde(default = "default_execution_mode")]
     pub execution_mode: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateManagedWorktreeRequest {
+    pub session_id: String,
+    pub task_name: String,
+    #[serde(default)]
+    pub branch_name: Option<String>,
+    pub target_branch: String,
+    #[serde(default)]
+    pub display_label: Option<String>,
+    #[serde(default)]
+    pub cleanup_policy: WorktreeCleanupPolicy,
+    #[serde(default)]
+    pub prd_path: Option<String>,
+    #[serde(default = "default_execution_mode")]
+    pub execution_mode: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionWorktreeRuntimeBinding {
+    pub session_id: String,
+    pub repo_id: String,
+    pub root_path: String,
+    pub runtime_path: String,
+    pub worktree_id: String,
+    pub branch: String,
+    pub target_branch: String,
+    pub runtime_kind: WorktreeRuntimeKind,
+    pub cleanup_policy: WorktreeCleanupPolicy,
+    #[serde(default)]
+    pub display_label: Option<String>,
+    #[serde(default)]
+    pub pr_info: Option<PullRequestInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManagedWorktreeMetadata {
+    pub version: u32,
+    pub worktree_id: String,
+    pub repo_id: String,
+    pub root_path: String,
+    pub runtime_path: String,
+    pub branch: String,
+    pub target_branch: String,
+    pub session_id: String,
+    pub display_label: Option<String>,
+    #[serde(default)]
+    pub cleanup_policy: WorktreeCleanupPolicy,
+    #[serde(default)]
+    pub pr_info: Option<PullRequestInfo>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl ManagedWorktreeMetadata {
+    pub fn new(
+        worktree_id: impl Into<String>,
+        repo_id: impl Into<String>,
+        root_path: impl Into<String>,
+        runtime_path: impl Into<String>,
+        branch: impl Into<String>,
+        target_branch: impl Into<String>,
+        session_id: impl Into<String>,
+    ) -> Self {
+        let now = now_rfc3339();
+        Self {
+            version: 1,
+            worktree_id: worktree_id.into(),
+            repo_id: repo_id.into(),
+            root_path: root_path.into(),
+            runtime_path: runtime_path.into(),
+            branch: branch.into(),
+            target_branch: target_branch.into(),
+            session_id: session_id.into(),
+            display_label: None,
+            cleanup_policy: WorktreeCleanupPolicy::Manual,
+            pr_info: None,
+            created_at: now.clone(),
+            updated_at: now,
+        }
+    }
+
+    pub fn touch(&mut self) {
+        self.updated_at = now_rfc3339();
+    }
+
+    pub fn to_runtime_binding(&self, runtime_kind: WorktreeRuntimeKind) -> SessionWorktreeRuntimeBinding {
+        SessionWorktreeRuntimeBinding {
+            session_id: self.session_id.clone(),
+            repo_id: self.repo_id.clone(),
+            root_path: self.root_path.clone(),
+            runtime_path: self.runtime_path.clone(),
+            worktree_id: self.worktree_id.clone(),
+            branch: self.branch.clone(),
+            target_branch: self.target_branch.clone(),
+            runtime_kind,
+            cleanup_policy: self.cleanup_policy,
+            display_label: self.display_label.clone(),
+            pr_info: self.pr_info.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreparePullRequestResult {
+    pub worktree_id: String,
+    pub repo_id: String,
+    pub forge_provider: ForgeProvider,
+    pub remote_name: String,
+    pub remote_url: String,
+    pub head_branch: String,
+    pub base_branch: String,
+    pub compare_url: String,
+    pub create_url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatePullRequestRequest {
+    pub worktree_id: String,
+    pub provider: ForgeProvider,
+    pub remote_name: String,
+    pub title: String,
+    pub body: String,
+    pub draft: bool,
+    pub base_branch: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatePullRequestResult {
+    pub worktree_id: String,
+    pub provider: ForgeProvider,
+    pub url: String,
+    pub number: Option<u64>,
+    pub state: PullRequestState,
 }
 
 fn default_execution_mode() -> String {

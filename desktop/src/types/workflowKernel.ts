@@ -20,6 +20,7 @@ export type WorkflowStatus = 'active' | 'completed' | 'failed' | 'cancelled' | '
 export type WorkflowSessionKind = 'simple_root';
 
 export type WorkflowBackgroundState = 'foreground' | 'background_idle' | 'background_running' | 'interrupted';
+export type WorkflowRuntimeKind = 'main' | 'managed_worktree' | 'legacy_worktree';
 
 export type ChatLifecyclePhase =
   | 'ready'
@@ -285,6 +286,7 @@ export interface WorkflowSession {
   sessionId: string;
   sessionKind: WorkflowSessionKind;
   displayTitle: string;
+  runtime?: SessionRuntimeInfo;
   workspacePath: string | null;
   status: WorkflowStatus;
   activeMode: WorkflowMode;
@@ -333,6 +335,7 @@ export interface WorkflowSessionCatalogItem {
   sessionId: string;
   sessionKind: WorkflowSessionKind;
   displayTitle: string;
+  runtime?: SessionRuntimeInfo;
   workspacePath: string | null;
   activeMode: WorkflowMode;
   status: WorkflowStatus;
@@ -412,4 +415,17 @@ export interface WorkflowKernelUpdatedEvent {
   sessionState: WorkflowSessionState;
   revision: number;
   source: string;
+}
+
+export interface SessionRuntimeInfo {
+  rootPath: string | null;
+  runtimePath: string | null;
+  runtimeKind: WorkflowRuntimeKind;
+  displayLabel?: string | null;
+  branch?: string | null;
+  targetBranch?: string | null;
+  managedWorktreeId?: string | null;
+  legacy: boolean;
+  runtimeStatus?: import('./git').WorktreeStatus | null;
+  prStatus?: import('./git').PullRequestInfo | null;
 }

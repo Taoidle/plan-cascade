@@ -190,6 +190,24 @@ export interface MergeBranchResult {
 // ---------------------------------------------------------------------------
 
 export type WorktreeStatus = 'creating' | 'active' | 'in_progress' | 'ready' | 'merging' | 'completed' | 'error';
+export type WorktreeRuntimeKind = 'managed' | 'legacy';
+export type WorktreeCleanupPolicy = 'manual' | 'delete_on_session_delete';
+export type ForgeProvider = 'github' | 'gitlab' | 'gitea';
+export type PullRequestState = 'draft' | 'open' | 'merged' | 'closed';
+
+export interface PullRequestInfo {
+  provider?: ForgeProvider | null;
+  remote_name?: string | null;
+  base_branch?: string | null;
+  head_branch?: string | null;
+  title?: string | null;
+  body?: string | null;
+  url?: string | null;
+  number?: number | null;
+  state?: PullRequestState | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
 
 export interface Worktree {
   id: string;
@@ -201,6 +219,33 @@ export interface Worktree {
   created_at: string;
   updated_at: string;
   error?: string;
+  repo_id?: string | null;
+  root_path?: string | null;
+  session_id?: string | null;
+  runtime_kind?: WorktreeRuntimeKind;
+  cleanup_policy?: WorktreeCleanupPolicy;
+  pr_info?: PullRequestInfo | null;
+  display_label?: string | null;
+}
+
+export interface PreparePullRequestResult {
+  worktree_id: string;
+  repo_id: string;
+  forge_provider: ForgeProvider;
+  remote_name: string;
+  remote_url: string;
+  head_branch: string;
+  base_branch: string;
+  compare_url: string;
+  create_url: string;
+}
+
+export interface CreatePullRequestResult {
+  worktree_id: string;
+  provider: ForgeProvider;
+  url: string;
+  number?: number | null;
+  state: PullRequestState;
 }
 
 // ---------------------------------------------------------------------------

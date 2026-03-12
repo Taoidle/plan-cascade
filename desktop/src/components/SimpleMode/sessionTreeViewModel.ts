@@ -17,6 +17,13 @@ export interface SessionTreeItem {
   kind: 'live' | 'history' | 'archived';
   title: string;
   workspacePath: string | null;
+  workspaceRootPath: string | null;
+  runtimePath: string | null;
+  runtimeKind: 'main' | 'managed_worktree' | 'legacy_worktree';
+  runtimeBranch: string | null;
+  runtimePrUrl: string | null;
+  runtimePrState: string | null;
+  managedWorktreeId: string | null;
   updatedAt: number;
   status: SessionTreeStatus;
   mode: WorkflowMode | null;
@@ -216,6 +223,7 @@ function toLiveItem(session: WorkflowSessionCatalogItem, activeSessionId: string
   const kind = session.status === 'archived' ? 'archived' : 'live';
   const debugDetails =
     session.activeMode === 'debug' ? deriveDebugDetails(session) : { detailSummary: null, detailChips: [] };
+  const runtime = session.runtime;
   return {
     id: `${kind}:${session.sessionId}`,
     kind,
@@ -224,6 +232,13 @@ function toLiveItem(session: WorkflowSessionCatalogItem, activeSessionId: string
       activeMode: session.activeMode,
     }),
     workspacePath: session.workspacePath,
+    workspaceRootPath: runtime?.rootPath ?? session.workspacePath,
+    runtimePath: runtime?.runtimePath ?? session.workspacePath,
+    runtimeKind: runtime?.runtimeKind ?? 'main',
+    runtimeBranch: runtime?.branch ?? null,
+    runtimePrUrl: runtime?.prStatus?.url ?? null,
+    runtimePrState: runtime?.prStatus?.state ?? null,
+    managedWorktreeId: runtime?.managedWorktreeId ?? null,
     updatedAt: new Date(session.updatedAt).getTime(),
     status: deriveSidebarSessionStatus({
       modeSnapshots: session.modeSnapshots,
@@ -248,6 +263,13 @@ function toHistoryItem(item: ExecutionHistoryItem): SessionTreeItem {
       fallbackText: item.taskDescription,
     }),
     workspacePath: item.workspacePath ?? null,
+    workspaceRootPath: item.workspacePath ?? null,
+    runtimePath: item.workspacePath ?? null,
+    runtimeKind: 'main',
+    runtimeBranch: null,
+    runtimePrUrl: null,
+    runtimePrState: null,
+    managedWorktreeId: null,
     updatedAt: item.completedAt ?? item.startedAt,
     status: item.error ? 'attention' : 'idle',
     mode: item.sessionId?.startsWith('claude:') ? 'chat' : null,
@@ -293,22 +315,22 @@ export function buildSessionTreeViewModel(params: {
     .map((session) => toLiveItem(session, params.activeSessionId))
     .filter((item) => includeArchived || item.kind !== 'archived');
 
-  const workflowKeys = new Set(workflowItems.map((item) => buildDedupeKey(item.title, item.workspacePath)));
+  const workflowKeys = new Set(workflowItems.map((item) => buildDedupeKey(item.title, item.workspaceRootPath)));
   const historyItems = history
     .map(toHistoryItem)
-    .filter((item) => !workflowKeys.has(buildDedupeKey(item.title, item.workspacePath)));
+    .filter((item) => !workflowKeys.has(buildDedupeKey(item.title, item.workspaceRootPath)));
 
   const allItems: SessionTreeItem[] = [...workflowItems, ...historyItems];
 
   for (const item of allItems) {
-    const normalizedWorkspacePath = normalizePath(item.workspacePath);
+    const normalizedWorkspacePath = normalizePath(item.workspaceRootPath);
     const matchedPin = matchPinnedDirectory(normalizedWorkspacePath, normalizedPinned);
     const groupKey = matchedPin?.normalizedPath ?? normalizedWorkspacePath ?? NO_WORKSPACE_KEY;
     const existing = groups.get(groupKey);
     const group =
       existing ??
       createPathGroup(
-        matchedPin?.path ?? item.workspacePath ?? null,
+        matchedPin?.path ?? item.workspaceRootPath ?? null,
         matchedPin?.normalizedPath ?? normalizedWorkspacePath ?? NO_WORKSPACE_KEY,
       );
 

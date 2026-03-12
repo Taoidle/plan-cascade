@@ -74,6 +74,11 @@
       "descriptionWindows": "在 Windows 上，关闭窗口会把应用隐藏到系统托盘，但应用会继续运行。你可以通过托盘图标或“退出应用”重新打开或彻底退出。",
       "descriptionLinux": "在 Linux 上，关闭窗口会将应用最小化到任务栏，但应用会继续运行。你可以通过任务栏、托盘图标或“退出应用”重新打开或彻底退出。"
     },
+    "worktreeLifecycle": {
+      "title": "Worktree 生命周期",
+      "autoCleanup": "删除会话时默认清理受管 worktree",
+      "autoCleanupHelp": "开启后，删除 workflow 会话时会默认勾选删除其位于 ~/.plan-cascade/worktrees 下的受管 worktree。"
+    },
 
     "knowledgeBase": {
       "title": "知识库",

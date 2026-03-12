@@ -11,8 +11,9 @@ import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { invoke } from '@tauri-apps/api/core';
-import type { BranchInfo, Worktree, WorktreeStatus } from '../../../../types/git';
+import type { BranchInfo, PreparePullRequestResult, Worktree, WorktreeStatus } from '../../../../types/git';
 import type { CommandResponse } from '../../../../lib/tauri';
+import { useWorkflowKernelStore } from '../../../../store/workflowKernel';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -228,7 +229,21 @@ function CreateWorktreeDialog({
 // WorktreeCard
 // ---------------------------------------------------------------------------
 
-function WorktreeCard({ worktree, onRemove }: { worktree: Worktree; onRemove: (worktree: Worktree) => void }) {
+function WorktreeCard({
+  worktree,
+  onRemove,
+  onAttach,
+  onPreparePr,
+  canAttach,
+  canPreparePr,
+}: {
+  worktree: Worktree;
+  onRemove: (worktree: Worktree) => void;
+  onAttach: (worktree: Worktree) => void;
+  onPreparePr: (worktree: Worktree) => void;
+  canAttach: boolean;
+  canPreparePr: boolean;
+}) {
   const { t } = useTranslation('git');
   const isTerminal = worktree.status === 'completed' || worktree.status === 'error';
 
@@ -250,6 +265,24 @@ function WorktreeCard({ worktree, onRemove }: { worktree: Worktree; onRemove: (w
         </div>
 
         <div className="flex items-center gap-1 shrink-0">
+          {canAttach && (
+            <button
+              onClick={() => onAttach(worktree)}
+              className="px-1.5 py-0.5 rounded text-2xs text-sky-700 dark:text-sky-300 bg-sky-50 dark:bg-sky-900/20 hover:bg-sky-100 dark:hover:bg-sky-900/30 transition-colors"
+              title={t('worktreeList.attachToCurrentSession')}
+            >
+              {t('worktreeList.attach')}
+            </button>
+          )}
+          {canPreparePr && (
+            <button
+              onClick={() => onPreparePr(worktree)}
+              className="px-1.5 py-0.5 rounded text-2xs text-violet-700 dark:text-violet-300 bg-violet-50 dark:bg-violet-900/20 hover:bg-violet-100 dark:hover:bg-violet-900/30 transition-colors"
+              title={t('worktreeList.preparePullRequest')}
+            >
+              {t('worktreeList.prBadge')}
+            </button>
+          )}
           {!isTerminal && (
             <button
               onClick={() => onRemove(worktree)}
@@ -270,6 +303,16 @@ function WorktreeCard({ worktree, onRemove }: { worktree: Worktree; onRemove: (w
       </div>
 
       <div className="flex items-center gap-3 text-2xs text-gray-500 dark:text-gray-400">
+        <span
+          className={clsx(
+            'shrink-0 rounded px-1 py-0.5 uppercase tracking-wide',
+            worktree.runtime_kind === 'managed'
+              ? 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300'
+              : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300',
+          )}
+        >
+          {worktree.runtime_kind === 'managed' ? t('worktreeList.runtimeManaged') : t('worktreeList.runtimeLegacy')}
+        </span>
         <span className="flex items-center gap-1">
           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
@@ -285,6 +328,17 @@ function WorktreeCard({ worktree, onRemove }: { worktree: Worktree; onRemove: (w
         <div className="mt-1 text-2xs text-red-600 dark:text-red-400 truncate" title={worktree.error}>
           {worktree.error}
         </div>
+      )}
+      {worktree.pr_info?.url && (
+        <button
+          type="button"
+          onClick={() => window.open(worktree.pr_info?.url ?? '', '_blank', 'noopener,noreferrer')}
+          className="mt-2 text-2xs text-violet-600 dark:text-violet-300 hover:underline"
+        >
+          {worktree.pr_info?.number
+            ? t('worktreeList.prNumber', { number: worktree.pr_info.number, defaultValue: 'PR #{{number}}' })
+            : t('worktreeList.openPr')}
+        </button>
       )}
     </div>
   );
@@ -306,12 +360,24 @@ export function WorktreeList({ repoPath }: WorktreeListProps) {
   const [targetBranch, setTargetBranch] = useState('');
   const [basePath, setBasePath] = useState('');
   const [createError, setCreateError] = useState<string | null>(null);
+  const [prPreview, setPrPreview] = useState<PreparePullRequestResult | null>(null);
+  const [prTitle, setPrTitle] = useState('');
+  const [prBody, setPrBody] = useState('');
+  const [isCreatingPr, setIsCreatingPr] = useState(false);
+  const [forgeTokenInput, setForgeTokenInput] = useState('');
+  const [hasForgeToken, setHasForgeToken] = useState(false);
+  const [isSavingForgeToken, setIsSavingForgeToken] = useState(false);
+  const [forgeTokenMessage, setForgeTokenMessage] = useState<string | null>(null);
+  const activeSessionId = useWorkflowKernelStore((s) => s.sessionId);
+  const attachSessionWorktree = useWorkflowKernelStore((s) => s.attachSessionWorktree);
+  const prepareSessionPr = useWorkflowKernelStore((s) => s.prepareSessionPr);
+  const createSessionPr = useWorkflowKernelStore((s) => s.createSessionPr);
 
   const fetchWorktrees = useCallback(async () => {
     if (!repoPath) return;
     setIsLoading(true);
     try {
-      const res = await invoke<CommandResponse<Worktree[]>>('list_worktrees', {
+      const res = await invoke<CommandResponse<Worktree[]>>('workflow_list_repo_worktrees', {
         repoPath,
       });
       if (res.success && res.data) {
@@ -396,7 +462,7 @@ export function WorktreeList({ repoPath }: WorktreeListProps) {
         executionMode: 'auto',
       });
       if (!res.success) {
-        setCreateError(res.error || 'Failed to create worktree');
+        setCreateError(res.error || t('worktreeList.createFailed'));
         return;
       }
 
@@ -418,6 +484,128 @@ export function WorktreeList({ repoPath }: WorktreeListProps) {
     setCreateError(null);
     setShowCreateDialog(true);
   }, []);
+
+  const handleAttach = useCallback(
+    async (worktree: Worktree) => {
+      if (!activeSessionId) return;
+      await attachSessionWorktree({
+        sessionId: activeSessionId,
+        repoPath,
+        worktreePath: worktree.path,
+        displayLabel: worktree.display_label ?? worktree.name,
+        cleanupPolicy: worktree.cleanup_policy ?? 'manual',
+      });
+    },
+    [activeSessionId, attachSessionWorktree, repoPath],
+  );
+
+  const handlePreparePr = useCallback(
+    async (worktree: Worktree) => {
+      const sessionId = activeSessionId;
+      if (!sessionId) return;
+      const result = await prepareSessionPr(sessionId);
+      if (!result) return;
+      setPrPreview(result);
+      setPrTitle(`Worktree: ${worktree.display_label ?? worktree.name}`);
+      setPrBody('');
+      window.open(result.compare_url, '_blank', 'noopener,noreferrer');
+    },
+    [activeSessionId, prepareSessionPr],
+  );
+
+  const handleCreatePr = useCallback(async () => {
+    if (!activeSessionId || !prPreview || !prTitle.trim()) return;
+    setIsCreatingPr(true);
+    setForgeTokenMessage(null);
+    try {
+      const result = await createSessionPr({
+        sessionId: activeSessionId,
+        provider: prPreview.forge_provider,
+        remoteName: prPreview.remote_name,
+        title: prTitle.trim(),
+        body: prBody,
+        draft: false,
+      });
+      if (result?.url) {
+        window.open(result.url, '_blank', 'noopener,noreferrer');
+      }
+    } catch (error) {
+      setForgeTokenMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsCreatingPr(false);
+    }
+  }, [activeSessionId, createSessionPr, prBody, prPreview, prTitle]);
+
+  useEffect(() => {
+    if (!prPreview) {
+      setHasForgeToken(false);
+      setForgeTokenInput('');
+      setForgeTokenMessage(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const result = await invoke<CommandResponse<boolean>>('has_forge_token', {
+          provider: prPreview.forge_provider,
+        });
+        if (!cancelled) {
+          setHasForgeToken(Boolean(result.success && result.data));
+        }
+      } catch {
+        if (!cancelled) {
+          setHasForgeToken(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [prPreview]);
+
+  const handleSaveForgeToken = useCallback(async () => {
+    if (!prPreview) return;
+    setIsSavingForgeToken(true);
+    setForgeTokenMessage(null);
+    try {
+      const result = await invoke<CommandResponse<boolean>>('set_forge_token', {
+        provider: prPreview.forge_provider,
+        token: forgeTokenInput.trim(),
+      });
+      if (!result.success) {
+        throw new Error(result.error || t('worktreeList.saveTokenFailed'));
+      }
+      setHasForgeToken(forgeTokenInput.trim().length > 0);
+      setForgeTokenInput('');
+      setForgeTokenMessage(t('worktreeList.forgeTokenSaved'));
+    } catch (error) {
+      setForgeTokenMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsSavingForgeToken(false);
+    }
+  }, [forgeTokenInput, prPreview, t]);
+
+  const handleClearForgeToken = useCallback(async () => {
+    if (!prPreview) return;
+    setIsSavingForgeToken(true);
+    setForgeTokenMessage(null);
+    try {
+      const result = await invoke<CommandResponse<boolean>>('set_forge_token', {
+        provider: prPreview.forge_provider,
+        token: '',
+      });
+      if (!result.success) {
+        throw new Error(result.error || t('worktreeList.clearTokenFailed'));
+      }
+      setHasForgeToken(false);
+      setForgeTokenInput('');
+      setForgeTokenMessage(t('worktreeList.forgeTokenRemoved'));
+    } catch (error) {
+      setForgeTokenMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsSavingForgeToken(false);
+    }
+  }, [prPreview, t]);
 
   // Filter out completed/terminal worktrees for display
   const activeWorktrees = worktrees.filter((wt) => wt.status !== 'completed');
@@ -471,9 +659,114 @@ export function WorktreeList({ repoPath }: WorktreeListProps) {
         )}
 
         {activeWorktrees.map((wt) => (
-          <WorktreeCard key={wt.id} worktree={wt} onRemove={setRemoveTarget} />
+          <WorktreeCard
+            key={wt.id}
+            worktree={wt}
+            onRemove={setRemoveTarget}
+            onAttach={handleAttach}
+            onPreparePr={handlePreparePr}
+            canAttach={!!activeSessionId && wt.session_id !== activeSessionId}
+            canPreparePr={!!activeSessionId && wt.session_id === activeSessionId && wt.runtime_kind === 'managed'}
+          />
         ))}
       </div>
+
+      {prPreview && (
+        <div className="shrink-0 border-t border-gray-200 dark:border-gray-700 px-3 py-2 text-2xs text-gray-600 dark:text-gray-300 space-y-2">
+          <div className="font-medium text-gray-800 dark:text-gray-100">{t('worktreeList.prReady')}</div>
+          <div className="truncate" title={prPreview.compare_url}>
+            {prPreview.head_branch} {'->'} {prPreview.base_branch}
+          </div>
+          <div className="rounded border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 p-2 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <div className="font-medium text-gray-800 dark:text-gray-100">
+                {t('worktreeList.forgeTokenTitle', { provider: prPreview.forge_provider })}
+              </div>
+              <span
+                className={clsx(
+                  'rounded-full px-1.5 py-0.5 text-[10px] font-medium',
+                  hasForgeToken
+                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+                    : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
+                )}
+              >
+                {hasForgeToken ? t('worktreeList.forgeTokenConfigured') : t('worktreeList.forgeTokenMissing')}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="password"
+                value={forgeTokenInput}
+                onChange={(event) => setForgeTokenInput(event.target.value)}
+                placeholder={t('worktreeList.forgeTokenPlaceholder', { provider: prPreview.forge_provider })}
+                className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-xs"
+              />
+              <button
+                type="button"
+                onClick={handleSaveForgeToken}
+                disabled={isSavingForgeToken || forgeTokenInput.trim().length === 0}
+                className={clsx(
+                  'px-2 py-1 rounded text-xs font-medium text-white transition-colors',
+                  isSavingForgeToken || forgeTokenInput.trim().length === 0
+                    ? 'bg-gray-400 cursor-not-allowed'
+                    : 'bg-primary-600 hover:bg-primary-700',
+                )}
+              >
+                {t('worktreeList.saveToken')}
+              </button>
+              {hasForgeToken ? (
+                <button
+                  type="button"
+                  onClick={handleClearForgeToken}
+                  disabled={isSavingForgeToken}
+                  className="px-2 py-1 rounded text-xs font-medium border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800"
+                >
+                  {t('worktreeList.clearToken')}
+                </button>
+              ) : null}
+            </div>
+            {forgeTokenMessage ? (
+              <div className="text-[10px] text-gray-500 dark:text-gray-400">{forgeTokenMessage}</div>
+            ) : null}
+          </div>
+          <input
+            type="text"
+            value={prTitle}
+            onChange={(event) => setPrTitle(event.target.value)}
+            placeholder={t('worktreeList.pullRequestTitlePlaceholder')}
+            className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-xs"
+          />
+          <textarea
+            value={prBody}
+            onChange={(event) => setPrBody(event.target.value)}
+            placeholder={t('worktreeList.pullRequestBodyPlaceholder')}
+            rows={3}
+            className="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-xs"
+          />
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleCreatePr}
+              disabled={isCreatingPr || !prTitle.trim()}
+              className={clsx(
+                'px-2 py-1 rounded text-xs font-medium text-white transition-colors',
+                isCreatingPr || !prTitle.trim()
+                  ? 'bg-violet-300 cursor-not-allowed'
+                  : 'bg-violet-600 hover:bg-violet-700',
+              )}
+            >
+              {isCreatingPr ? t('worktreeList.creatingPr') : t('worktreeList.createPr')}
+            </button>
+            <button
+              type="button"
+              onClick={() => window.open(prPreview.create_url, '_blank', 'noopener,noreferrer')}
+              className="px-2 py-1 rounded text-xs font-medium border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800"
+            >
+              {t('worktreeList.openCompare')}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Remove Confirmation Dialog */}
       {removeTarget && (

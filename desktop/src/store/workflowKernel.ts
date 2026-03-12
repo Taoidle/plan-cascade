@@ -9,12 +9,20 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { CommandResponse } from '../lib/tauri';
 import type {
+  CreatePullRequestResult,
+  ForgeProvider,
+  PreparePullRequestResult,
+  Worktree,
+  WorktreeCleanupPolicy,
+} from '../types/git';
+import type {
   HandoffContextBundle,
   ModeTranscriptPatch,
   ModeTranscriptState,
   ModeTranscriptPayload,
   PlanEditOperation,
   ResumeResult,
+  SessionRuntimeInfo,
   UserInputIntent,
   WorkflowSessionCatalogItem,
   WorkflowSessionCatalogState,
@@ -37,6 +45,21 @@ const DEFAULT_HANDOFF: HandoffContextBundle = {
   contextSources: [],
   metadata: {},
 };
+
+function normalizeRuntime(runtime: SessionRuntimeInfo | undefined, workspacePath: string | null): SessionRuntimeInfo {
+  return {
+    rootPath: runtime?.rootPath ?? workspacePath ?? null,
+    runtimePath: runtime?.runtimePath ?? workspacePath ?? null,
+    runtimeKind: runtime?.runtimeKind ?? 'main',
+    displayLabel: runtime?.displayLabel ?? null,
+    branch: runtime?.branch ?? null,
+    targetBranch: runtime?.targetBranch ?? null,
+    managedWorktreeId: runtime?.managedWorktreeId ?? null,
+    legacy: runtime?.legacy ?? false,
+    runtimeStatus: runtime?.runtimeStatus ?? null,
+    prStatus: runtime?.prStatus ?? null,
+  };
+}
 
 type TranscriptMap = Record<string, Partial<Record<WorkflowMode, ModeTranscriptState>>>;
 const EMPTY_TRANSCRIPT_STATE: ModeTranscriptState = {
@@ -110,6 +133,7 @@ function normalizeHandoff(bundle?: HandoffContextBundle): HandoffContextBundle {
 function normalizeSession(session: WorkflowSession): WorkflowSession {
   return {
     ...session,
+    runtime: normalizeRuntime(session.runtime, session.workspacePath),
     handoffContext: normalizeHandoff(session.handoffContext),
     modeSnapshots: {
       ...session.modeSnapshots,
@@ -138,6 +162,13 @@ function normalizeSession(session: WorkflowSession): WorkflowSession {
           }
         : null,
     },
+  };
+}
+
+function normalizeCatalogItem(item: WorkflowSessionCatalogItem): WorkflowSessionCatalogItem {
+  return {
+    ...item,
+    runtime: normalizeRuntime(item.runtime, item.workspacePath),
   };
 }
 
@@ -174,13 +205,52 @@ export interface WorkflowKernelStore {
   _transcriptUpdatesUnlisten: UnlistenFn | null;
 
   openSession: (initialMode?: WorkflowMode, initialContext?: HandoffContextBundle) => Promise<WorkflowSession | null>;
+  createIsolatedSession: (params: {
+    repoPath: string;
+    taskName: string;
+    targetBranch: string;
+    initialMode?: WorkflowMode;
+    displayTitle?: string | null;
+    cleanupPolicy?: WorktreeCleanupPolicy;
+  }) => Promise<WorkflowSession | null>;
+  moveSessionToManagedWorktree: (params: {
+    sessionId: string;
+    repoPath: string;
+    branchName: string;
+    targetBranch: string;
+    cleanupPolicy?: WorktreeCleanupPolicy;
+  }) => Promise<WorkflowSession | null>;
+  attachSessionWorktree: (params: {
+    sessionId: string;
+    repoPath: string;
+    worktreePath: string;
+    displayLabel?: string | null;
+    cleanupPolicy?: WorktreeCleanupPolicy;
+  }) => Promise<WorkflowSession | null>;
+  detachSessionWorktree: (sessionId: string) => Promise<WorkflowSession | null>;
+  cleanupSessionWorktree: (sessionId: string, force?: boolean) => Promise<WorkflowSession | null>;
+  listRepoWorktrees: (repoPath: string) => Promise<Worktree[]>;
+  prepareSessionPr: (sessionId: string) => Promise<PreparePullRequestResult | null>;
+  createSessionPr: (params: {
+    sessionId: string;
+    provider: ForgeProvider;
+    remoteName: string;
+    title: string;
+    body: string;
+    draft?: boolean;
+  }) => Promise<CreatePullRequestResult | null>;
   listSessions: () => Promise<WorkflowSessionCatalogItem[]>;
   getSessionCatalogState: () => Promise<WorkflowSessionCatalogState | null>;
   activateSession: (sessionId: string) => Promise<WorkflowSessionState | null>;
   renameSession: (sessionId: string, displayTitle: string) => Promise<WorkflowSession | null>;
   archiveSession: (sessionId: string) => Promise<WorkflowSessionCatalogState | null>;
   restoreSession: (sessionId: string) => Promise<WorkflowSessionState | null>;
-  deleteSession: (sessionId: string) => Promise<WorkflowSessionCatalogState | null>;
+  deleteSession: (
+    sessionId: string,
+    options?: {
+      deleteWorktree?: boolean;
+    },
+  ) => Promise<WorkflowSessionCatalogState | null>;
   resumeBackgroundRuns: (sessionId?: string | null) => Promise<ResumeResult[]>;
   getModeTranscript: (sessionId: string, mode: WorkflowMode) => Promise<ModeTranscriptPayload | null>;
   getCachedModeTranscript: (sessionId: string | null, mode: WorkflowMode) => ModeTranscriptState;
@@ -287,6 +357,166 @@ export const useWorkflowKernelStore = create<WorkflowKernelStore>((set, get) => 
     }
   },
 
+  createIsolatedSession: async ({
+    repoPath,
+    taskName,
+    targetBranch,
+    initialMode = 'chat',
+    displayTitle,
+    cleanupPolicy,
+  }) => {
+    try {
+      const result = await invoke<CommandResponse<WorkflowSession>>('workflow_create_isolated_session', {
+        initialMode,
+        repoPath,
+        taskName,
+        targetBranch,
+        displayTitle: displayTitle ?? null,
+        cleanupPolicy: cleanupPolicy ?? 'manual',
+      });
+      if (!result.success || !result.data) {
+        set({ error: result.error || 'Failed to create isolated workflow session' });
+        return null;
+      }
+      applySession(set, result.data);
+      void get().getSessionCatalogState();
+      return result.data;
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) });
+      return null;
+    }
+  },
+
+  moveSessionToManagedWorktree: async ({ sessionId, repoPath, branchName, targetBranch, cleanupPolicy }) => {
+    try {
+      const result = await invoke<CommandResponse<WorkflowSession>>('workflow_move_session_to_worktree', {
+        sessionId,
+        repoPath,
+        branchName,
+        targetBranch,
+        cleanupPolicy: cleanupPolicy ?? 'manual',
+      });
+      if (!result.success || !result.data) {
+        set({ error: result.error || 'Failed to move session to managed worktree' });
+        return null;
+      }
+      applySession(set, result.data);
+      void get().getSessionCatalogState();
+      return result.data;
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) });
+      return null;
+    }
+  },
+
+  attachSessionWorktree: async ({ sessionId, repoPath, worktreePath, displayLabel, cleanupPolicy }) => {
+    try {
+      const result = await invoke<CommandResponse<WorkflowSession>>('workflow_attach_session_worktree', {
+        sessionId,
+        repoPath,
+        worktreePath,
+        displayLabel: displayLabel ?? null,
+        cleanupPolicy: cleanupPolicy ?? 'manual',
+      });
+      if (!result.success || !result.data) {
+        set({ error: result.error || 'Failed to attach worktree to session' });
+        return null;
+      }
+      applySession(set, result.data);
+      void get().getSessionCatalogState();
+      return result.data;
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) });
+      return null;
+    }
+  },
+
+  detachSessionWorktree: async (sessionId) => {
+    try {
+      const result = await invoke<CommandResponse<WorkflowSession>>('workflow_detach_session_worktree', { sessionId });
+      if (!result.success || !result.data) {
+        set({ error: result.error || 'Failed to detach worktree from session' });
+        return null;
+      }
+      applySession(set, result.data);
+      void get().getSessionCatalogState();
+      return result.data;
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) });
+      return null;
+    }
+  },
+
+  cleanupSessionWorktree: async (sessionId, force = true) => {
+    try {
+      const result = await invoke<CommandResponse<WorkflowSession>>('workflow_cleanup_session_worktree', {
+        sessionId,
+        force,
+      });
+      if (!result.success || !result.data) {
+        set({ error: result.error || 'Failed to clean up session worktree' });
+        return null;
+      }
+      applySession(set, result.data);
+      void get().getSessionCatalogState();
+      return result.data;
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) });
+      return null;
+    }
+  },
+
+  listRepoWorktrees: async (repoPath) => {
+    try {
+      const result = await invoke<CommandResponse<Worktree[]>>('workflow_list_repo_worktrees', { repoPath });
+      if (!result.success || !result.data) {
+        set({ error: result.error || 'Failed to list repository worktrees' });
+        return [];
+      }
+      return result.data;
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) });
+      return [];
+    }
+  },
+
+  prepareSessionPr: async (sessionId) => {
+    try {
+      const result = await invoke<CommandResponse<PreparePullRequestResult>>('workflow_prepare_session_pr', {
+        sessionId,
+      });
+      if (!result.success || !result.data) {
+        set({ error: result.error || 'Failed to prepare pull request' });
+        return null;
+      }
+      return result.data;
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) });
+      return null;
+    }
+  },
+
+  createSessionPr: async ({ sessionId, provider, remoteName, title, body, draft = false }) => {
+    try {
+      const result = await invoke<CommandResponse<CreatePullRequestResult>>('workflow_create_session_pr', {
+        sessionId,
+        provider,
+        remoteName,
+        title,
+        body,
+        draft,
+      });
+      if (!result.success || !result.data) {
+        set({ error: result.error || 'Failed to create pull request' });
+        return null;
+      }
+      return result.data;
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) });
+      return null;
+    }
+  },
+
   listSessions: async () => {
     try {
       const result = await invoke<CommandResponse<WorkflowSessionCatalogItem[]>>('workflow_list_sessions');
@@ -294,8 +524,9 @@ export const useWorkflowKernelStore = create<WorkflowKernelStore>((set, get) => 
         set({ error: result.error || 'Failed to list workflow sessions' });
         return [];
       }
-      set({ sessionCatalog: result.data, error: null });
-      return result.data;
+      const items = result.data.map(normalizeCatalogItem);
+      set({ sessionCatalog: items, error: null });
+      return items;
     } catch (error) {
       set({ error: error instanceof Error ? error.message : String(error) });
       return [];
@@ -311,7 +542,7 @@ export const useWorkflowKernelStore = create<WorkflowKernelStore>((set, get) => 
       }
       set({
         activeRootSessionId: result.data.activeSessionId,
-        sessionCatalog: result.data.sessions,
+        sessionCatalog: result.data.sessions.map(normalizeCatalogItem),
         error: null,
       });
       return result.data;
@@ -403,7 +634,7 @@ export const useWorkflowKernelStore = create<WorkflowKernelStore>((set, get) => 
       const catalogState = result.data;
       set({
         activeRootSessionId: catalogState.activeSessionId,
-        sessionCatalog: catalogState.sessions,
+        sessionCatalog: catalogState.sessions.map(normalizeCatalogItem),
         error: null,
       });
 
@@ -458,7 +689,7 @@ export const useWorkflowKernelStore = create<WorkflowKernelStore>((set, get) => 
     }
   },
 
-  deleteSession: async (sessionId) => {
+  deleteSession: async (sessionId, options) => {
     const normalizedSessionId = sessionId.trim();
     if (!normalizedSessionId) {
       set({ error: 'Session id cannot be empty' });
@@ -467,6 +698,7 @@ export const useWorkflowKernelStore = create<WorkflowKernelStore>((set, get) => 
     try {
       const result = await invoke<CommandResponse<WorkflowSessionCatalogState>>('workflow_delete_session', {
         sessionId: normalizedSessionId,
+        deleteWorktree: options?.deleteWorktree ?? null,
       });
       if (!result.success || !result.data) {
         set({ error: result.error || 'Failed to delete workflow session' });
@@ -475,7 +707,7 @@ export const useWorkflowKernelStore = create<WorkflowKernelStore>((set, get) => 
       const catalogState = result.data;
       set({
         activeRootSessionId: catalogState.activeSessionId,
-        sessionCatalog: catalogState.sessions,
+        sessionCatalog: catalogState.sessions.map(normalizeCatalogItem),
         error: null,
       });
       if (!catalogState.activeSessionId) {
@@ -970,7 +1202,7 @@ export const useWorkflowKernelStore = create<WorkflowKernelStore>((set, get) => 
             if (!payload) return;
             set({
               activeRootSessionId: payload.activeSessionId,
-              sessionCatalog: payload.sessions,
+              sessionCatalog: payload.sessions.map(normalizeCatalogItem),
             });
           },
         );
@@ -1049,6 +1281,7 @@ function mergeCatalogSession(
     sessionId: session.sessionId,
     sessionKind: session.sessionKind,
     displayTitle: session.displayTitle,
+    runtime: normalizeRuntime(session.runtime, session.workspacePath),
     workspacePath: session.workspacePath,
     activeMode: session.activeMode,
     status: session.status,

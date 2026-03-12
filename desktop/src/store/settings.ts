@@ -132,6 +132,7 @@ interface SettingsState {
   sidebarCollapsed: boolean;
   autoPanelHoverEnabled: boolean;
   closeToBackgroundEnabled: boolean;
+  worktreeAutoCleanupOnSessionDelete: boolean;
   sessionPathSort: SessionPathSort;
   showArchivedSessions: boolean;
 
@@ -228,6 +229,7 @@ interface SettingsState {
   setSidebarCollapsed: (collapsed: boolean) => void;
   setAutoPanelHoverEnabled: (enabled: boolean) => void;
   setCloseToBackgroundEnabled: (enabled: boolean) => void;
+  setWorktreeAutoCleanupOnSessionDelete: (enabled: boolean) => void;
   setSessionPathSort: (sort: SessionPathSort) => void;
   setShowArchivedSessions: (show: boolean) => void;
   setDeveloperModeEnabled: (enabled: boolean) => void;
@@ -298,6 +300,7 @@ const defaultSettings = {
   sidebarCollapsed: false,
   autoPanelHoverEnabled: false,
   closeToBackgroundEnabled: true,
+  worktreeAutoCleanupOnSessionDelete: false,
   sessionPathSort: 'recent' as SessionPathSort,
   showArchivedSessions: false,
 
@@ -693,6 +696,8 @@ export const useSettingsStore = create<SettingsState>()(
       setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
       setAutoPanelHoverEnabled: (autoPanelHoverEnabled) => set({ autoPanelHoverEnabled }),
       setCloseToBackgroundEnabled: (closeToBackgroundEnabled) => set({ closeToBackgroundEnabled }),
+      setWorktreeAutoCleanupOnSessionDelete: (worktreeAutoCleanupOnSessionDelete) =>
+        set({ worktreeAutoCleanupOnSessionDelete }),
       setSessionPathSort: (sessionPathSort) => set({ sessionPathSort }),
       setShowArchivedSessions: (showArchivedSessions) => set({ showArchivedSessions }),
       setDeveloperModeEnabled: (developerModeEnabled) => set({ developerModeEnabled }),

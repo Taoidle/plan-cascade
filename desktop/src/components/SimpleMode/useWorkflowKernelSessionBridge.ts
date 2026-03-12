@@ -98,6 +98,9 @@ export function useWorkflowKernelSessionBridge({
         metadata: {
           entry: 'simple_mode_mount',
           workspacePath,
+          workspaceRootPath: workspacePath,
+          runtimePath: workspacePath,
+          runtimeKind: 'main',
         },
       });
       if (opened?.sessionId) {

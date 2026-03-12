@@ -76,6 +76,7 @@ const setSessionPathSort = vi.fn();
 const setShowArchivedSessions = vi.fn();
 let mockSessionPathSort: 'recent' | 'name' = 'recent';
 let mockShowArchivedSessions = false;
+let mockWorktreeAutoCleanupOnSessionDelete = false;
 
 vi.mock('../../store/settings', () => ({
   useSettingsStore: vi.fn((selector) => {
@@ -89,9 +90,20 @@ vi.mock('../../store/settings', () => ({
       setSessionPathSort,
       showArchivedSessions: mockShowArchivedSessions,
       setShowArchivedSessions,
+      worktreeAutoCleanupOnSessionDelete: mockWorktreeAutoCleanupOnSessionDelete,
+      setWorktreeAutoCleanupOnSessionDelete: vi.fn(),
     };
     return typeof selector === 'function' ? selector(state) : state;
   }),
+}));
+
+const mockWorkflowKernelStore = {
+  listRepoWorktrees: vi.fn().mockResolvedValue([]),
+};
+vi.mock('../../store/workflowKernel', () => ({
+  useWorkflowKernelStore: vi.fn((selector) =>
+    typeof selector === 'function' ? selector(mockWorkflowKernelStore) : mockWorkflowKernelStore,
+  ),
 }));
 
 const mockSkillMemoryStore = {
@@ -237,6 +249,8 @@ describe('WorkspaceTreeSidebar', () => {
     mockWorkspacePath = '/repo/app';
     mockSessionPathSort = 'recent';
     mockShowArchivedSessions = false;
+    mockWorktreeAutoCleanupOnSessionDelete = false;
+    mockWorkflowKernelStore.listRepoWorktrees.mockResolvedValue([]);
   });
 
   it('renders empty state when there are no grouped sessions', () => {
@@ -247,10 +261,9 @@ describe('WorkspaceTreeSidebar', () => {
     expect(screen.queryByRole('heading', { name: 'History' })).not.toBeInTheDocument();
   });
 
-  it('renders a single path tree with mixed live and history sessions', () => {
+  it('renders a single path tree with mixed live and history sessions', async () => {
     const onSwitchWorkflowSession = vi.fn();
     const onRestore = vi.fn();
-    const onNewTaskInPath = vi.fn();
     mockPinnedDirectories = ['/repo'];
 
     render(
@@ -261,7 +274,6 @@ describe('WorkspaceTreeSidebar', () => {
         history={[createHistoryItem({ id: 'history-1', title: 'Past chat', workspacePath: '/repo/app' })]}
         activeWorkflowSessionId="root-live"
         onSwitchWorkflowSession={onSwitchWorkflowSession}
-        onNewTaskInPath={onNewTaskInPath}
       />,
     );
 
@@ -282,7 +294,7 @@ describe('WorkspaceTreeSidebar', () => {
     expect(onRestore).toHaveBeenCalledWith('history-1');
 
     fireEvent.click(screen.getByTitle('New task in this directory'));
-    expect(onNewTaskInPath).toHaveBeenCalledWith('/repo');
+    expect(await screen.findByText('Create session runtime')).toBeInTheDocument();
   });
 
   it('supports renaming, archiving, deleting live sessions and clearing all sessions', () => {
@@ -317,7 +329,7 @@ describe('WorkspaceTreeSidebar', () => {
     fireEvent.click(screen.getByTitle('Delete session'));
     expect(screen.getByText('Delete this session permanently? This cannot be undone.')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
-    expect(onDeleteWorkflowSession).toHaveBeenCalledWith('root-live');
+    expect(onDeleteWorkflowSession).toHaveBeenCalledWith('root-live', { deleteWorktree: false });
 
     fireEvent.click(screen.getByRole('button', { name: 'Clear All Sessions' }));
     expect(onClearAllSessions).toHaveBeenCalled();
@@ -381,7 +393,7 @@ describe('WorkspaceTreeSidebar', () => {
     expect(screen.getByText('Delete 2 selected sessions permanently? This cannot be undone.')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
 
-    expect(onDeleteWorkflowSession).toHaveBeenCalledWith('root-live');
+    expect(onDeleteWorkflowSession).toHaveBeenCalledWith('root-live', { deleteWorktree: false });
     expect(onDelete).toHaveBeenCalledWith('history-1');
     expect(screen.queryByLabelText('Select session Ship auth')).not.toBeInTheDocument();
   });

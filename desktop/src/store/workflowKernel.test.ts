@@ -408,6 +408,7 @@ describe('workflowKernel store', () => {
     expect(result?.activeSessionId).toBe('kernel-6');
     expect(mockInvoke).toHaveBeenNthCalledWith(1, 'workflow_delete_session', {
       sessionId: 'kernel-5',
+      deleteWorktree: null,
     });
     expect(mockInvoke).toHaveBeenNthCalledWith(2, 'workflow_get_session_state', {
       sessionId: 'kernel-6',

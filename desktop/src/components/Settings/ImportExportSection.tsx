@@ -901,6 +901,7 @@ function buildFrontendExportState(settings: ReturnType<typeof useSettingsStore.g
     sidebar_collapsed: settings.sidebarCollapsed,
     auto_panel_hover_enabled: settings.autoPanelHoverEnabled,
     close_to_background_enabled: settings.closeToBackgroundEnabled,
+    worktree_auto_cleanup_on_session_delete: settings.worktreeAutoCleanupOnSessionDelete,
     workspace_path: settings.workspacePath,
   };
 }
@@ -924,6 +925,9 @@ function syncSettingsToStore(settings: Record<string, unknown>) {
   if (settings.default_mode) store.setDefaultMode(settings.default_mode as 'simple' | 'expert');
   if (typeof settings.close_to_background_enabled === 'boolean') {
     store.setCloseToBackgroundEnabled(settings.close_to_background_enabled);
+  }
+  if (typeof settings.worktree_auto_cleanup_on_session_delete === 'boolean') {
+    store.setWorktreeAutoCleanupOnSessionDelete(settings.worktree_auto_cleanup_on_session_delete);
   }
 
   // Handle complex objects

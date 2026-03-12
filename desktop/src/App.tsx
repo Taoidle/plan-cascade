@@ -16,6 +16,7 @@ import { useTranslation } from 'react-i18next';
 import { AnimatedModeContent } from './components/ModeSwitch';
 import { TopNavBar } from './components/TopNavBar';
 import { SimpleMode } from './components/SimpleMode';
+import { SimpleTopBarContext, SessionRuntimeCapsule } from './components/SimpleMode/SimpleTopBarContext';
 import { ExpertMode } from './components/ExpertMode';
 import { ClaudeCodeMode } from './components/ClaudeCodeMode';
 import { Projects } from './components/Projects';
@@ -345,7 +346,11 @@ function AppContent() {
       <FeatureTour active={tourActive} onFinish={endTour} />
 
       {/* Top Navigation Bar */}
-      <TopNavBar onOpenCommandPalette={openCommandPalette} />
+      <TopNavBar
+        onOpenCommandPalette={openCommandPalette}
+        centerSlot={mode === 'simple' ? <SimpleTopBarContext /> : undefined}
+        actionsSlot={mode === 'simple' ? <SessionRuntimeCapsule /> : undefined}
+      />
 
       {/* Main Content with animated transitions */}
       <main className="flex-1 overflow-hidden flex flex-col min-w-0">

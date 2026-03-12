@@ -19,6 +19,7 @@ use serde_json::{json, Value};
 use tokio::sync::RwLock;
 
 use crate::commands::task_mode::{TaskConfigConfirmationState, TaskWorkflowConfig};
+use crate::models::worktree::{PullRequestInfo, WorktreeStatus};
 use crate::services::debug_mode::{
     runtime_capabilities_for_profile, DebugCapabilityProfile, DebugPendingApproval,
     DebugRuntimeCapabilities, DebugState,
@@ -65,6 +66,45 @@ impl Default for WorkflowBackgroundState {
     fn default() -> Self {
         Self::Foreground
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkflowRuntimeKind {
+    Main,
+    ManagedWorktree,
+    LegacyWorktree,
+}
+
+impl Default for WorkflowRuntimeKind {
+    fn default() -> Self {
+        Self::Main
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionRuntimeInfo {
+    #[serde(default)]
+    pub root_path: Option<String>,
+    #[serde(default)]
+    pub runtime_path: Option<String>,
+    #[serde(default)]
+    pub runtime_kind: WorkflowRuntimeKind,
+    #[serde(default)]
+    pub display_label: Option<String>,
+    #[serde(default)]
+    pub branch: Option<String>,
+    #[serde(default)]
+    pub target_branch: Option<String>,
+    #[serde(default)]
+    pub managed_worktree_id: Option<String>,
+    #[serde(default)]
+    pub legacy: bool,
+    #[serde(default)]
+    pub runtime_status: Option<WorktreeStatus>,
+    #[serde(default)]
+    pub pr_status: Option<PullRequestInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -358,6 +398,8 @@ pub struct WorkflowSessionCatalogItem {
     pub session_id: String,
     pub session_kind: WorkflowSessionKind,
     pub display_title: String,
+    #[serde(default)]
+    pub runtime: SessionRuntimeInfo,
     pub workspace_path: Option<String>,
     pub active_mode: WorkflowMode,
     pub status: WorkflowStatus,
@@ -555,6 +597,8 @@ pub struct WorkflowSession {
     pub session_kind: WorkflowSessionKind,
     #[serde(default = "default_display_title")]
     pub display_title: String,
+    #[serde(default)]
+    pub runtime: SessionRuntimeInfo,
     #[serde(default)]
     pub workspace_path: Option<String>,
     pub status: WorkflowStatus,
@@ -793,10 +837,12 @@ impl WorkflowKernelState {
         if let Some(context) = initial_context.as_ref() {
             append_handoff_to_context_ledger(&mut ledger_entries, active_mode, context.clone());
         }
+        let runtime = derive_session_runtime_info(initial_context.as_ref());
         let mut session = WorkflowSession {
             session_id: session_id.clone(),
             session_kind: WorkflowSessionKind::SimpleRoot,
             display_title: derive_initial_display_title(initial_mode, initial_context.as_ref()),
+            runtime,
             workspace_path: derive_workspace_path(initial_context.as_ref()),
             status: WorkflowStatus::Active,
             active_mode,
@@ -892,6 +938,7 @@ impl WorkflowKernelState {
                 session_id: session.session_id,
                 session_kind: session.session_kind,
                 display_title: session.display_title,
+                runtime: session.runtime,
                 workspace_path: session.workspace_path,
                 active_mode: session.active_mode,
                 status: session.status,
@@ -947,6 +994,26 @@ impl WorkflowKernelState {
         };
 
         self.persist_session_record(session_id).await?;
+        Ok(updated_session)
+    }
+
+    pub async fn update_session_runtime(
+        &self,
+        session_id: &str,
+        runtime: SessionRuntimeInfo,
+    ) -> Result<WorkflowSession, String> {
+        let updated_session = {
+            let mut sessions = self.sessions.write().await;
+            let session = sessions
+                .get_mut(session_id)
+                .ok_or_else(|| format!("Workflow session not found: {session_id}"))?;
+            session.runtime = runtime;
+            repair_session_runtime(session);
+            session.updated_at = now_rfc3339();
+            session.clone()
+        };
+        self.persist_session_record(session_id).await?;
+        self.refresh_all_session_runtime_meta().await?;
         Ok(updated_session)
     }
 
@@ -3226,6 +3293,7 @@ impl WorkflowKernelState {
         session: &mut WorkflowSession,
         active_session_id: Option<&str>,
     ) {
+        repair_session_runtime(session);
         session.context_ledger = build_context_ledger_summary(&session.handoff_context);
         session.mode_snapshots.ensure_mode(WorkflowMode::Chat);
         session.mode_snapshots.ensure_mode(WorkflowMode::Plan);
@@ -4098,12 +4166,94 @@ fn is_default_display_title(title: &str) -> bool {
 }
 
 fn derive_workspace_path(initial_context: Option<&HandoffContextBundle>) -> Option<String> {
-    initial_context
-        .and_then(|context| context.metadata.get("workspacePath"))
+    let runtime = derive_session_runtime_info(initial_context);
+    runtime
+        .runtime_path
+        .or(runtime.root_path)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn derive_session_runtime_info(initial_context: Option<&HandoffContextBundle>) -> SessionRuntimeInfo {
+    let metadata = initial_context.map(|context| &context.metadata);
+    let root_path = metadata
+        .and_then(|map| map.get("workspaceRootPath").or_else(|| map.get("workspacePath")))
         .and_then(|value| value.as_str())
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned)
+        .map(ToOwned::to_owned);
+    let runtime_path = metadata
+        .and_then(|map| map.get("runtimePath").or_else(|| map.get("workspacePath")))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    let runtime_kind = metadata
+        .and_then(|map| map.get("runtimeKind"))
+        .and_then(|value| value.as_str())
+        .map(|value| match value.trim().to_ascii_lowercase().as_str() {
+            "managed_worktree" => WorkflowRuntimeKind::ManagedWorktree,
+            "legacy_worktree" => WorkflowRuntimeKind::LegacyWorktree,
+            _ => WorkflowRuntimeKind::Main,
+        })
+        .unwrap_or_default();
+    let legacy = matches!(runtime_kind, WorkflowRuntimeKind::LegacyWorktree);
+    SessionRuntimeInfo {
+        root_path,
+        runtime_path,
+        runtime_kind,
+        display_label: metadata
+            .and_then(|map| map.get("runtimeDisplayLabel"))
+            .and_then(|value| value.as_str())
+            .map(ToOwned::to_owned),
+        branch: metadata
+            .and_then(|map| map.get("runtimeBranch"))
+            .and_then(|value| value.as_str())
+            .map(ToOwned::to_owned),
+        target_branch: metadata
+            .and_then(|map| map.get("targetBranch"))
+            .and_then(|value| value.as_str())
+            .map(ToOwned::to_owned),
+        managed_worktree_id: metadata
+            .and_then(|map| map.get("managedWorktreeId"))
+            .and_then(|value| value.as_str())
+            .map(ToOwned::to_owned),
+        legacy,
+        runtime_status: None,
+        pr_status: None,
+    }
+}
+
+fn repair_session_runtime(session: &mut WorkflowSession) {
+    if session.runtime.root_path.is_none() {
+        session.runtime.root_path = session.workspace_path.clone();
+    }
+    if session.runtime.runtime_path.is_none() {
+        session.runtime.runtime_path = session.workspace_path.clone();
+    }
+    if session.runtime.runtime_path.is_none() {
+        session.runtime.runtime_path = session.runtime.root_path.clone();
+    }
+    if session.workspace_path.is_none() {
+        session.workspace_path = session.runtime.runtime_path.clone().or_else(|| session.runtime.root_path.clone());
+    } else {
+        session.workspace_path = session.runtime.runtime_path.clone().or_else(|| session.workspace_path.clone());
+    }
+    if session.runtime.root_path.is_none() {
+        session.runtime.root_path = session.workspace_path.clone();
+    }
+    session.runtime.legacy = matches!(session.runtime.runtime_kind, WorkflowRuntimeKind::LegacyWorktree);
+    if matches!(
+        session.runtime.runtime_kind,
+        WorkflowRuntimeKind::ManagedWorktree | WorkflowRuntimeKind::LegacyWorktree
+    ) && session.runtime.managed_worktree_id.is_none()
+    {
+        session.runtime.managed_worktree_id = session
+            .runtime
+            .runtime_path
+            .as_ref()
+            .and_then(|value| PathBuf::from(value).file_name().and_then(|name| name.to_str()).map(ToOwned::to_owned));
+    }
 }
 
 fn summarize_display_title(content: &str) -> String {

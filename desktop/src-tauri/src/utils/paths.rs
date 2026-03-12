@@ -37,6 +37,11 @@ pub fn agents_dir() -> AppResult<PathBuf> {
     Ok(plan_cascade_dir()?.join("agents"))
 }
 
+/// Get the managed worktrees directory (~/.plan-cascade/worktrees/)
+pub fn worktrees_dir() -> AppResult<PathBuf> {
+    Ok(plan_cascade_dir()?.join("worktrees"))
+}
+
 /// Ensure a directory exists, creating it if necessary
 pub fn ensure_dir(path: &PathBuf) -> AppResult<()> {
     if !path.exists() {
@@ -62,6 +67,13 @@ pub fn ensure_plan_cascade_dir() -> AppResult<PathBuf> {
 /// Get the agents directory, creating if it doesn't exist
 pub fn ensure_agents_dir() -> AppResult<PathBuf> {
     let path = agents_dir()?;
+    ensure_dir(&path)?;
+    Ok(path)
+}
+
+/// Get the managed worktrees directory, creating if it doesn't exist
+pub fn ensure_worktrees_dir() -> AppResult<PathBuf> {
+    let path = worktrees_dir()?;
     ensure_dir(&path)?;
     Ok(path)
 }
@@ -97,5 +109,12 @@ mod tests {
         let path = database_path();
         assert!(path.is_ok());
         assert!(path.unwrap().to_string_lossy().contains("data.db"));
+    }
+
+    #[test]
+    fn test_worktrees_dir() {
+        let dir = worktrees_dir();
+        assert!(dir.is_ok());
+        assert!(dir.unwrap().to_string_lossy().contains(".plan-cascade/worktrees"));
     }
 }

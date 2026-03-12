@@ -31,6 +31,7 @@ export interface AppConfig {
   max_recent_projects: number;
   debug_mode: boolean;
   close_to_background_enabled: boolean;
+  worktree_auto_cleanup_on_session_delete: boolean;
 }
 
 export interface SettingsUpdate {
@@ -47,6 +48,7 @@ export interface SettingsUpdate {
   max_recent_projects?: number;
   debug_mode?: boolean;
   close_to_background_enabled?: boolean;
+  worktree_auto_cleanup_on_session_delete?: boolean;
 }
 
 export interface KnowledgeFeatureFlags {

@@ -656,9 +656,37 @@ pub async fn workflow_restore_session(
 #[tauri::command]
 pub async fn workflow_delete_session(
     session_id: String,
+    delete_worktree: Option<bool>,
     state: tauri::State<'_, WorkflowKernelState>,
+    worktree_state: tauri::State<'_, crate::commands::worktree::WorktreeState>,
+    app_state: tauri::State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<CommandResponse<WorkflowSessionCatalogState>, String> {
+    let auto_cleanup = match delete_worktree {
+        Some(value) => value,
+        None => app_state
+            .get_config()
+            .await
+            .map(|config| config.worktree_auto_cleanup_on_session_delete)
+            .unwrap_or(false),
+    };
+    if auto_cleanup {
+        if let Ok(session) = state.get_session(&session_id).await {
+            if let (Some(root_path), Some(worktree_id)) = (
+                session.runtime.root_path.as_deref(),
+                session.runtime.managed_worktree_id.as_deref(),
+            ) {
+                let manager = worktree_state.manager.read().await;
+                let _ = manager
+                    .cleanup_managed_worktree(
+                        &std::path::PathBuf::from(root_path),
+                        worktree_id,
+                        true,
+                    )
+                    .await;
+            }
+        }
+    }
     let result = state.delete_session(&session_id).await;
     Ok(match result {
         Ok(catalog_state) => {

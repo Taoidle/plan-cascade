@@ -314,6 +314,9 @@ pub fn import_backend_settings(
             debug_mode: Some(new_config.debug_mode),
             search_provider: Some(new_config.search_provider),
             close_to_background_enabled: Some(new_config.close_to_background_enabled),
+            worktree_auto_cleanup_on_session_delete: Some(
+                new_config.worktree_auto_cleanup_on_session_delete,
+            ),
         };
         config_service.update_config(update)?;
         Ok(())

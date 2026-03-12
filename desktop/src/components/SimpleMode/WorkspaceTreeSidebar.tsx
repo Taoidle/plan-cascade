@@ -17,7 +17,9 @@ import { useSkillMemoryStore } from '../../store/skillMemory';
 import { usePluginStore } from '../../store/plugins';
 import { useAgentsStore } from '../../store/agents';
 import { usePromptsStore } from '../../store/prompts';
+import { useWorkflowKernelStore } from '../../store/workflowKernel';
 import type { WorkflowSessionCatalogItem } from '../../types/workflowKernel';
+import type { Worktree, WorktreeCleanupPolicy } from '../../types/git';
 import { Collapsible } from './Collapsible';
 import { buildSessionTreeViewModel, type PathGroup, type SessionTreeItem } from './sessionTreeViewModel';
 import { SkillMemoryPanel } from './SkillMemoryPanel';
@@ -41,7 +43,7 @@ export interface WorkspaceTreeSidebarProps {
   onRename: (id: string, title: string) => void;
   onClear: () => void;
   onClearAllSessions?: () => void;
-  onNewTask: () => void;
+  onNewTask: (request?: NewSessionRequest) => void;
   currentTask?: string | null;
   /** Background session snapshots keyed by session ID */
   backgroundSessions?: Record<string, SessionSnapshot>;
@@ -59,10 +61,14 @@ export interface WorkspaceTreeSidebarProps {
   onRenameWorkflowSession?: (id: string, title: string) => void;
   onArchiveWorkflowSession?: (id: string) => void;
   onRestoreWorkflowSession?: (id: string) => void;
-  onDeleteWorkflowSession?: (id: string) => void;
+  onDeleteWorkflowSession?: (
+    id: string,
+    options?: {
+      deleteWorktree?: boolean;
+    },
+  ) => void;
   pathGroups?: PathGroup[];
   activePath?: string | null;
-  onNewTaskInPath?: (path: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -87,6 +93,250 @@ function timeAgo(timestamp: number, nowMs: number, t: ReturnType<typeof useTrans
 }
 
 type SessionManageTarget = Pick<SessionTreeItem, 'kind' | 'sourceSessionId' | 'title'>;
+
+type SessionRuntimeMode = 'main' | 'managed_worktree' | 'attach_existing_worktree';
+
+export interface NewSessionRequest {
+  workspacePath: string;
+  runtimeMode: SessionRuntimeMode;
+  taskName?: string;
+  targetBranch?: string;
+  worktreePath?: string;
+  cleanupPolicy?: WorktreeCleanupPolicy;
+}
+
+interface WorkflowSessionDeleteMeta {
+  hasManagedWorktree: boolean;
+  runtimeLabel: string | null;
+  autoCleanupDefault: boolean;
+}
+
+function NewSessionDialog({
+  open,
+  workspacePath,
+  suggestedTaskName,
+  autoCleanupDefault,
+  existingWorktrees,
+  onOpenChange,
+  onConfirm,
+}: {
+  open: boolean;
+  workspacePath: string;
+  suggestedTaskName: string;
+  autoCleanupDefault: boolean;
+  existingWorktrees: Worktree[];
+  onOpenChange: (open: boolean) => void;
+  onConfirm: (request: NewSessionRequest) => void;
+}) {
+  const { t } = useTranslation('simpleMode');
+  const [runtimeMode, setRuntimeMode] = useState<SessionRuntimeMode>('main');
+  const [taskName, setTaskName] = useState(suggestedTaskName);
+  const [targetBranch, setTargetBranch] = useState('main');
+  const [selectedWorktreePath, setSelectedWorktreePath] = useState('');
+  const [cleanupPolicy, setCleanupPolicy] = useState<WorktreeCleanupPolicy>(
+    autoCleanupDefault ? 'delete_on_session_delete' : 'manual',
+  );
+
+  useEffect(() => {
+    if (!open) return;
+    setTaskName(suggestedTaskName);
+    setTargetBranch('main');
+    setCleanupPolicy(autoCleanupDefault ? 'delete_on_session_delete' : 'manual');
+    setSelectedWorktreePath(existingWorktrees[0]?.path ?? '');
+  }, [autoCleanupDefault, existingWorktrees, open, suggestedTaskName]);
+
+  const canSubmit =
+    workspacePath.trim().length > 0 &&
+    (runtimeMode !== 'managed_worktree' || taskName.trim().length > 0) &&
+    (runtimeMode !== 'attach_existing_worktree' || selectedWorktreePath.trim().length > 0);
+
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-[90] bg-black/40 backdrop-blur-[1px]" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-[100] w-[min(92vw,560px)] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-gray-200 bg-white p-5 shadow-xl dark:border-gray-700 dark:bg-gray-900">
+          <Dialog.Title className="text-base font-semibold text-gray-900 dark:text-gray-100">
+            {t('sidebar.newSessionDialog.title', { defaultValue: 'Create session runtime' })}
+          </Dialog.Title>
+          <Dialog.Description className="mt-2 text-sm text-gray-600 dark:text-gray-300">
+            {t('sidebar.newSessionDialog.description', {
+              defaultValue:
+                'Choose whether this session should run in the main workspace, a new managed worktree, or an existing worktree.',
+            })}
+          </Dialog.Description>
+
+          <div className="mt-4 space-y-4">
+            <div>
+              <div className="mb-1 text-xs font-medium text-gray-600 dark:text-gray-300">
+                {t('sidebar.newSessionDialog.workspace', { defaultValue: 'Workspace root' })}
+              </div>
+              <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 font-mono text-xs text-gray-700 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-200">
+                {workspacePath}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="flex items-start gap-3 rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+                <input
+                  type="radio"
+                  name="session-runtime-mode"
+                  checked={runtimeMode === 'main'}
+                  onChange={() => setRuntimeMode('main')}
+                  className="mt-1"
+                />
+                <div>
+                  <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                    {t('sidebar.newSessionDialog.main', { defaultValue: 'Main workspace' })}
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">
+                    {t('sidebar.newSessionDialog.mainHelp', {
+                      defaultValue: 'Run directly in the project root without creating a worktree.',
+                    })}
+                  </div>
+                </div>
+              </label>
+              <label className="flex items-start gap-3 rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+                <input
+                  type="radio"
+                  name="session-runtime-mode"
+                  checked={runtimeMode === 'managed_worktree'}
+                  onChange={() => setRuntimeMode('managed_worktree')}
+                  className="mt-1"
+                />
+                <div className="flex-1">
+                  <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                    {t('sidebar.newSessionDialog.managed', { defaultValue: 'New managed worktree' })}
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">
+                    {t('sidebar.newSessionDialog.managedHelp', {
+                      defaultValue: 'Create an isolated runtime under ~/.plan-cascade/worktrees for this session.',
+                    })}
+                  </div>
+                  {runtimeMode === 'managed_worktree' ? (
+                    <div className="mt-3 grid gap-3">
+                      <input
+                        type="text"
+                        value={taskName}
+                        onChange={(event) => setTaskName(event.target.value)}
+                        placeholder={t('sidebar.newSessionDialog.taskNamePlaceholder', {
+                          defaultValue: 'feature-runtime-isolation',
+                        })}
+                        className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition-colors focus:border-primary-500 focus:ring-2 focus:ring-primary-500/30 dark:border-gray-600 dark:bg-gray-950 dark:text-gray-100"
+                      />
+                      <input
+                        type="text"
+                        value={targetBranch}
+                        onChange={(event) => setTargetBranch(event.target.value)}
+                        placeholder={t('sidebar.newSessionDialog.targetBranchPlaceholder', {
+                          defaultValue: 'main',
+                        })}
+                        className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition-colors focus:border-primary-500 focus:ring-2 focus:ring-primary-500/30 dark:border-gray-600 dark:bg-gray-950 dark:text-gray-100"
+                      />
+                    </div>
+                  ) : null}
+                </div>
+              </label>
+              <label className="flex items-start gap-3 rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+                <input
+                  type="radio"
+                  name="session-runtime-mode"
+                  checked={runtimeMode === 'attach_existing_worktree'}
+                  onChange={() => setRuntimeMode('attach_existing_worktree')}
+                  className="mt-1"
+                />
+                <div className="flex-1">
+                  <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                    {t('sidebar.newSessionDialog.attach', { defaultValue: 'Attach existing worktree' })}
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">
+                    {t('sidebar.newSessionDialog.attachHelp', {
+                      defaultValue: 'Bind this new session to an existing managed or legacy worktree.',
+                    })}
+                  </div>
+                  {runtimeMode === 'attach_existing_worktree' ? (
+                    existingWorktrees.length > 0 ? (
+                      <select
+                        value={selectedWorktreePath}
+                        onChange={(event) => setSelectedWorktreePath(event.target.value)}
+                        className="mt-3 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition-colors focus:border-primary-500 focus:ring-2 focus:ring-primary-500/30 dark:border-gray-600 dark:bg-gray-950 dark:text-gray-100"
+                      >
+                        {existingWorktrees.map((worktree) => (
+                          <option key={worktree.path} value={worktree.path}>
+                            {worktree.branch} - {worktree.path}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <p className="mt-3 text-xs text-amber-600 dark:text-amber-300">
+                        {t('sidebar.newSessionDialog.noWorktrees', {
+                          defaultValue: 'No existing worktrees were found for this repository.',
+                        })}
+                      </p>
+                    )
+                  ) : null}
+                </div>
+              </label>
+            </div>
+
+            {runtimeMode !== 'main' ? (
+              <label className="flex items-start gap-3 rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+                <input
+                  type="checkbox"
+                  checked={cleanupPolicy === 'delete_on_session_delete'}
+                  onChange={(event) => setCleanupPolicy(event.target.checked ? 'delete_on_session_delete' : 'manual')}
+                  className="mt-1"
+                />
+                <div>
+                  <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                    {t('sidebar.newSessionDialog.cleanupLabel', {
+                      defaultValue: 'Delete worktree when deleting the session',
+                    })}
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">
+                    {t('sidebar.newSessionDialog.cleanupHelp', {
+                      defaultValue:
+                        'This only changes the default for this session. You can still override it when deleting the session later.',
+                    })}
+                  </div>
+                </div>
+              </label>
+            ) : null}
+          </div>
+
+          <div className="mt-5 flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => onOpenChange(false)}
+              className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
+            >
+              {t('sidebar.cancelAction', { defaultValue: 'Cancel' })}
+            </button>
+            <button
+              type="button"
+              disabled={!canSubmit}
+              onClick={() =>
+                onConfirm({
+                  workspacePath,
+                  runtimeMode,
+                  taskName: taskName.trim(),
+                  targetBranch: targetBranch.trim(),
+                  worktreePath: selectedWorktreePath.trim(),
+                  cleanupPolicy,
+                })
+              }
+              className={clsx(
+                'rounded-md px-3 py-1.5 text-sm text-white transition-colors',
+                canSubmit ? 'bg-primary-600 hover:bg-primary-700' : 'cursor-not-allowed bg-gray-400 dark:bg-gray-600',
+              )}
+            >
+              {t('sidebar.newSessionDialog.confirm', { defaultValue: 'Create session' })}
+            </button>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Sidebar Header
@@ -455,6 +705,16 @@ function modeBadgeLabel(mode: SessionTreeItem['mode']): string | null {
   return null;
 }
 
+function runtimeBadgeLabel(item: SessionTreeItem, t: ReturnType<typeof useTranslation>['t']): string | null {
+  if (item.runtimeKind === 'managed_worktree') {
+    return t('sidebar.runtime.managed', { defaultValue: 'worktree' });
+  }
+  if (item.runtimeKind === 'legacy_worktree') {
+    return t('sidebar.runtime.legacy', { defaultValue: 'legacy' });
+  }
+  return null;
+}
+
 function SessionTreeRow({
   item,
   nowMs,
@@ -632,8 +892,34 @@ function SessionTreeRow({
         {item.detailSummary && (
           <p className="mt-1 text-2xs leading-4 text-gray-500 dark:text-gray-400 line-clamp-2">{item.detailSummary}</p>
         )}
+        {(item.runtimeKind !== 'main' || item.runtimeBranch || item.runtimePrState) && (
+          <div className="mt-1 flex flex-wrap items-center gap-1">
+            {runtimeBadgeLabel(item, t) ? (
+              <span className="inline-flex max-w-full items-center rounded-full bg-primary-50 px-1.5 py-0.5 text-[10px] font-medium leading-none text-primary-700 dark:bg-primary-900/30 dark:text-primary-300">
+                <span className="truncate">{runtimeBadgeLabel(item, t)}</span>
+              </span>
+            ) : null}
+            {item.runtimeBranch ? (
+              <span className="inline-flex max-w-full items-center rounded-full bg-gray-100 px-1.5 py-0.5 font-mono text-[10px] font-medium leading-none text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+                <span className="truncate">{item.runtimeBranch}</span>
+              </span>
+            ) : null}
+            {item.runtimePrState ? (
+              <span className="inline-flex max-w-full items-center rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium leading-none text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+                <span className="truncate">
+                  {t('sidebar.prState', { defaultValue: 'PR' })}: {item.runtimePrState}
+                </span>
+              </span>
+            ) : null}
+          </div>
+        )}
         <div className="mt-0.5 flex items-center gap-2 text-2xs text-gray-500 dark:text-gray-400">
           {item.status !== 'idle' ? <span>{statusText(item.status, t)}</span> : null}
+          {item.workspaceRootPath && item.runtimePath && item.workspaceRootPath !== item.runtimePath ? (
+            <span className="truncate" title={`${item.workspaceRootPath} -> ${item.runtimePath}`}>
+              {t('sidebar.runtimePath', { defaultValue: 'runtime' })}: {item.runtimePath}
+            </span>
+          ) : null}
           <span>{timeAgo(item.updatedAt, nowMs, t)}</span>
         </div>
       </div>
@@ -854,7 +1140,6 @@ export const WorkspaceTreeSidebar = memo(function WorkspaceTreeSidebar({
   onDeleteWorkflowSession,
   pathGroups,
   activePath,
-  onNewTaskInPath,
 }: WorkspaceTreeSidebarProps) {
   const { t } = useTranslation('simpleMode');
   const workspacePath = useSettingsStore((s) => s.workspacePath);
@@ -865,6 +1150,8 @@ export const WorkspaceTreeSidebar = memo(function WorkspaceTreeSidebar({
   const setSessionPathSort = useSettingsStore((s) => s.setSessionPathSort);
   const showArchivedSessions = useSettingsStore((s) => s.showArchivedSessions);
   const setShowArchivedSessions = useSettingsStore((s) => s.setShowArchivedSessions);
+  const worktreeAutoCleanupOnSessionDelete = useSettingsStore((s) => s.worktreeAutoCleanupOnSessionDelete);
+  const listRepoWorktrees = useWorkflowKernelStore((s) => s.listRepoWorktrees);
 
   const skills = useSkillMemoryStore((s) => s.skills);
   const loadSkills = useSkillMemoryStore((s) => s.loadSkills);
@@ -902,6 +1189,15 @@ export const WorkspaceTreeSidebar = memo(function WorkspaceTreeSidebar({
   const [selectedSessionIds, setSelectedSessionIds] = useState<Set<string>>(() => new Set());
   const [bulkDeleteTargets, setBulkDeleteTargets] = useState<SessionManageTarget[] | null>(null);
   const [bulkArchiveTargets, setBulkArchiveTargets] = useState<SessionManageTarget[] | null>(null);
+  const [newSessionDialog, setNewSessionDialog] = useState<{
+    open: boolean;
+    workspacePath: string;
+    existingWorktrees: Worktree[];
+  }>({
+    open: false,
+    workspacePath: '',
+    existingWorktrees: [],
+  });
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -938,7 +1234,7 @@ export const WorkspaceTreeSidebar = memo(function WorkspaceTreeSidebar({
 
   // Auto-expand the active directory on mount / workspace change
   useEffect(() => {
-    const activeNormalized = normalizeWorkspacePath(workspacePath);
+    const activeNormalized = normalizeWorkspacePath(activePath ?? workspacePath);
     if (!activeNormalized) return;
 
     setExpandedPaths((prev) => {
@@ -956,7 +1252,7 @@ export const WorkspaceTreeSidebar = memo(function WorkspaceTreeSidebar({
       }
       return prev;
     });
-  }, [workspacePath, pinnedDirectories]);
+  }, [activePath, workspacePath, pinnedDirectories]);
 
   const effectivePathGroups = useMemo(
     () =>
@@ -1023,12 +1319,35 @@ export const WorkspaceTreeSidebar = memo(function WorkspaceTreeSidebar({
     [removePinnedDirectory],
   );
 
-  const fallbackNewTaskInPath = useCallback(
-    (dirPath: string) => {
-      setWorkspacePath(dirPath);
-      onNewTask();
+  const openNewSessionDialog = useCallback(
+    async (targetPath?: string | null) => {
+      const resolvedPath = (targetPath ?? workspacePath ?? '').trim();
+      if (!resolvedPath) {
+        onNewTask();
+        return;
+      }
+      let existingWorktrees: Worktree[] = [];
+      try {
+        existingWorktrees = await listRepoWorktrees(resolvedPath);
+      } catch (error) {
+        console.warn('Failed to list repo worktrees for session creation dialog:', error);
+      }
+      setNewSessionDialog({
+        open: true,
+        workspacePath: resolvedPath,
+        existingWorktrees,
+      });
     },
-    [setWorkspacePath, onNewTask],
+    [listRepoWorktrees, onNewTask, workspacePath],
+  );
+
+  const handleConfirmNewSession = useCallback(
+    (request: NewSessionRequest) => {
+      setWorkspacePath(request.workspacePath);
+      onNewTask(request);
+      setNewSessionDialog((prev) => ({ ...prev, open: false }));
+    },
+    [onNewTask, setWorkspacePath],
   );
 
   // Restore session and set workspace path to match.
@@ -1197,6 +1516,59 @@ export const WorkspaceTreeSidebar = memo(function WorkspaceTreeSidebar({
     [allSessionTargets, selectedSessionIds],
   );
 
+  const workflowDeleteMetaBySessionId = useMemo(
+    () =>
+      Object.fromEntries(
+        workflowSessions.map((session) => [
+          session.sessionId,
+          {
+            hasManagedWorktree: session.runtime?.runtimeKind === 'managed_worktree',
+            runtimeLabel: session.runtime?.branch ?? session.runtime?.runtimePath ?? null,
+            autoCleanupDefault:
+              session.runtime?.runtimeKind === 'managed_worktree' && worktreeAutoCleanupOnSessionDelete,
+          } satisfies WorkflowSessionDeleteMeta,
+        ]),
+      ) as Record<string, WorkflowSessionDeleteMeta>,
+    [workflowSessions, worktreeAutoCleanupOnSessionDelete],
+  );
+
+  const deleteSessionMeta = useMemo(() => {
+    if (deleteTarget?.kind !== 'live' && deleteTarget?.kind !== 'archived') return null;
+    return workflowDeleteMetaBySessionId[deleteTarget.sourceSessionId] ?? null;
+  }, [deleteTarget, workflowDeleteMetaBySessionId]);
+  const bulkDeleteManagedCount = useMemo(
+    () =>
+      (bulkDeleteTargets ?? []).filter(
+        (target) =>
+          (target.kind === 'live' || target.kind === 'archived') &&
+          workflowDeleteMetaBySessionId[target.sourceSessionId]?.hasManagedWorktree,
+      ).length,
+    [bulkDeleteTargets, workflowDeleteMetaBySessionId],
+  );
+  const [deleteManagedWorktree, setDeleteManagedWorktree] = useState(worktreeAutoCleanupOnSessionDelete);
+
+  useEffect(() => {
+    if (!deleteTarget && !bulkDeleteTargets) return;
+    if (bulkDeleteTargets) {
+      setDeleteManagedWorktree(
+        worktreeAutoCleanupOnSessionDelete &&
+          bulkDeleteTargets.some(
+            (target) =>
+              (target.kind === 'live' || target.kind === 'archived') &&
+              workflowDeleteMetaBySessionId[target.sourceSessionId]?.hasManagedWorktree,
+          ),
+      );
+      return;
+    }
+    setDeleteManagedWorktree(deleteSessionMeta?.autoCleanupDefault ?? false);
+  }, [
+    bulkDeleteTargets,
+    deleteSessionMeta,
+    deleteTarget,
+    workflowDeleteMetaBySessionId,
+    worktreeAutoCleanupOnSessionDelete,
+  ]);
+
   const handleStartSelection = useCallback(() => {
     setSelectionMode(true);
   }, []);
@@ -1227,7 +1599,10 @@ export const WorkspaceTreeSidebar = memo(function WorkspaceTreeSidebar({
       if (target.kind === 'history') {
         onDelete(target.sourceSessionId);
       } else {
-        onDeleteWorkflowSession?.(target.sourceSessionId);
+        const meta = workflowDeleteMetaBySessionId[target.sourceSessionId];
+        onDeleteWorkflowSession?.(target.sourceSessionId, {
+          deleteWorktree: meta?.hasManagedWorktree ? deleteManagedWorktree : false,
+        });
       }
     }
 
@@ -1235,7 +1610,14 @@ export const WorkspaceTreeSidebar = memo(function WorkspaceTreeSidebar({
     setBulkDeleteTargets(null);
     setSelectionMode(false);
     setSelectedSessionIds(new Set());
-  }, [bulkDeleteTargets, deleteTarget, onDelete, onDeleteWorkflowSession]);
+  }, [
+    bulkDeleteTargets,
+    deleteManagedWorktree,
+    deleteTarget,
+    onDelete,
+    onDeleteWorkflowSession,
+    workflowDeleteMetaBySessionId,
+  ]);
 
   return (
     <div className="h-full min-h-0 flex flex-col rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
@@ -1244,7 +1626,7 @@ export const WorkspaceTreeSidebar = memo(function WorkspaceTreeSidebar({
         <SidebarTabs tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
         <SidebarActions
           activeTab={activeTab}
-          onNewTask={onNewTask}
+          onNewTask={() => void openNewSessionDialog(workspacePath)}
           onAddDirectory={handleAddDirectory}
           sessionPathSort={sessionPathSort}
           onSessionPathSortChange={setSessionPathSort}
@@ -1297,9 +1679,7 @@ export const WorkspaceTreeSidebar = memo(function WorkspaceTreeSidebar({
                       onUnpin={
                         group.path && pinnedDirectories.includes(group.path) ? () => handleUnpin(group.path!) : null
                       }
-                      onNewTaskInPath={() =>
-                        group.path ? (onNewTaskInPath ?? fallbackNewTaskInPath)(group.path) : onNewTask()
-                      }
+                      onNewTaskInPath={() => void openNewSessionDialog(group.path ?? workspacePath)}
                       onActivateLive={onSwitchWorkflowSession}
                       onRestoreHistory={handleRestore}
                       onRestoreArchived={onRestoreWorkflowSession}
@@ -1419,6 +1799,16 @@ export const WorkspaceTreeSidebar = memo(function WorkspaceTreeSidebar({
 
       {/* Prompt Dialog (portal-rendered) */}
       <PromptDialog />
+
+      <NewSessionDialog
+        open={newSessionDialog.open}
+        workspacePath={newSessionDialog.workspacePath}
+        suggestedTaskName=""
+        autoCleanupDefault={worktreeAutoCleanupOnSessionDelete}
+        existingWorktrees={newSessionDialog.existingWorktrees}
+        onOpenChange={(open) => setNewSessionDialog((prev) => ({ ...prev, open }))}
+        onConfirm={handleConfirmNewSession}
+      />
 
       <Dialog.Root open={archiveTarget !== null || bulkArchiveTargets !== null} onOpenChange={handleCloseArchiveDialog}>
         <Dialog.Portal>
@@ -1559,6 +1949,29 @@ export const WorkspaceTreeSidebar = memo(function WorkspaceTreeSidebar({
                 (deleteTarget?.title ?? '')
               )}
             </div>
+            {(deleteSessionMeta?.hasManagedWorktree || bulkDeleteManagedCount > 0) && (
+              <label className="mt-4 flex items-start gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300">
+                <input
+                  type="checkbox"
+                  checked={deleteManagedWorktree}
+                  onChange={(event) => setDeleteManagedWorktree(event.target.checked)}
+                  className="mt-1"
+                />
+                <span>
+                  {bulkDeleteManagedCount > 0
+                    ? t('sidebar.deleteManagedWorktreesBulk', {
+                        count: bulkDeleteManagedCount,
+                        defaultValue: `Also delete ${bulkDeleteManagedCount} managed worktrees under ~/.plan-cascade/worktrees.`,
+                      })
+                    : t('sidebar.deleteManagedWorktree', {
+                        defaultValue: 'Also delete the managed worktree under ~/.plan-cascade/worktrees.',
+                      })}
+                  {deleteSessionMeta?.runtimeLabel ? (
+                    <span className="mt-1 block font-mono text-xs">{deleteSessionMeta.runtimeLabel}</span>
+                  ) : null}
+                </span>
+              </label>
+            )}
             <div className="mt-5 flex items-center justify-end gap-2">
               <button
                 type="button"

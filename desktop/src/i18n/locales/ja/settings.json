@@ -74,6 +74,11 @@
       "descriptionWindows": "Windows では、ウィンドウを閉じるとシステムトレイに隠れ、アプリは実行を続けます。トレイアイコンまたは「アプリを終了」から再表示または完全終了できます。",
       "descriptionLinux": "Linux では、ウィンドウを閉じるとタスクバーに最小化され、アプリは実行を続けます。タスクバー、トレイアイコン、または「アプリを終了」から再表示または完全終了できます。"
     },
+    "worktreeLifecycle": {
+      "title": "Worktree ライフサイクル",
+      "autoCleanup": "セッション削除時に管理対象 worktree を自動で掃除する",
+      "autoCleanupHelp": "有効にすると、管理対象 worktree を使うセッションの削除時に worktree も一緒に削除する設定を既定で選択します。"
+    },
 
     "knowledgeBase": {
       "title": "ナレッジベース",

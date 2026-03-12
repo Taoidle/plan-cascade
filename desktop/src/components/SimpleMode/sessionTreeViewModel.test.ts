@@ -79,6 +79,7 @@ function createWorkflowSession(overrides: Partial<WorkflowSessionCatalogItem> = 
       },
     },
     modeRuntimeMeta: overrides.modeRuntimeMeta ?? {},
+    runtime: overrides.runtime,
   };
 }
 
@@ -124,6 +125,36 @@ describe('sessionTreeViewModel', () => {
 
     expect(groups).toHaveLength(1);
     expect(groups[0].children.map((item) => item.title)).toEqual(['Newer', 'Older']);
+  });
+
+  it('groups managed worktree sessions by workspace root while preserving runtime metadata', () => {
+    const groups = buildSessionTreeViewModel({
+      workflowSessions: [
+        createWorkflowSession({
+          sessionId: 'wt-1',
+          workspacePath: '/Users/demo/.plan-cascade/worktrees/repo/session-a',
+          runtime: {
+            rootPath: '/repo/app',
+            runtimePath: '/Users/demo/.plan-cascade/worktrees/repo/session-a',
+            runtimeKind: 'managed_worktree',
+            branch: 'pc/feature-wt-1',
+            targetBranch: 'main',
+            managedWorktreeId: 'wt-1',
+            legacy: false,
+            runtimeStatus: null,
+            prStatus: {
+              url: 'https://example.com/pr/1',
+              state: 'open',
+            },
+          },
+        }),
+      ],
+    });
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0].path).toBe('/repo/app');
+    expect(groups[0].children[0]?.runtimeKind).toBe('managed_worktree');
+    expect(groups[0].children[0]?.runtimeBranch).toBe('pc/feature-wt-1');
   });
 
   it('filters archived sessions by default and can include them when requested', () => {

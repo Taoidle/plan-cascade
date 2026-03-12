@@ -290,6 +290,7 @@ async function saveSettingsToBackend() {
         minimax_endpoint: settings.minimaxEndpoint,
         qwen_endpoint: settings.qwenEndpoint,
         close_to_background_enabled: settings.closeToBackgroundEnabled,
+        worktree_auto_cleanup_on_session_delete: settings.worktreeAutoCleanupOnSessionDelete,
       });
       await setKnowledgeFeatureFlags({
         kbQueryRunsV2: settings.kbQueryRunsV2,

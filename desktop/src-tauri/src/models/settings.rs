@@ -42,6 +42,9 @@ pub struct AppConfig {
     /// Whether clicking the window close button keeps the app running in background.
     #[serde(default = "default_true")]
     pub close_to_background_enabled: bool,
+    /// Whether deleting a workflow session should also delete its managed worktree by default.
+    #[serde(default)]
+    pub worktree_auto_cleanup_on_session_delete: bool,
 }
 
 fn default_search_provider() -> String {
@@ -90,6 +93,7 @@ impl Default for AppConfig {
             debug_mode: false,
             search_provider: "duckduckgo".to_string(),
             close_to_background_enabled: true,
+            worktree_auto_cleanup_on_session_delete: false,
         }
     }
 }
@@ -111,6 +115,7 @@ pub struct SettingsUpdate {
     pub debug_mode: Option<bool>,
     pub search_provider: Option<String>,
     pub close_to_background_enabled: Option<bool>,
+    pub worktree_auto_cleanup_on_session_delete: Option<bool>,
 }
 
 impl AppConfig {
@@ -235,6 +240,9 @@ impl AppConfig {
         }
         if let Some(close_to_background_enabled) = update.close_to_background_enabled {
             self.close_to_background_enabled = close_to_background_enabled;
+        }
+        if let Some(enabled) = update.worktree_auto_cleanup_on_session_delete {
+            self.worktree_auto_cleanup_on_session_delete = enabled;
         }
     }
 

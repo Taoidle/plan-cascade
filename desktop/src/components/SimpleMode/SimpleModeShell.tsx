@@ -66,6 +66,8 @@ import { useSimpleKernelSession } from './useSimpleKernelSession';
 import { useSimpleQueueRuntime } from './useSimpleQueueRuntime';
 import { useWorkflowQuestionSpecs } from './useWorkflowQuestionSpecs';
 import { buildSessionTreeViewModel, normalizeSidebarSessionTitle } from './sessionTreeViewModel';
+import { useActiveSessionPaths } from './useActiveSessionPaths';
+import type { NewSessionRequest } from './WorkspaceTreeSidebar';
 import {
   cancelActiveWorkflow,
   submitWorkflowInputWithTracking,
@@ -305,6 +307,9 @@ export function SimpleModeShell() {
     bindSkillInvocationSession(workflowKernelSessionId);
   }, [bindSkillInvocationSession, workflowKernelSessionId]);
 
+  const activeSessionPaths = useActiveSessionPaths(workflowKernelSession, workspacePath);
+  const runtimeWorkspacePath = activeSessionPaths.runtimePath ?? workspacePath;
+
   useEffect(() => {
     void getWorkflowKernelCatalogState().then((catalogState) => {
       if (catalogState) {
@@ -356,8 +361,8 @@ export function SimpleModeShell() {
     [taskId, standaloneSessionId, workflowKernelSessionId, activeRootSessionId],
   );
   useEffect(() => {
-    if (bridgeSessionIds.length === 0 || !workspacePath) return;
-    const bridge = createFileChangeCardBridge(bridgeSessionIds, workspacePath);
+    if (bridgeSessionIds.length === 0 || !runtimeWorkspacePath) return;
+    const bridge = createFileChangeCardBridge(bridgeSessionIds, runtimeWorkspacePath);
     const unlistenPromise = bridge.startListening();
 
     // Listen for turn end (status transitions from running to something else)
@@ -379,7 +384,7 @@ export function SimpleModeShell() {
       unsub();
       bridge.reset();
     };
-  }, [bridgeSessionIds, workspacePath]);
+  }, [bridgeSessionIds, runtimeWorkspacePath]);
 
   const startWorkflow = useWorkflowOrchestratorStore((s) => s.startWorkflow);
   const submitInterviewAnswer = useWorkflowOrchestratorStore((s) => s.submitInterviewAnswer);
@@ -1171,57 +1176,83 @@ export function SimpleModeShell() {
     workspaceReferences,
   ]);
 
-  const handleNewTask = useCallback(() => {
-    const hasContext =
-      (workflowKernelSession?.contextLedger.conversationTurnCount ?? 0) > 0 ||
-      getCachedWorkflowKernelModeTranscript(workflowKernelSessionId, workflowMode).lines.length > 0;
+  const handleNewTask = useCallback(
+    async (request?: NewSessionRequest) => {
+      const targetWorkspacePath = request?.workspacePath ?? workspacePath;
+      const hasContext =
+        (workflowKernelSession?.contextLedger.conversationTurnCount ?? 0) > 0 ||
+        getCachedWorkflowKernelModeTranscript(workflowKernelSessionId, workflowMode).lines.length > 0;
 
-    persistForegroundModeView(workflowKernelSessionId, workflowMode);
-    resetWorkflow();
-    resetPlanWorkflow();
-    resetDebugWorkflow();
-    reset();
-    clearStrategyAnalysis();
-    clearWorkspaceReferences();
-    setDescription('');
-    void openWorkflowKernelSession('chat', {
-      conversationContext: [],
-      summaryItems: [],
-      artifactRefs: [],
-      contextSources: ['simple_mode'],
-      metadata: {
-        entry: 'new_task',
-        workspacePath,
-      },
-    });
+      persistForegroundModeView(workflowKernelSessionId, workflowMode);
+      resetWorkflow();
+      resetPlanWorkflow();
+      resetDebugWorkflow();
+      reset();
+      clearStrategyAnalysis();
+      clearWorkspaceReferences();
+      setDescription('');
+      setWorkspacePath(targetWorkspacePath);
 
-    if (hasContext) {
-      showToast(t('contextBridge.contextReset', { defaultValue: 'Context cleared for new task' }), 'info');
-    }
-  }, [
-    reset,
-    clearStrategyAnalysis,
-    clearWorkspaceReferences,
-    resetWorkflow,
-    resetPlanWorkflow,
-    resetDebugWorkflow,
-    openWorkflowKernelSession,
-    persistForegroundModeView,
-    getCachedWorkflowKernelModeTranscript,
-    showToast,
-    t,
-    workflowKernelSession?.contextLedger.conversationTurnCount,
-    workflowKernelSessionId,
-    workflowMode,
-    workspacePath,
-  ]);
+      if (request?.runtimeMode === 'managed_worktree' && targetWorkspacePath) {
+        await useWorkflowKernelStore.getState().createIsolatedSession({
+          repoPath: targetWorkspacePath,
+          taskName: request.taskName || 'isolated-session',
+          targetBranch: request.targetBranch || 'main',
+          displayTitle: request.taskName || null,
+          cleanupPolicy: request.cleanupPolicy,
+        });
+      } else {
+        const opened = await openWorkflowKernelSession('chat', {
+          conversationContext: [],
+          summaryItems: [],
+          artifactRefs: [],
+          contextSources: ['simple_mode'],
+          metadata: {
+            entry: 'new_task',
+            workspacePath: targetWorkspacePath,
+            workspaceRootPath: targetWorkspacePath,
+            runtimePath: targetWorkspacePath,
+            runtimeKind: 'main',
+          },
+        });
+        if (
+          opened &&
+          request?.runtimeMode === 'attach_existing_worktree' &&
+          request.worktreePath &&
+          targetWorkspacePath
+        ) {
+          await useWorkflowKernelStore.getState().attachSessionWorktree({
+            sessionId: opened.sessionId,
+            repoPath: targetWorkspacePath,
+            worktreePath: request.worktreePath,
+            displayLabel: request.taskName || null,
+            cleanupPolicy: request.cleanupPolicy,
+          });
+        }
+      }
 
-  const handleNewTaskInPath = useCallback(
-    (path: string) => {
-      setWorkspacePath(path);
-      handleNewTask();
+      if (hasContext) {
+        showToast(t('contextBridge.contextReset', { defaultValue: 'Context cleared for new task' }), 'info');
+      }
     },
-    [handleNewTask, setWorkspacePath],
+    [
+      reset,
+      clearStrategyAnalysis,
+      clearWorkspaceReferences,
+      resetWorkflow,
+      resetPlanWorkflow,
+      resetDebugWorkflow,
+      openWorkflowKernelSession,
+      persistForegroundModeView,
+      getCachedWorkflowKernelModeTranscript,
+      showToast,
+      t,
+      workflowKernelSession?.contextLedger.conversationTurnCount,
+      workflowKernelSessionId,
+      workflowMode,
+      workspacePath,
+      setWorkspacePath,
+    ],
   );
 
   const handleForkWorkflowSession = useCallback(
@@ -1437,9 +1468,9 @@ export function SimpleModeShell() {
   );
 
   const handleDeleteWorkflowSession = useCallback(
-    async (sessionId: string) => {
+    async (sessionId: string, options?: { deleteWorktree?: boolean }) => {
       persistForegroundModeView(workflowKernelSessionId, workflowMode);
-      const result = await deleteWorkflowKernelSession(sessionId);
+      const result = await deleteWorkflowKernelSession(sessionId, options);
       if (!result) return;
 
       if (result.activeSessionId) {
@@ -2008,8 +2039,7 @@ export function SimpleModeShell() {
             onRestoreWorkflowSession={handleRestoreWorkflowSession}
             onDeleteWorkflowSession={handleDeleteWorkflowSession}
             pathGroups={sessionTreePathGroups}
-            activePath={workspacePath}
-            onNewTaskInPath={handleNewTaskInPath}
+            activePath={activeSessionPaths.workspaceRootPath ?? workspacePath}
           />
         }
         middlePanel={
@@ -2117,7 +2147,7 @@ export function SimpleModeShell() {
                 onRemoveAttachment={removeAttachment}
                 workspaceReferences={workspaceReferences}
                 onWorkspaceReferencesChange={setWorkspaceReferences}
-                workspacePath={workspacePath}
+                workspacePath={runtimeWorkspacePath}
                 activeAgentName={activeAgentName}
                 onClearAgent={handleClearActiveAgent}
                 queuedChatMessages={queuedChatMessages}
@@ -2149,7 +2179,7 @@ export function SimpleModeShell() {
                 workflowMode={workflowMode}
                 workflowPhase={rightPanelPhase}
                 executionStatus={executionStatusForUi}
-                workspacePath={workspacePath}
+                workspacePath={runtimeWorkspacePath}
                 contextSessionId={contextSessionId}
                 debugSessionId={kernelDebugRuntime.linkedSessionId}
               />
@@ -2160,7 +2190,10 @@ export function SimpleModeShell() {
 
       {/* Bottom status bar */}
       <ExecutionAwareBottomStatusBar
-        workspacePath={workspacePath}
+        workspacePath={runtimeWorkspacePath}
+        runtimeKind={activeSessionPaths.runtimeKind}
+        workspaceRootPath={activeSessionPaths.workspaceRootPath}
+        runtimeBranch={activeSessionPaths.runtimeBranch}
         permissionLevel={permissionLevel}
         onPermissionLevelChange={(level) => setPermissionLevel(permissionSessionId, level)}
         sessionId={permissionSessionId}
@@ -2264,6 +2297,9 @@ function KernelTranscriptRightPanel({
 
 function ExecutionAwareBottomStatusBar({
   workspacePath,
+  workspaceRootPath,
+  runtimeKind,
+  runtimeBranch,
   permissionLevel,
   onPermissionLevelChange,
   sessionId,
@@ -2272,6 +2308,9 @@ function ExecutionAwareBottomStatusBar({
   isEstimatingTokenBudget,
 }: {
   workspacePath: string | null;
+  workspaceRootPath: string | null;
+  runtimeKind: 'main' | 'managed_worktree' | 'legacy_worktree';
+  runtimeBranch: string | null;
   permissionLevel: Parameters<typeof BottomStatusBar>[0]['permissionLevel'];
   onPermissionLevelChange: (level: Parameters<typeof BottomStatusBar>[0]['permissionLevel']) => void;
   sessionId: string;
@@ -2362,6 +2401,9 @@ function ExecutionAwareBottomStatusBar({
   return (
     <BottomStatusBar
       workspacePath={workspacePath}
+      workspaceRootPath={workspaceRootPath}
+      runtimeKind={runtimeKind}
+      runtimeBranch={runtimeBranch}
       permissionLevel={permissionLevel}
       onPermissionLevelChange={onPermissionLevelChange}
       sessionId={sessionId}
