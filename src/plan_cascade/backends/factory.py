@@ -246,6 +246,7 @@ class BackendFactory:
                 "claude-api": "claude",
                 "openai": "openai",
                 "deepseek": "openai",  # DeepSeek uses OpenAI-compatible API
+                "novita": "novita",  # Novita uses OpenAI-compatible API
                 "ollama": "ollama",
             }
             if backend in backend_to_provider:
@@ -297,7 +298,7 @@ class BackendFactory:
             provider = config.get("provider", "claude")
 
             # Check API key requirement
-            if provider in ("claude", "openai", "deepseek"):
+            if provider in ("claude", "openai", "deepseek", "novita"):
                 if not config.get("api_key"):
                     errors.append(
                         f"API key required for {provider} provider. "
@@ -305,7 +306,7 @@ class BackendFactory:
                     )
 
             # Check provider is valid
-            valid_providers = ["claude", "openai", "ollama", "deepseek"]
+            valid_providers = ["claude", "openai", "novita", "ollama", "deepseek"]
             if provider not in valid_providers:
                 errors.append(
                     f"Unknown provider: {provider}. "

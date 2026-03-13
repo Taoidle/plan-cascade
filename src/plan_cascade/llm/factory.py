@@ -17,7 +17,7 @@ class LLMFactory:
     """
     Factory for creating LLM provider instances.
 
-    Supports built-in providers (claude, openai, ollama) and custom
+    Supports built-in providers (claude, openai, novita, ollama) and custom
     provider registration for extensibility.
 
     Example:
@@ -62,6 +62,11 @@ class LLMFactory:
         },
         "qwen": {
             "model": "qwen-plus",
+            "max_tokens": 8192,
+        },
+        "novita": {
+            "model": "deepseek/deepseek-v3.2",
+            "base_url": "https://api.novita.ai/openai",
             "max_tokens": 8192,
         },
         "ollama": {
@@ -177,6 +182,10 @@ class LLMFactory:
             from .providers.glm import GLMProvider
             cls._providers["glm"] = GLMProvider
             return GLMProvider
+        elif provider_name == "novita":
+            from .providers.novita import NovitaProvider
+            cls._providers["novita"] = NovitaProvider
+            return NovitaProvider
         elif provider_name == "qwen":
             from .providers.qwen import QwenProvider
             cls._providers["qwen"] = QwenProvider
@@ -200,7 +209,7 @@ class LLMFactory:
             List of provider names
         """
         # Built-in providers plus any registered
-        built_in = ["claude", "claude-max", "openai", "deepseek", "glm", "qwen", "ollama"]
+        built_in = ["claude", "claude-max", "openai", "deepseek", "glm", "qwen", "novita", "ollama"]
         registered = list(cls._providers.keys())
         return list(set(built_in + registered))
 

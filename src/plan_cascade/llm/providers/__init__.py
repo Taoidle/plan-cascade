@@ -9,12 +9,14 @@ Concrete implementations of LLMProvider for various LLM services:
 - GLMProvider: ZhipuAI's GLM models
 - QwenProvider: Alibaba Cloud's Qwen models via DashScope
 - OllamaProvider: Local models via Ollama
+- NovitaProvider: Novita AI's OpenAI-compatible API
 """
 
 from .claude import ClaudeProvider
 from .claude_max import ClaudeMaxProvider
 from .deepseek import DeepSeekProvider
 from .glm import GLMProvider
+from .novita import NovitaProvider
 from .ollama import OllamaProvider
 from .openai import OpenAIProvider
 from .qwen import QwenProvider
@@ -24,6 +26,7 @@ __all__ = [
     "ClaudeMaxProvider",
     "DeepSeekProvider",
     "GLMProvider",
+    "NovitaProvider",
     "OpenAIProvider",
     "QwenProvider",
     "OllamaProvider",
