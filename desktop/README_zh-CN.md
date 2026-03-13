@@ -1,396 +1,366 @@
-<div align="center">
+<p align="center">
+  <img src="../assets/plan-cascade-logo.png" alt="Plan Cascade" width="200">
+</p>
 
-# Plan Cascade Desktop
+<h1 align="center">Plan Cascade Desktop</h1>
 
-**AI 驱动的编程编排平台**
+<p align="center">
+  <strong>本地优先的 AI 开发工作站</strong>
+</p>
 
-跨平台桌面应用，将复杂开发任务分解为可并行执行的工作流，支持多智能体协作。基于 Rust 后端与 React 前端构建。
+<p align="center">
+  Chat · Plan · Task · Debug — 四种工作模式，统一内核驱动
+</p>
 
-[![版本](https://img.shields.io/badge/版本-0.1.0-blue)](package.json)
-[![Tauri](https://img.shields.io/badge/Tauri-2.0-FFC131?logo=tauri&logoColor=white)](https://tauri.app/)
-[![React](https://img.shields.io/badge/React-18.3-61dafb?logo=react&logoColor=white)](https://react.dev/)
-[![Rust](https://img.shields.io/badge/Rust-2021_Edition-dea584?logo=rust&logoColor=white)](https://www.rust-lang.org/)
-[![许可证](https://img.shields.io/badge/许可证-MIT-green)](../LICENSE)
+<p align="center">
+  <a href="#-核心特性">核心特性</a> •
+  <a href="#-为什么选择-desktop">为什么选择 Desktop</a> •
+  <a href="#-快速开始">快速开始</a> •
+  <a href="#-技术栈">技术栈</a> •
+  <a href="#-架构深度解析">架构</a>
+</p>
 
-[English](./README.md) | [简体中文](./README_zh-CN.md)
-
-</div>
-
----
-
-## 项目概览
-
-Plan Cascade Desktop 是基于 **Tauri 2.0** 构建的综合性 AI 编程助手。它对接 7+ 个大语言模型提供商，提供智能代码生成与 Agent 工具调用，并编排多步骤开发工作流——从简单的问答对话到完全自主的 PRD 驱动功能开发。
-
-### 为什么选择 Plan Cascade Desktop？
-
-- **纯 Rust 后端** — 极低内存占用，运行时无需 Python/Node 环境
-- **安全优先** — API 密钥使用 AES-256-GCM 加密存储，仅保留在本地，不会外传
-- **兼容你的模型** — 支持 Anthropic、OpenAI、DeepSeek、Ollama (本地)、通义千问、智谱 GLM、MiniMax
-- **多种执行模式** — 为不同任务选择合适的自治程度
-- **全栈类型安全** — TypeScript 严格模式 + Rust 编译期检查
-- **跨平台** — Windows、macOS (Universal 二进制) 和 Linux
+<p align="center">
+  <img src="https://img.shields.io/badge/Version-0.1.0-orange?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/Tauri-2.0-blue?style=flat-square" alt="Tauri">
+  <img src="https://img.shields.io/badge/Rust-1.75+-orange?style=flat-square" alt="Rust">
+  <img src="https://img.shields.io/badge/React-18.3-61dafb?style=flat-square" alt="React">
+  <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="License">
+  <img src="https://img.shields.io/badge/Status-Alpha-yellow?style=flat-square" alt="Status">
+</p>
 
 ---
 
-## 功能特性
+## 🎯 核心特性
 
-### 多模式执行
+### 四种工作模式
 
-| 模式 | 描述 | 适用场景 |
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         Workflow Kernel (SSOT)                              │
+│  ┌───────────────────────────────────────────────────────────────────────┐  │
+│  │                      Unified State Kernel                              │  │
+│  │   ┌─────────┐   ┌─────────┐   ┌─────────┐   ┌─────────┐             │  │
+│  │   │  Chat   │   │  Plan   │   │  Task   │   │  Debug  │             │  │
+│  │   │  对话   │   │  计划   │   │  任务   │   │  调试   │             │  │
+│  │   └─────────┘   └─────────┘   └─────────┘   └─────────┘             │  │
+│  └───────────────────────────────────────────────────────────────────────┘  │
+│                    ↕ HandoffContext (跨模式上下文交接)                       │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+| 模式 | 用途 | 生命周期 |
 |------|------|----------|
-| **Claude Code** | 与 Claude Code CLI 集成的交互式对话 | 实时结对编程 |
-| **Simple** | 直接 LLM 对话，支持 Agent 工具调用 | 快速任务和问答 |
-| **Expert** | PRD 生成与依赖关系图可视化 | 功能规划与拆解 |
-| **Task** | PRD 驱动的自主多故事执行 | 复杂功能实现 |
-| **Plan** | 多功能 Mega 计划编排 | 项目级协调 |
+| **Chat** | 自由对话、快速问答 | ready → streaming → paused/failed |
+| **Plan** | 结构化多步骤执行 | idle → planning → executing → completed |
+| **Task** | 完整开发工作流（需求→设计→实现） | idle → interviewing → generating_prd → executing |
+| **Debug** | 专业问题诊断和修复 | intaking → hypothesizing → testing → patching → verifying |
 
-### 智能体库
+### 核心能力
 
-创建和管理专业化 AI 智能体，支持自定义系统提示词、工具约束、模型选择和执行历史。智能体可在项目和会话间复用。
-
-### 质量门禁
-
-每次代码生成后自动运行的验证流水线：
-- 测试执行（单元测试、集成测试、端到端测试）
-- 代码检查和格式化
-- 类型检查
-- 按项目自定义验证规则
-
-### 时间线与检查点
-
-AI 生成变更的会话级版本控制：
-- 在关键里程碑自动创建状态快照
-- 分支和分叉工作流，探索不同方案
-- 一键回滚到任意检查点
-
-### Git 工作树集成
-
-隔离的开发环境，支持并行任务执行：
-- 自动创建分支和工作树
-- 安全的合并工作流，自动检测冲突
-- 多任务并行开发
-
-### 知识库 (RAG)
-
-基于向量嵌入的语义文档搜索：
-- 索引项目文档、设计规格和参考资料
-- 多提供商 Embedding 支持
-- 自动变更检测与重新索引
-
-### 代码库索引
-
-AI 驱动的代码搜索与理解：
-- 基于 Tree-sitter 的符号提取（函数、类、结构体、枚举）
-- 后台索引 + 文件监听自动更新
-- HNSW 向量搜索，支持语义化代码查询
-
-### MCP 集成
-
-完整的 [Model Context Protocol](https://modelcontextprotocol.io/) 支持：
-- 服务器注册表管理
-- 自定义工具和资源提供者配置
-- 支持 Streamable HTTP 和 stdio 传输协议
-
-### 分析仪表板
-
-跨所有 LLM 提供商跟踪使用量、成本和性能：
-- 按模型/提供商的 Token 消耗与费用明细
-- 历史趋势可视化
-- 会话级使用归因
-
-### 更多能力
-
-- **护栏 (Guardrails)** — 基于规则约束工具执行，保障安全
-- **Webhooks** — 事件路由到飞书、Slack、Discord 或自定义端点
-- **远程控制** — Telegram Bot 和 A2A 协议 Agent 发现
-- **插件系统** — 按框架注入专业技能（React、Vue、Rust）
-- **PDF / 图片导出** — 导出对话和制品
-- **国际化** — 支持英文、中文（简体）、日文
+| 能力 | 说明 |
+|------|------|
+| **统一内核 (SSOT)** | 所有模式共享单一状态源，消除前端状态漂移 |
+| **跨模式上下文交接** | Chat → Task 自动导入对话；Task → Chat 结构化摘要回传 |
+| **多 LLM 后端** | Claude / OpenAI / DeepSeek / GLM / Qwen / MiniMax / Ollama |
+| **离线支持** | Ollama 本地模型，无需联网 |
 
 ---
 
-## 架构
+## 🚀 为什么选择 Desktop？
+
+### 与其他 Agent 工具的对比
+
+| 能力 | Plan Cascade Desktop | Cursor | GitHub Copilot | Claude Code |
+|------|---------------------|--------|----------------|-------------|
+| **多模式工作流** | ✅ 4种模式无缝切换 | ❌ 单一对话 | ❌ 单一补全 | ❌ 单一对话 |
+| **跨模式上下文** | ✅ 自动交接 | ❌ | ❌ | ❌ |
+| **质量门禁流水线** | ✅ 企业级 + 自动重试 | ❌ | ❌ | ❌ |
+| **安全模型** | ✅ 5层 (护栏→门禁→策略→沙箱→审计) | 基础 | 基础 | 基础 |
+| **可成长知识系统** | ✅ 技能 + 记忆 + RAG | ❌ | ❌ | ❌ |
+| **远程控制** | ✅ A2A + Telegram | ❌ | ❌ | ❌ |
+| **MCP 全栈** | ✅ Manager + Client + Server | 部分 | ❌ | Client only |
+| **多 LLM 后端** | ✅ 7+ 提供商 | 部分 | ❌ | 仅 Claude |
+| **离线使用** | ✅ Ollama | ❌ | ❌ | ❌ |
+
+### 核心差异化优势
+
+<details>
+<summary><b>🔒 企业级安全模型</b></summary>
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                     Plan Cascade Desktop                        │
-├───────────────────────────┬─────────────────────────────────────┤
-│   React 前端              │   Rust 后端 (Tauri 2.0)             │
-│   ───────────────────     │   ─────────────────────────         │
-│   Radix UI 组件库         │   300+ IPC 命令                     │
-│   Zustand 状态管理 (50)   │   42+ 服务模块                      │
-│   Monaco 代码编辑器       │   SQLite + r2d2 连接池              │
-│   i18next (3 种语言)      │   AES-256-GCM 密钥存储             │
-│   Tailwind CSS            │   Tree-sitter 代码解析              │
-│   Fuse.js 模糊搜索        │   HNSW 向量搜索                    │
-├───────────────────────────┴─────────────────────────────────────┤
-│                       Tauri IPC 桥接                            │
-├───────────┬──────────────┬──────────────┬───────────────────────┤
-│ Claude    │ LLM          │ Git          │ MCP                   │
-│ Code CLI  │ 提供商       │ 工作树       │ 服务器                │
-│           │ (7+)         │              │                       │
-└───────────┴──────────────┴──────────────┴───────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                    5层安全防护架构                           │
+├─────────────────────────────────────────────────────────────┤
+│  Layer 1: Guardrail        - 敏感数据检测与脱敏             │
+│  Layer 2: Permission Gate   - 操作审批（可配置阈值）         │
+│  Layer 3: Policy Engine v2  - 细粒度访问控制                │
+│  Layer 4: Sandbox           - 文件系统隔离                  │
+│  Layer 5: Audit Log         - 完整操作审计追踪              │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-### Cargo 工作空间
+- 自动检测 API 密钥、密码、令牌
+- 代码安全扫描（注入攻击检测）
+- 可配置的危险操作审批流程
+</details>
 
-Rust 后端由 5 个 crate 组成：
-
-| Crate | 用途 |
-|-------|------|
-| `plan-cascade-desktop` | Tauri 主应用 — 命令、服务、存储 |
-| `plan-cascade-core` | 核心 trait、错误类型、上下文层级、流式事件 |
-| `plan-cascade-llm` | LLM 提供商抽象与流式适配器 |
-| `plan-cascade-tools` | 工具执行框架与定义 |
-| `plan-cascade-quality-gates` | 质量门禁流水线与项目类型检测 |
-
-### 项目结构
+<details>
+<summary><b>✅ 质量门禁流水线</b></summary>
 
 ```
-desktop/
-├── src/                          # React 前端
-│   ├── components/               #   按领域组织的 UI 组件
-│   │   ├── Agents/               #     智能体库
-│   │   ├── Analytics/            #     使用量与费用仪表板
-│   │   ├── ClaudeCodeMode/       #     Claude Code CLI 集成
-│   │   ├── ExpertMode/           #     PRD 与策略规划
-│   │   ├── SimpleMode/           #     直接 LLM 对话
-│   │   ├── TaskMode/             #     自主任务执行
-│   │   ├── KnowledgeBase/        #     RAG 文档搜索
-│   │   ├── Timeline/             #     检查点浏览器
-│   │   ├── MCP/                  #     MCP 服务器管理
-│   │   ├── Settings/             #     配置界面
-│   │   └── shared/               #     通用组件
-│   ├── store/                    #   Zustand 状态管理
-│   ├── lib/                      #   IPC API 封装
-│   ├── i18n/                     #   翻译文件 (en, zh, ja)
-│   └── types/                    #   TypeScript 类型定义
-├── src-tauri/                    # Rust 后端
-│   ├── src/
-│   │   ├── commands/             #   Tauri IPC 命令处理器
-│   │   ├── services/             #   业务逻辑层
-│   │   ├── models/               #   数据结构
-│   │   └── storage/              #   SQLite、密钥存储、配置
-│   └── crates/                   #   工作空间 crate
-│       ├── core/                 #     核心 trait 与类型
-│       ├── llm/                  #     LLM 提供商适配器
-│       ├── tools/                #     工具执行框架
-│       └── quality-gates/        #     验证流水线
-└── docs/                         # 文档
+┌─────────┐   ┌─────────┐   ┌─────────┐   ┌─────────┐   ┌─────────┐
+│ Format  │ → │  Lint   │ → │TypeCheck│ → │Security │ → │Complexity│
+└─────────┘   └─────────┘   └─────────┘   └─────────┘   └─────────┘
+      ↓             ↓             ↓             ↓             ↓
+   Auto-fix     Auto-fix      Block        Block         Warn
 ```
+
+- 自动检测项目类型（Rust/Python/Node 等）
+- 多维度检查：格式化 → Lint → 类型 → 安全 → 复杂度
+- 迭代式修复循环，最多 3 次自动重试
+- 与 Task 模式深度集成
+</details>
+
+<details>
+<summary><b>🧠 可成长的知识系统</b></summary>
+
+**技能系统 (4来源 + 2阶段选择)**
+
+| 来源 | 优先级 | 说明 |
+|------|--------|------|
+| 内置技能 | 最高 | hybrid-ralph, mega-plan, planning-with-files |
+| 外部技能 | 高 | Git Submodules (React, Vue, Rust 最佳实践) |
+| 用户技能 | 中 | 项目级自定义工作流 |
+| 动态生成 | 低 | 运行时按需生成 |
+
+**记忆系统 (TF-IDF + 4-信号混合排序)**
+
+```
+Score = w₁×Recency + w₂×Frequency + w₃×Semantic + w₄×Importance
+```
+
+- 自动衰减与剪枝
+- 跨会话持久化
+- 上下文感知检索
+</details>
+
+<details>
+<summary><b>🌐 远程控制 (A2A 协议)</b></summary>
+
+```
+用户 → Telegram Bot → Desktop Agent → 执行任务 → 返回结果
+                           ↓
+                    5层安全保护
+```
+
+- JSON-RPC 2.0 + SSE 传输
+- 多平台适配器 (Telegram / Discord / Slack)
+- 远程启动任务、查看进度、审批操作
+</details>
+
+<details>
+<summary><b>🔌 MCP 全栈能力</b></summary>
+
+| 能力 | 说明 |
+|------|------|
+| **MCP Client** | 连接任意 MCP Server，扩展工具能力 |
+| **MCP Server** | 暴露自身为 MCP 工具，供其他应用调用 |
+| **MCP Manager** | 完整生命周期管理（注册、健康检查、市场发现） |
+| **Claude Desktop 导入** | 一键导入 Claude Desktop 的 MCP 配置 |
+</details>
 
 ---
 
-## 快速开始
+## 🚀 快速开始
 
-### 环境要求
+### 前置要求
 
-| 依赖 | 版本 | 说明 |
-|------|------|------|
-| [Node.js](https://nodejs.org/) | 18+ | 前端构建工具链 |
-| [pnpm](https://pnpm.io/) | 8+ | 包管理器 |
-| [Rust](https://rustup.rs/) | 1.70+ | 后端编译 |
-| 系统库 | — | 参见 [Tauri 系统依赖](https://v2.tauri.app/start/prerequisites/) |
+- **Node.js** 18+ 和 pnpm
+- **Rust** 1.75+ (首次构建会自动安装)
+- **系统依赖**: Platform-specific (见下方)
 
-### 安装与运行
+### 安装
 
 ```bash
 # 克隆仓库
-git clone https://github.com/plan-cascade/plan-cascade
+git clone https://github.com/anthropics/plan-cascade.git
 cd plan-cascade/desktop
 
-# 安装前端依赖
+# 安装依赖
 pnpm install
 
-# 启动开发模式（前端 + 后端，支持热重载）
+# 启动开发服务器
 pnpm tauri:dev
 ```
 
-首次启动时，Rust 后端需从源码编译，耗时几分钟。后续启动会非常快。
+### 系统依赖
 
-### 生产构建
-
-```bash
-# 构建当前平台
-pnpm tauri:build
-
-# 特定平台构建
-pnpm tauri:build:macos      # macOS Universal (Intel + Apple Silicon)
-pnpm tauri:build:windows    # Windows x64 MSI
-pnpm tauri:build:linux      # Linux x64 AppImage
-```
-
----
-
-## 开发
-
-### 常用命令
-
-```bash
-# 前端
-pnpm dev                    # 仅启动 Vite 开发服务器 (端口 8173)
-pnpm build                  # TypeScript 编译 + Vite 构建
-pnpm lint                   # ESLint (零警告策略)
-pnpm typecheck              # TypeScript 严格模式检查
-pnpm test                   # 运行测试 (Vitest)
-pnpm test:watch             # 监听模式
-pnpm test:coverage          # 覆盖率报告 (60% 阈值)
-
-# 后端（在 src-tauri/ 目录下）
-cargo test                  # 单元测试 + 集成测试
-cargo clippy                # Rust 代码检查
-cargo check                 # 类型检查
-cargo build --features browser  # 构建（含无头浏览器支持）
-
-# 完整应用
-pnpm tauri:dev              # 开发模式，支持热重载和 devtools
-pnpm tauri:build:dev        # Debug 构建
-```
-
-### 代码质量
-
-- **TypeScript**：严格模式，启用 `noUnusedLocals` 和 `noUnusedParameters`
-- **ESLint**：零警告策略 (`--max-warnings 0`)
-- **Prettier**：通过 pre-commit 钩子强制执行（Husky + lint-staged）
-- **Rust**：clippy 代码检查，Release 构建启用 LTO 和符号裁剪
-- **提交规范**：约定式格式 — `type(scope): description`
-
----
-
-## 支持的 LLM 提供商
-
-| 提供商 | 工具调用 | 本地 | 说明 |
-|--------|:---:|:---:|------|
-| [Anthropic](https://www.anthropic.com/) (Claude) | 原生 | | 支持 Prompt Caching |
-| [OpenAI](https://openai.com/) (GPT) | 原生 | | |
-| [DeepSeek](https://www.deepseek.com/) | 双通道 | | 原生 + 提示词降级 |
-| [通义千问](https://www.alibabacloud.com/en/solutions/generative-ai/qwen) (阿里巴巴) | 双通道 | | |
-| [智谱 GLM](https://www.zhipuai.cn/) | 双通道 | | |
-| [Ollama](https://ollama.com/) | 仅提示词 | 是 | 支持任意本地模型 |
-| [MiniMax](https://www.minimaxi.com/) | 仅提示词 | | |
-
-**双通道**：工具同时通过原生 API 和提示词降级方式传递，提高可靠性。
-
----
-
-## 文档
-
-| 文档 | 描述 |
+| 平台 | 依赖 |
 |------|------|
-| [用户手册](./docs/user-guide.md) | 终端用户功能详解 |
-| [开发者指南](./docs/developer-guide.md) | 架构深入解析与贡献指引 |
-| [API 参考](./docs/api-reference.md) | 完整 IPC 命令文档 |
-| [迁移指南](./docs/migration-v5.md) | 从 v4.x 升级到 v5.0 |
-| [代码库索引计划](./docs/codebase-index-iteration-plan.md) | 语义搜索迭代路线图 |
-| [记忆技能计划](./docs/memory-skill-iteration-plan.md) | 智能体记忆系统设计 |
+| **macOS** | Xcode Command Line Tools |
+| **Windows** | Microsoft Visual Studio C++ Build Tools |
+| **Linux** | `webkit2gtk-4.1`, `openssl`, `curl`, `wget`, `file` |
 
----
-
-## 贡献
-
-欢迎参与贡献！架构细节和代码规范请参阅 [开发者指南](./docs/developer-guide.md)。
+### 构建生产版本
 
 ```bash
-# 1. Fork 并克隆
-git clone https://github.com/<your-username>/plan-cascade
-cd plan-cascade/desktop
-
-# 2. 创建功能分支
-git checkout -b feat/your-feature
-
-# 3. 开发完成后，确保质量检查通过
-pnpm lint && pnpm typecheck && pnpm test
-
-# 4. 使用约定式提交信息提交
-git commit -m "feat(scope): add your feature"
-
-# 5. 推送并创建 Pull Request
-git push origin feat/your-feature
+pnpm tauri:build
 ```
 
-### 开发规范
-
-- 合并前所有测试必须通过
-- ESLint 零警告策略——禁止无理由的规则屏蔽
-- 面向用户的变更需同步更新文档
-- 新增命令、服务和组件应遵循现有模式
-
 ---
 
-## 故障排除
+## 📁 工作区概览
 
-**构建失败，提示 "linker 'cc' not found"**
-
-```bash
-# macOS
-xcode-select --install
-
-# Ubuntu / Debian
-sudo apt install build-essential libwebkit2gtk-4.1-dev libappindicator3-dev
-
-# Fedora
-sudo dnf install gcc webkit2gtk4.1-devel libappindicator-gtk3-devel
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│                            Simple 工作台                                  │
+├──────────────────────────────────────────────────────────────────────────┤
+│  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐            │
+│  │  文件面板       │  │   对话面板     │  │  产物面板       │            │
+│  │                │  │                │  │                │            │
+│  │  📁 项目文件    │  │  💬 与 AI 对话 │  │  📄 PRD        │            │
+│  │  📎 拖拽文件    │  │  @ 引用上下文  │  │  📋 设计文档    │            │
+│  │  🔍 快速搜索    │  │  ✏️ 编辑消息   │  │  📊 进度追踪    │            │
+│  │                │  │                │  │                │            │
+│  └────────────────┘  └────────────────┘  └────────────────┘            │
+├──────────────────────────────────────────────────────────────────────────┤
+│  [Chat] [Plan] [Task] [Debug]                    Quality Gates: ✓ 3/3    │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Tauri 开发服务器无法启动**
+### 可用工作区
 
-```bash
-cargo clean                           # 清除 Rust 构建缓存
-rm -rf node_modules && pnpm install   # 重新安装前端依赖
+| 工作区 | 状态 | 核心功能 |
+|--------|------|----------|
+| **Simple** | ✅ 活跃 | Chat/Plan/Task/Debug 四模式工作台 |
+| **MCP Servers** | ✅ 活跃 | MCP Server 注册表、健康检查、市场发现 |
+| **Analytics** | ✅ 活跃 | Token 消耗、成本估算、使用历史导出 |
+| **Knowledge Base** | ✅ 活跃 | RAG 文档智能、Collection 管理、检索实验室 |
+| **Codebase** | ✅ 活跃 | 文件/符号/嵌入概览、HNSW + FTS5 组合搜索 |
+| **Settings** | ✅ 活跃 | 集中化配置、主题、快捷键 |
+
+---
+
+## 🛠 技术栈
+
+| 层级 | 技术 | 用途 |
+|------|------|------|
+| **前端** | React 18.3 + TypeScript | UI 组件 |
+| **状态** | Zustand + Immer | 客户端状态管理 |
+| **样式** | Tailwind CSS + Radix UI | 设计系统 |
+| **后端** | Rust (Tauri 2.0) | 原生性能 |
+| **IPC** | Tauri Commands | 前端-Rust 通信桥 |
+| **数据库** | SQLite + Tauri SQL | 持久化存储 |
+| **索引** | HNSW + FTS5 | 代码与知识搜索 |
+
+### Rust Crates
+
+| Crate | 用途 |
+|-------|------|
+| `core` | Builders, LLM clients, quality gates |
+| `llm` | 多提供商 LLM 抽象 |
+| `tools` | ReAct 工具实现 |
+| `quality-gates` | 验证流水线 |
+
+---
+
+## 🏗 架构深度解析
+
+### 后端服务
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                          应用层                                      │
+├─────────────────────────────────────────────────────────────────────┤
+│  workflow_kernel  │  orchestrator  │  mega  │  agent_composer       │
+│  (会话生命周期)     │ (LLM+工具)     │ (多功能) │ (流水线)             │
+├─────────────────────────────────────────────────────────────────────┤
+│                          服务层                                      │
+├─────────────────────────────────────────────────────────────────────┤
+│  mcp  │  knowledge  │  memory  │  skills  │  git  │  worktree       │
+│  a2a  │  analytics  │  plugins │  webhook │  timeline              │
+├─────────────────────────────────────────────────────────────────────┤
+│                          基础层                                      │
+├─────────────────────────────────────────────────────────────────────┤
+│  plan-cascade-core │ plan-cascade-llm │ plan-cascade-tools │ ...    │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-**API 密钥无法保存**
+### LLM 提供商
 
-应用使用本地加密文件存储（AES-256-GCM），而非系统钥匙串。请检查应用对数据目录是否有写入权限。
-
----
-
-## 技术栈
-
-### 前端
-
-| 类别 | 库 | 版本 |
-|------|-----|------|
-| 框架 | React | 18.3 |
-| 状态管理 | Zustand | 5.0 |
-| UI 基础组件 | Radix UI | latest |
-| 代码编辑器 | Monaco Editor | 4.7 |
-| 样式 | Tailwind CSS | 3.4 |
-| 国际化 | i18next | 25.8 |
-| Markdown | react-markdown + rehype + remark | 10.1 |
-| 数学公式 | KaTeX | 0.16 |
-| 拖拽 | @dnd-kit | latest |
-| 语法高亮 | Prism React Renderer | 2.4 |
-| 模糊搜索 | Fuse.js | 7.1 |
-
-### 后端
-
-| 类别 | 库 | 版本 |
-|------|-----|------|
-| 桌面框架 | Tauri | 2.0 |
-| 异步运行时 | Tokio | 1.x |
-| 数据库 | rusqlite (内置 SQLite) | 0.32 |
-| 连接池 | r2d2 | latest |
-| HTTP 客户端 | Reqwest | 0.12 |
-| 加密 | aes-gcm | 0.10 |
-| 代码解析 | tree-sitter | 0.24 |
-| 向量搜索 | hnsw_rs | 0.3 |
-| 文件监听 | notify | 6.x |
-| LLM SDK | ollama-rs, async-dashscope, anthropic-async, zai-rs | various |
+| 提供商 | 模型 | 最适用于 |
+|--------|------|----------|
+| Anthropic | Claude Sonnet, Haiku | 平衡性能 |
+| OpenAI | GPT-4o, GPT-4o Mini | 通用场景 |
+| DeepSeek | DeepSeek Chat | 高性价比 |
+| GLM | 智谱 AI | 中文场景 |
+| Qwen | 通义千问 | 中文 + 嵌入 |
+| MiniMax | M2 系列 | 语音能力 |
+| Ollama | 本地模型 | 隐私优先 |
 
 ---
 
-## 许可证
+## 📊 路线图与状态
 
-[MIT](../LICENSE)
+| 工作区 | 状态 | 说明 |
+|--------|------|------|
+| Simple | ✅ 活跃 | 核心日常工作区 |
+| MCP Servers | ✅ 活跃 | 完整生命周期管理 |
+| Analytics | ✅ 活跃 | 使用量与成本追踪 |
+| Knowledge Base | ✅ 活跃 | RAG 文档智能 |
+| Codebase | ✅ 活跃 | 混合代码搜索 |
+| Settings | ✅ 活跃 | 集中化配置 |
+| Expert | 🚧 开发中 | 高级代理功能 |
+| Claude Code | 🚧 开发中 | Claude Code 集成 |
+| Projects | 🚧 开发中 | 多项目管理 |
+| Artifacts | 🚧 开发中 | 产物浏览器 |
 
 ---
 
-## 致谢
+## 📚 文档
 
-- [Tauri](https://tauri.app/) — 跨平台桌面框架
-- [Anthropic](https://www.anthropic.com/) — Claude API 与 Claude Code
-- [Radix UI](https://www.radix-ui.com/) — 无障碍、无样式 UI 基础组件
-- [Monaco Editor](https://microsoft.github.io/monaco-editor/) — 代码编辑器组件
-- [Tree-sitter](https://tree-sitter.github.io/) — 增量代码解析
+| 文档 | 说明 |
+|------|------|
+| [架构设计](./docs/architecture-design_zh.md) | 系统架构概览 |
+| [内核设计](./docs/kernel-design_zh.md) | 工作流内核规范 |
+| [内存与技能](./docs/memory-and-skills_zh.md) | 可成长知识系统 |
+| [MCP 集成](./docs/mcp-integration_zh.md) | MCP Server 管理 |
+| [A2A 远程控制](./docs/a2a-remote-control_zh.md) | 远程代理协议 |
+
+---
+
+## 🤝 贡献指南
+
+欢迎参与贡献！详情请参阅 [贡献指南](../CONTRIBUTING.md)。
+
+### 开发环境搭建
+
+1. Fork 并克隆仓库
+2. 安装依赖：`pnpm install`
+3. 启动开发：`pnpm tauri:dev`
+4. 进行修改
+5. 运行测试：`pnpm test && cd src-tauri && cargo test`
+6. 提交 Pull Request
+
+---
+
+## 📄 许可证
+
+本项目基于 [MIT License](../LICENSE) 开源。
+
+---
+
+## 🙏 致谢
+
+- [Tauri](https://tauri.app/) - 跨平台桌面应用框架
+- [Claude](https://www.anthropic.com/claude) - Anthropic 的 AI 助手
+- [React](https://react.dev/) - UI 框架
+- [Radix UI](https://www.radix-ui.com/) - 无障碍组件库
+
+---
+
+<p align="center">
+  <a href="https://github.com/anthropics/plan-cascade/issues">报告问题</a> •
+  <a href="https://github.com/anthropics/plan-cascade/discussions">参与讨论</a>
+</p>

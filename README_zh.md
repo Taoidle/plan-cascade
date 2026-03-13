@@ -1,26 +1,21 @@
-[English](README.md)
-
 <div align="center">
 
 # Plan Cascade
 
 **AI 驱动的级联开发框架**
 
-*将复杂项目分解为可并行执行的任务，支持多 Provider 执行*
+*将复杂项目智能分解为可并行执行的任务，支持多提供商执行*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-4.4.0-brightgreen)](https://github.com/Taoidle/plan-cascade)
-[![Claude Code](https://img.shields.io/badge/Claude%20Code-Plugin-blue)](https://claude.ai/code)
-[![MCP](https://img.shields.io/badge/MCP-Server-purple)](https://modelcontextprotocol.io)
 
-| 组件 | 状态 |
-|------|------|
-| Claude Code 插件 | ![稳定](https://img.shields.io/badge/状态-稳定-brightgreen) |
-| MCP 服务器 | ![稳定](https://img.shields.io/badge/状态-稳定-brightgreen) |
-| 独立 CLI | ![开发中](https://img.shields.io/badge/状态-开发中-yellow) |
-| 桌面应用 | ![Alpha](https://img.shields.io/badge/状态-Alpha-red) |
+| 组件 | 版本 | 状态 | 说明 |
+|------|------|------|------|
+| **Plugin** | [![4.4.0](https://img.shields.io/badge/version-4.4.0-brightgreen)](https://github.com/Taoidle/plan-cascade) | ![稳定](https://img.shields.io/badge/状态-稳定-brightgreen) | Claude Code 集成 |
+| **Desktop** | [![0.1.0](https://img.shields.io/badge/version-0.1.0-blue)](./desktop) | ![Alpha](https://img.shields.io/badge/状态-Alpha-orange) | 本地优先 AI 工作站 |
+| **CLI** | ![开发中](https://img.shields.io/badge/状态-开发中-yellow) | ![开发中](https://img.shields.io/badge/状态-开发中-yellow) | 命令行界面 |
+| **MCP Server** | ![稳定](https://img.shields.io/badge/状态-稳定-brightgreen) | ![稳定](https://img.shields.io/badge/状态-稳定-brightgreen) | Model Context Protocol |
 
-[功能特性](#功能特性) • [快速开始](#快速开始) • [文档](#文档) • [架构](#架构)
+[为什么选择 Plan Cascade?](#为什么选择-plan-cascade) • [产品形态](#产品形态) • [快速开始](#快速开始) • [架构](#架构)
 
 </div>
 
@@ -28,305 +23,238 @@
 
 ## 为什么选择 Plan Cascade？
 
-传统 AI 编程助手在处理大型复杂项目时力不从心。Plan Cascade 通过以下方式解决这个问题：
+传统 AI 编程助手在处理大型复杂项目时会遇到瓶颈：
 
-- **分解复杂性** — 自动将项目分解为可管理的 Story
-- **并行执行** — 使用多个 Agent 同时执行独立任务
-- **保持上下文** — 设计文档/PRD + 执行上下文（含持久化工具日志）可��御压缩/截断
-- **质量保障** — 每一步都有自动化测试和代码检查
+| 挑战 | 传统 AI | Plan Cascade |
+|------|---------|--------------|
+| **复杂性** | 在大型代码库中迷失 | 分解为可管理的单元 |
+| **并行性** | 顺序执行，一次一个 | 独立任务并行运行 |
+| **上下文** | 长会话中丢失 | 设计文档 + 持久上下文抵御压缩 |
+| **质量** | 需要人工验证 | 每步自动测试与检查 |
+| **控制** | 黑盒执行 | 透明、可检查的工作流 |
 
-## 功能特性
-
-### 三层级联架构
+### 解决方案：级联分解
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  第1层: Mega Plan                                           │
-│  ────────────────                                           │
-│  项目级编排                                                  │
-│  管理多个 Feature 的并行批次                                 │
-│  输出: mega-plan.json + design_doc.json                     │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│  第2层: Hybrid Ralph (Feature)                              │
-│  ─────────────────────────────                              │
-│  功能级开发                                                  │
-│  自动生成包含用户故事的 PRD                                  │
-│  输出: prd.json + design_doc.json                           │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│  第3层: Story 执行                                          │
-│  ─────────────────                                          │
-│  支持多 Provider 的并行 Story 执行                              │
-│  可配置的 LLM Provider 选择                                   │
-│  输出: 代码变更                                              │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                         你的项目目标                                 │
+│              "构建一个带认证的 REST API"                             │
+└─────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  第 1 层: Mega Plan                                                 │
+│  ───────────────────                                                │
+│  项目级编排 → 批量管理多个功能                                       │
+│  输出: mega-plan.json + design_doc.json                             │
+└─────────────────────────────────────────────────────────────────────┘
+                                  │
+              ┌───────────────────┼───────────────────┐
+              ▼                   ▼                   ▼
+┌─────────────────────┐ ┌─────────────────────┐ ┌─────────────────────┐
+│ 功能: 认证          │ │ 功能: API           │ │ 功能: 数据库        │
+│ ───────────────     │ │ ───────────────     │ │ ───────────────     │
+│ PRD + 设计文档      │ │ PRD + 设计文档      │ │ PRD + 设计文档      │
+└─────────────────────┘ └─────────────────────┘ └─────────────────────┘
+              │                   │                   │
+              ▼                   ▼                   ▼
+┌─────────────────────┐ ┌─────────────────────┐ ┌─────────────────────┐
+│ 故事 (并行执行)     │ │ 故事 (并行执行)     │ │ 故事 (并行执行)     │
+│ ─────────────────   │ │ ─────────────────   │ │ ─────────────────   │
+│ □ JWT 实现          │ │ □ CRUD 端点         │ │ □ Schema 设计       │
+│ □ 密码哈希          │ │ □ 限流              │ │ □ 迁移脚本          │
+│ □ 会话管理          │ │ □ 输入验证          │ │ □ 连接池            │
+└─────────────────────┘ └─────────────────────┘ └─────────────────────┘
+                                  │
+                                  ▼
+                        ┌─────────────────┐
+                        │ 质量门禁        │
+                        │ ─────────────   │
+                        │ ✓ DoR / DoD     │
+                        │ ✓ 测试覆盖      │
+                        │ ✓ Lint / 格式化 │
+                        └─────────────────┘
 ```
 
-### 核心运行模式
+---
 
-| 模式 | 说明 | 最适用于 |
-|------|------|----------|
-| **Chat** | 轻量级聊天界面，用于简单问答 | 快速问答、文件查看、简单任务 |
-| **Plan** | 域自适应任务拆解，支持 Steps | 内容创作、研究、多步骤工作流 |
-| **Task** | PRD 驱动的代码开发，包含 Stories 和质量门禁 | 功能开发、复杂实现 |
+## 产品形态
 
-### Workflow Kernel
+Plan Cascade 提供三种形态以适应不同的工作流程：
 
-三种模式都由统一的 **Workflow Kernel** 管理，提供：
+| 功能 | Plugin | Desktop | CLI |
+|------|--------|---------|-----|
+| **目标用户** | Claude Code 用户 | 多模型团队 | 自动化/CI |
+| **LLM 后端** | 仅 Claude Code | 7+ 提供商 (Claude, OpenAI, DeepSeek, Ollama...) | 7+ 提供商 |
+| **离线使用** | ❌ | ✅ (Ollama) | ✅ (Ollama) |
+| **安装方式** | `claude plugins install` | 桌面应用 / `pip install` | `pip install` |
+| **界面** | 斜杠命令 | 完整 GUI，4 种工作模式 | 命令行 |
+| **质量门禁** | ✅ 标准 | ✅ 企业级 + 自动重试 | ✅ |
+| **安全模型** | 基础 | 5层 (护栏 → 门禁 → 策略 → 沙箱 → 审计) | 基础 |
+| **Worktree 集成** | ✅ | ✅ 可视化 Diff 查看器 | ✅ |
+| **可视化工作流** | ❌ | ✅ 实时时间线 + 检查点 | ❌ |
+| **MCP 全栈** | 仅客户端 | 完整 (管理器 + 客户端 + 服务端) | 仅客户端 |
+| **知识系统** | ❌ | ✅ 技能 + 记忆 + RAG | ❌ |
+| **远程控制** | ❌ | ✅ A2A 协议 + Telegram 机器人 | ❌ |
+| **成熟度** | 稳定 | Alpha | 开发中 |
 
-- **统一会话生命周期** — 跨模式的一致性状态管理
-- **类型化事件流** — 实时进度更新
-- **模式切换** — Chat/Plan/Task 之间无缝切换
-- **轻量级检查点** — 支持中断后恢复
+### 如何选择？
 
-### Plan 模式 — 域自适应任务拆解
+- **选择 Plugin** — 如果你是 Claude Code 重度用户，希望无缝集成
+- **选择 Desktop** — 如果你需要多模型支持、可视化工作流或离线能力
+- **选择 CLI** — 如果你正在构建自动化流水线或 CI/CD 集成
 
-**Plan 模式**提供域无关的任务拆解框架：
+---
 
-- **域适配器** — 针对不同任务类型的专门处理器（通用、写作、研究、营销、数据分析等）
-- **Step 拆解** — 将任务拆解为可执行的 Steps 及依赖关系
-- **批次执行** — 并行执行独立的 Steps
-- **输出验证** — 验证 Step 输出是否符合验收标准
+## 核心能力
 
-### Task 模式 — PRD 驱动的代码开发
+### 统一工作流内核
 
-**Task 模式**是最强大的模式，实现完整的软件工程方法论：
+所有模式共享相同的基础架构：
 
-- **PRD 生成** — 根据任务描述自动生成产品需求文档
-- **Story 拆解** — 将需求拆解���可执行的 Stories 及依赖关系
-- **Kahn 算法** — 拓扑排序优化批次执行顺序
-- **7 级 Agent 优先级** — 智能 Agent 选择（全局 > 阶段 > Story > 推断 > 默认 > 回退 > claude-code）
-- **完整质量门禁** — 每个 Story 后的完整验证流水线：
-  - DoR (Definition of Ready)
-  - DoD (Definition of Done)
-  - AI 验证（检测骨架代码）
-  - 代码审查（质量评分）
-  - TDD 合规
-- **自动重试** — 失败时指数退避重试（5s → 10s → 20s）
+- **统一生命周期** — 跨模式一致的状态管理
+- **事件流** — 通过类型化事件实时更新进度
+- **模式切换** — Chat → Plan → Task 无缝切换
+- **检查点** — 从中断中恢复
 
-### 多 Provider 执行
+### 质量门禁流水线
 
-Plan Cascade 支持为 Story 执行配置不同的 LLM Provider。在设置 → 阶段代理 中配置。
+每个 Story 都会经过验证：
 
-| Provider | 类型 | 最适用于 |
-|----------|------|----------|
-| `claude-sonnet` | LLM (默认) | 平衡能力和速度 |
-| `claude-opus` | LLM | 复杂任务，最强能力 |
-| `claude-haiku` | LLM | 简单任务，最快响应 |
+```
+┌─────────┐   ┌─────────┐   ┌─────────────┐   ┌─────────────┐   ┌─────────┐
+│   DoR   │ → │  代码   │ → │     DoD     │ → │  AI 验证    │ → │  评审   │
+│ (就绪)  │   │ (编写)  │   │   (完成)    │   │ (无桩代码)  │   │ (评分)  │
+└─────────┘   └─────────┘   └─────────────┘   └─────────────┘   └─────────┘
+     │             │               │                 │               │
+     ▼             ▼               ▼                 ▼               ▼
+  验证需求      实现方案       验证所有标准      检测桩代码       代码质量
+               所有标准        已满足           和 TODO          评分
+```
 
-支持的 LLM Provider：Anthropic、OpenAI、Ollama、DeepSeek。
+### 设计文档层级
 
-**注意**：CLI 工具执行（codex, aider）支持尚未实现。
+两级架构确保一致性：
 
-### Story 执行模式
-
-| 模式 | 说明 |
-|------|------|
-| `LLM` | 通过 OrchestratorService 使用直接 LLM API（默认） |
-| `CLI` | 使用外部 CLI 工具（尚未实现） |
-
-Story 执行模式根据是否配置了 LLM Provider 自动确定。
-
-### 自动生成设计文档
-
-Plan Cascade 会自动生成与 PRD 配套的技术设计文档：
-
-- **项目级**: 架构、模式、跨功能决策
-- **功能级**: 组件设计、API、Story 映射
-- **继承机制**: 功能级文档继承项目级上下文
-
-### 质量门控
-
-每个 Story 完成后自动验证：
-- TypeScript/Python 类型检查
-- 单元测试和集成测试
-- 代码检查（ESLint、Ruff）
-- 自定义验证脚本
-- **AI 验证门** — 验证实现是否符合验收标准并检测骨架代码
-- **代码审查门** — AI 驱动的代码审查和质量评分
-- **TDD 合规门** — 确保代码变更伴随测试变更
-
-### 桌面应用功能
-
-桌面应用提供完整的 GUI，包含 **50+ Tauri 命令**，涵盖：
-
-| 类别 | 命令 |
-|------|------|
-| **Task 模式** | 进入/退出 Task 模式、生成/审批 PRD、执行状态、取消/报告 |
-| **Plan 模式** | 计划生成、会话分析、生命周期报告 |
-| **Git 操作** | 工作树管理、分支操作、提交历史 |
-| **内存** | 基于可配置嵌入提供商的语义存储和检索 |
-| **知识库** | 项目知识管理，混合搜索（HNSW + FTS5） |
-| **代码库索引** | 基于 LSP 的代码智能、语义搜索 |
-| **技能** | 外部框架技能加载（React、Vue、Rust 等） |
-| **MCP** | 模型上下文协议服务器集成 |
-| **插件** | 可扩展插件架构 |
-| **设置** | 用户偏好管理 |
-| **Webhook** | 外部回调 |
-| **评估** | 代码质量评估 |
-
-### 记忆系统
-
-桌面应用包含一个复杂的**跨会话持久化记忆系统**，能够从用户交互和项目上下文中学习：
-
-| 功能 | 描述 |
-|------|------|
-| **存储** | 基于 SQLite 的持久化存储，支持 TF-IDF 向量嵌入 |
-| **作用域** | 项目级、全局级（跨项目）、会话级记忆 |
-| **检索** | 4信号混合排序（嵌入 + 关键词 + 重要性 + 最近访问） |
-| **类别** | 偏好、约定、模式、纠正、事实 |
-| **提取** | LLM 驱动的对话自动记忆提取 |
-| **命令** | 显式记忆命令：`remember that...`、`forget about...`、`what do you remember about...` |
-| **维护** | 自动衰减、修剪和压缩 |
-
-**记忆类别：**
-
-| 类别 | 描述 |
-|------|------|
-| `Preference` | 用户偏好和习惯 |
-| `Convention` | 项目特定的约定 |
-| `Pattern` | 代码库中发现的模式 |
-| `Correction` | 开发过程中做的纠正 |
-| `Fact` | 关于项目的事实性知识 |
-
-**显式记忆命令：**
-- `remember that [内容]` — 存储新记忆
-- `forget about [主题]` — 删除关于某主题的记忆
-- `what do you remember about [主题]` — 查询关于某主题的记忆
-
-**全局记忆：**
-标记为 `__global__` 的记忆会在所有项目和会话之间共享，实现用户偏好的持久化。
+- **项目级** — 全局模式、共享决策 (ADR-001, ADR-002...)
+- **功能级** — 组件特定决策 (ADR-F001, ADR-F002...)
 
 ### 外部框架技能
 
-Plan Cascade 内置框架特定技能，可自动检测并注入：
+从 Git 子模块自动注入最佳实践：
 
-| 框架 | 技能 | 自动检测 |
-|------|------|----------|
-| React/Next.js | `react-best-practices`, `web-design-guidelines` | `package.json` 包含 `react` 或 `next` |
-| Vue/Nuxt | `vue-best-practices`, `vue-router-best-practices`, `vue-pinia-best-practices` | `package.json` 包含 `vue` 或 `nuxt` |
-| Rust | `rust-coding-guidelines`, `rust-ownership`, `rust-error-handling`, `rust-concurrency` | 存在 `Cargo.toml` |
+- React/Next.js — 通过 `package.json` 检测
+- Vue/Nuxt — 通过 `package.json` 检测
+- Rust — 通过 `Cargo.toml` 检测
 
-技能从 Git 子模块加载，在 Story 执行期间提供框架特定的指导：
+---
 
-```bash
-# 初始化外部技能（首次使用）
-git submodule update --init --recursive
+## 架构
 
-# 在 React 项目中，技能会自动检测：
-/plan-cascade:auto "添加用户资料组件"
-# → 自动将 React 最佳实践注入上下文
 ```
+┌────────────────────────────────────────────────────────────────────────────┐
+│                            Plan Cascade 核心                               │
+├────────────────────────────────────────────────────────────────────────────┤
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐      │
+│  │   策略      │  │    PRD      │  │   并行      │  │   质量      │      │
+│  │   选择器    │  │   生成器    │  │   执行器    │  │   门禁      │      │
+│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘      │
+├────────────────────────────────────────────────────────────────────────────┤
+│                           Agent 后端层                                      │
+│  ┌────────────────────────────┐  ┌────────────────────────────┐           │
+│  │   ClaudeCodeBackend        │  │     BuiltinBackend         │           │
+│  │   (子进程，无需 API)       │  │   (直接 API，ReAct 循环)   │           │
+│  └────────────────────────────┘  └────────────────────────────┘           │
+├────────────────────────────────────────────────────────────────────────────┤
+│                           LLM 提供商层                                      │
+│    Anthropic │ OpenAI │ DeepSeek │ Ollama │ GLM │ Qwen │ MiniMax          │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
 
 ## 快速开始
 
-### 方式一：Claude Code 插件（推荐）
+### Plugin (稳定版)
 
 ```bash
-# 安装插件
-claude plugins install Taoidle/plan-cascade
+# 在 Claude Code 中安装
+claude plugins install plan-cascade
 
-# 首次设置（推荐，尤其是 Windows 用户）
-/plan-cascade:init
-
-# 让 AI 选择最佳策略
-/plan-cascade:auto "构建一个带用户认证和 JWT 的 REST API"
-# → 默认 FULL flow（spec auto + TDD on + 确认）。可用 --flow/--tdd/--no-confirm 覆盖。
-
-# 或手动选择
-/plan-cascade:hybrid-auto "添加密码重置功能"
-/plan-cascade:approve --auto-run
+# 使用斜杠命令
+/plan-cascade:auto "实现用户认证功能"
 ```
 
-### 方式二：桌面应用（Alpha）
-
-> **注意**：桌面应用目前处于 **Alpha** 阶段，核心能力已完成，但部分功能可能不稳定。
-
-基于 **Tauri 2.0** 构建，Rust 后端 + React 前端：
+### CLI (开发中)
 
 ```bash
-# 从源码构建
-cd desktop
-pnpm install
-pnpm tauri dev
+# 需要 Python 3.10+ 和 uv
+git clone https://github.com/Taoidle/plan-cascade.git
+cd plan-cascade
+uv run pytest tests/  # 运行测试
 
-# 或运行构建后的应用（构建后）
-pnpm tauri build
+# CLI 入口
+uv run plan-cascade --help
 ```
 
-### 方式三：独立 CLI
+### Desktop (Alpha)
 
-> **注意**：独立 CLI 目前正在积极开发中，部分功能可能不完整或不稳定。生产环境建议使用 Claude Code 插件。
+完整功能的桌面应用，详见 [desktop/README_zh-CN.md](./desktop/README_zh-CN.md)。
 
-```bash
-# 安装
-pip install plan-cascade
-
-# 配置
-plan-cascade config --setup
-
-# 自动策略运行
-...
-```
+---
 
 ## 文档
 
 | 文档 | 说明 |
 |------|------|
-| [架构设计](desktop/docs/architecture-design_zh.md) | 整体系统架构 |
-| [内核设计](desktop/docs/kernel-design_zh.md) | 工作流内核、Simple Plan/Task 生产规范 |
-| [内存与技能设计](desktop/docs/memory-skill-design_zh.md) | 内存和技能架构 |
-| [代码库索引设计](desktop/docs/codebase-index-design_zh.md) | HNSW/FTS5/LSP 索引设计 |
-| [开发者指南](desktop/docs/developer-guide-v2_zh.md) | 开发环境搭建、项目结构 |
-| [API 参考](desktop/docs/api-reference-v2_zh.md) | Tauri 命令参考 |
+| [Plugin 指南](./docs/Plugin-Guide.md) | Claude Code 插件使用 |
+| [CLI 指南](./docs/CLI-Guide.md) | 命令行界面 |
+| [Mega Plan 指南](./docs/Mega-Plan-Guide.md) | 多功能编排 |
+| [Desktop README](./desktop/README_zh-CN.md) | 桌面应用 |
+| [PRD 模板](./docs/prd-template.json) | PRD 文件格式 |
 
-## 架构
+---
 
-### 桌面应用架构
+## 项目结构
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                     前端 (React + TypeScript)                 │
-├─────────────────────────────────────────────────────────────┤
-│  110+ Zustand Store  │  React Query  │  Radix UI        │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                    Tauri IPC (50+ 命令)
-                              │
-┌─────────────────────────────────────────────────────────────┐
-│                   后端 (Rust + Tauri 2.0)                    │
-├─────────────────────────────────────────────────────────────┤
-│  Core Crate    │  LLM Crate   │  Quality Gates  │  Tools   │
-│  上下文/      │  OpenAI/    │  Detector/     │  Executor│
-│  事件/       │  Anthropic/ │  Validator/   │  Traits  │
-│  流式处理      │  DeepSeek/   │  Pipeline     │          │
-│                │  Ollama/...   │               │          │
-└─────────────────────────────────────────────────────────────┘
+plan-cascade/
+├── src/plan_cascade/          # 核心 Python 库
+│   ├── core/                  # 编排引擎
+│   ├── backends/              # Agent 抽象层
+│   ├── state/                 # 线程安全状态管理
+│   ├── llm/                   # LLM 提供商抽象
+│   └── tools/                 # ReAct 工具实现
+├── desktop/                   # Tauri 桌面应用
+│   ├── src/                   # React 前端
+│   └── src-tauri/             # Rust 后端
+├── skills/                    # 插件技能
+│   ├── hybrid-ralph/          # PRD 驱动执行
+│   ├── mega-plan/             # 多功能编排
+│   └── planning-with-files/   # 基于文件的规划
+├── commands/                  # 斜杠命令定义
+└── mcp_server/               # FastMCP 服务器
 ```
 
-### 支持的 LLM 提供商
+---
 
-| 提供商 | 模型 |
-|--------|------|
-| OpenAI | GPT-4o, GPT-4o Mini |
-| Anthropic | Claude Sonnet, Claude Haiku |
-| DeepSeek | DeepSeek Chat |
-| GLM | 智谱 AI (对话 + 嵌入) |
-| MiniMax | M2, M2.1, M2.5 (通过 Anthropic 兼容 API) |
-| Ollama | 本地模型 |
-| Qwen | 通义千问 (对话 + 嵌入) |
+## 路线图
 
-### 搜索能力
+| 组件 | 当前版本 | 下一个里程碑 |
+|------|----------|--------------|
+| **Plugin** | 4.4.0 稳定版 | 5.0.0 - 增强 CLI 集成 |
+| **Desktop** | 0.1.0 Alpha | 0.2.0 - Beta 完整工作流 |
+| **CLI** | 开发中 | 1.0.0 - 稳定版发布 |
+| **MCP Server** | 稳定版 | 增强工具支持 |
 
-- **语义搜索** — 可配置的嵌入提供商 (OpenAI, Qwen, GLM, Ollama, TF-IDF)
-- **混合搜索** — HNSW + FTS5 组合
-- **基于 LSP** — 语言服务器协议的代码智能
+---
+
+## 贡献
+
+欢迎贡献！请查看我们的贡献指南了解详情。
+
+---
 
 ## 许可证
 
-MIT 许可证 - 详见 [LICENSE](LICENSE)。
+MIT 许可证 - 详见 [LICENSE](../LICENSE)。

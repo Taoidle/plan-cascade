@@ -2,15 +2,15 @@
 
 # Plan Cascade Desktop
 
-**AI-Powered Programming Orchestration Platform**
+**Local-First AI Development Workstation**
 
-A cross-platform desktop application that decomposes complex development tasks into parallel executable workflows with multi-agent collaboration, powered by a Rust backend and React frontend.
+*A complete AI-powered development environment — Chat, Plan, Task, Debug — all in one desktop app*
 
-[![Version](https://img.shields.io/badge/version-0.1.0-blue)](package.json)
+[![Version](https://img.shields.io/badge/version-0.1.0-blue)](./package.json)
 [![Tauri](https://img.shields.io/badge/Tauri-2.0-FFC131?logo=tauri&logoColor=white)](https://tauri.app/)
 [![React](https://img.shields.io/badge/React-18.3-61dafb?logo=react&logoColor=white)](https://react.dev/)
-[![Rust](https://img.shields.io/badge/Rust-2021_Edition-dea584?logo=rust&logoColor=white)](https://www.rust-lang.org/)
-[![License](https://img.shields.io/badge/license-MIT-green)](../LICENSE)
+[![Rust](https://img.shields.io/badge/Rust-2021-dea584?logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![License](https://img.shields.io/badge/License-MIT-green)](../LICENSE)
 
 [English](./README.md) | [简体中文](./README_zh-CN.md)
 
@@ -18,379 +18,352 @@ A cross-platform desktop application that decomposes complex development tasks i
 
 ---
 
-## Overview
+## Why Desktop?
 
-Plan Cascade Desktop is a comprehensive AI programming assistant built on **Tauri 2.0**. It connects to 7+ LLM providers, provides intelligent code generation with agentic tool use, and orchestrates multi-step development workflows — from simple Q&A to fully autonomous PRD-driven feature implementation.
+AI coding assistants are transforming how we build software. But using them effectively often means juggling multiple tools:
 
-### Why Plan Cascade Desktop?
+- Chat in one app, code in another
+- No visibility into what the AI is actually doing
+- Switching contexts loses important details
+- Enterprise concerns: security, audit trails, data control
 
-- **Pure Rust backend** — minimal memory footprint, no Python/Node runtime needed at runtime
-- **Security first** — API keys encrypted with AES-256-GCM, stored locally, never transmitted
-- **Works with your models** — supports Anthropic, OpenAI, DeepSeek, Ollama (local), Qwen, Zhipu GLM, MiniMax
-- **Multiple execution modes** — choose the right level of autonomy for every task
-- **Full-stack type safety** — TypeScript strict mode + Rust compile-time checks
-- **Cross-platform** — Windows, macOS (Universal binary), and Linux
+**Plan Cascade Desktop** solves these problems with a unified, local-first AI workstation.
 
----
+### Key Differentiators
 
-## Features
-
-### Multi-Mode Execution
-
-| Mode | Description | Use Case |
-|------|-------------|----------|
-| **Claude Code** | Interactive chat with Claude Code CLI integration | Real-time pair programming |
-| **Simple** | Direct LLM conversation with agentic tool use | Quick tasks and Q&A |
-| **Expert** | PRD generation with dependency graph visualization | Feature planning and decomposition |
-| **Task** | PRD-driven autonomous multi-story execution | Complex feature implementation |
-| **Plan** | Multi-feature mega-plan orchestration | Project-level coordination |
-
-### Agent Library
-
-Create and manage specialized AI agents with custom system prompts, tool constraints, model selection, and execution history. Agents are reusable across projects and sessions.
-
-### Quality Gates
-
-Automated validation pipeline that runs after each code generation step:
-- Test execution (unit, integration, e2e)
-- Linting and formatting checks
-- Type checking
-- Custom validation rules per project
-
-### Timeline & Checkpoints
-
-Session-level version control for AI-generated changes:
-- Automatic state snapshots at key milestones
-- Branch and fork workflows for exploring alternatives
-- One-click rollback to any checkpoint
-
-### Git Worktree Integration
-
-Isolated development environments for parallel task execution:
-- Automatic branch creation and worktree setup
-- Safe merge workflows with conflict detection
-- Multi-task parallel development
-
-### Knowledge Base (RAG)
-
-Semantic document search powered by embeddings:
-- Index project docs, design specs, and references
-- Multi-provider embedding support
-- Automatic change detection and re-indexing
-
-### Codebase Index
-
-AI-powered code search and understanding:
-- Tree-sitter based symbol extraction (functions, classes, structs, enums)
-- Background indexing with file watching
-- HNSW vector search for semantic code queries
-
-### MCP Integration
-
-Full [Model Context Protocol](https://modelcontextprotocol.io/) support:
-- Server registry management
-- Custom tool and resource provider configuration
-- Streamable HTTP and stdio transport support
-
-### Analytics Dashboard
-
-Track usage, costs, and performance across all LLM providers:
-- Token consumption and cost breakdown by model/provider
-- Historical trend visualization
-- Session-level usage attribution
-
-### Additional Capabilities
-
-- **Guardrails** — rule-based constraints on tool execution for safety
-- **Webhooks** — event routing to Slack, Feishu, Discord, or custom endpoints
-- **Remote Control** — Telegram bot and A2A protocol agent discovery
-- **Plugin System** — framework-specific skill injection (React, Vue, Rust)
-- **PDF / Image Export** — export conversations and artifacts
-- **Internationalization** — English, Chinese (Simplified), Japanese
+| Capability | Plan Cascade Desktop | Cursor / Copilot | Claude Code |
+|------------|---------------------|------------------|-------------|
+| **Multi-Model Support** | 7+ providers | Limited | Claude only |
+| **Offline Mode** | ✅ Ollama | ❌ | ❌ |
+| **4 Workflow Modes** | Chat/Plan/Task/Debug | Single mode | Single mode |
+| **Unified State Kernel** | SSOT architecture | Per-session | Per-session |
+| **Cross-Mode Context** | Zero information loss | ❌ | ❌ |
+| **Quality Gates** | Full pipeline + auto-fix | Basic lint | ❌ |
+| **5-Layer Security** | Guardrail → Policy → Sandbox → Audit | Basic confirmations | Basic |
+| **Skill System** | 4 sources + priority management | ❌ | ❌ |
+| **Memory System** | TF-IDF + 4-signal ranking | Conversation history | Conversation history |
+| **Remote Control** | A2A + Telegram | ❌ | ❌ |
+| **MCP Full Stack** | Server + Client + Import | ❌ | Partial |
 
 ---
 
-## Architecture
+## Four Workflow Modes
+
+All modes are driven by a **Unified Workflow Kernel (SSOT)**, ensuring state consistency and seamless context handoff.
+
+### Chat Mode — Conversational Interface
+
+```
+ready → submitting → streaming → paused/failed/cancelled
+```
+
+**Features:**
+- Streaming responses with pause/resume
+- Message queuing and turn management
+- File drag & drop, @-references
+- Slash commands integration
+
+### Plan Mode — Structured Execution
+
+```
+idle → analyzing → clarifying → planning → executing → completed
+```
+
+**Features:**
+- Step orchestration with parallel execution (maxParallel=4)
+- Automatic retry with backoff (800ms)
+- Batch gating — blocks subsequent batches on failure
+- Output quality gates — rejects empty output, TODO narratives
+
+### Task Mode — Full Development Workflow
+
+```
+idle → interviewing → exploring → generating_prd → executing → completed
+```
+
+**Features:**
+- Requirements analysis and clarification
+- Automatic PRD and design document generation
+- Strategy recommendation (flow level, TDD mode, quality gates)
+- Full quality gates pipeline
+
+### Debug Mode — Professional Debugging
+
+```
+intaking → clarifying → reproducing → hypothesizing → testing → patching → verifying
+```
+
+**Features:**
+- **Hypothesis Management** — Track multiple hypotheses with supporting/refuting evidence
+- **Capability Tiers** — `dev_full` / `staging_limited` / `prod_observe_only`
+- **Approval Mechanism** — Patch preview, dangerous tools require manual confirmation
+- **Verification Reports** — Structured checklists and residual risk assessment
+
+### Cross-Mode Context Handoff
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                     Plan Cascade Desktop                        │
-├───────────────────────────┬─────────────────────────────────────┤
-│   React Frontend          │   Rust Backend (Tauri 2.0)          │
-│   ───────────────────     │   ─────────────────────────         │
-│   Radix UI Components     │   300+ IPC Commands                 │
-│   Zustand State (50)      │   42+ Service Modules               │
-│   Monaco Editor           │   SQLite + r2d2 Pool                │
-│   i18next (3 languages)   │   AES-256-GCM Keyring               │
-│   Tailwind CSS            │   Tree-sitter Code Parsing          │
-│   Fuse.js Fuzzy Search    │   HNSW Vector Search                │
-├───────────────────────────┴─────────────────────────────────────┤
-│                        Tauri IPC Bridge                         │
-├───────────┬──────────────┬──────────────┬───────────────────────┤
-│ Claude    │ LLM          │ Git          │ MCP                   │
-│ Code CLI  │ Providers    │ Worktrees    │ Servers               │
-│           │ (7+)         │              │                       │
-└───────────┴──────────────┴──────────────┴───────────────────────┘
+│                    Workflow Kernel (SSOT)                       │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │              modeSnapshots & modeRuntimeMeta                ││
+│  │  ┌───────┐  ┌───────┐  ┌───────┐  ┌───────┐               ││
+│  │  │ Chat  │  │ Plan  │  │ Task  │  │ Debug │               ││
+│  │  └───────┘  └───────┘  └───────┘  └───────┘               ││
+│  └─────────────────────────────────────────────────────────────┘│
+│           ↕ HandoffContext (cross-mode context transfer)        │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-### Cargo Workspace
-
-The Rust backend is organized into 5 crates:
-
-| Crate | Purpose |
-|-------|---------|
-| `plan-cascade-desktop` | Main Tauri app — commands, services, storage |
-| `plan-cascade-core` | Core traits, error types, context hierarchy, streaming |
-| `plan-cascade-llm` | LLM provider abstraction with streaming adapters |
-| `plan-cascade-tools` | Tool executor framework and definitions |
-| `plan-cascade-quality-gates` | Quality gate pipeline and project type detection |
-
-### Project Structure
-
-```
-desktop/
-├── src/                          # React frontend
-│   ├── components/               #   UI components by domain
-│   │   ├── Agents/               #     Agent library
-│   │   ├── Analytics/            #     Usage & cost dashboard
-│   │   ├── ClaudeCodeMode/       #     Claude Code CLI integration
-│   │   ├── ExpertMode/           #     PRD & strategy planning
-│   │   ├── SimpleMode/           #     Direct LLM chat
-│   │   ├── TaskMode/             #     Autonomous task execution
-│   │   ├── KnowledgeBase/        #     RAG document search
-│   │   ├── Timeline/             #     Checkpoint browser
-│   │   ├── MCP/                  #     MCP server management
-│   │   ├── Settings/             #     Configuration UI
-│   │   └── shared/               #     Reusable components
-│   ├── store/                    #   Zustand state management
-│   ├── lib/                      #   IPC API wrappers
-│   ├── i18n/                     #   Translations (en, zh, ja)
-│   └── types/                    #   TypeScript type definitions
-├── src-tauri/                    # Rust backend
-│   ├── src/
-│   │   ├── commands/             #   Tauri IPC command handlers
-│   │   ├── services/             #   Business logic layer
-│   │   ├── models/               #   Data structures
-│   │   └── storage/              #   SQLite, keyring, config
-│   └── crates/                   #   Workspace crates
-│       ├── core/                 #     Core traits & types
-│       ├── llm/                  #     LLM provider adapters
-│       ├── tools/                #     Tool execution framework
-│       └── quality-gates/        #     Validation pipeline
-└── docs/                         # Documentation
-```
+**Benefits:**
+- Chat → Plan/Task: Automatic conversation context import
+- Plan/Task → Chat: Structured summary handoff
+- Zero information loss on mode switching
 
 ---
 
-## Quick Start
+## Core Features
 
-### Prerequisites
+### 🏆 Enterprise-Grade Security
 
-| Dependency | Version | Notes |
-|------------|---------|-------|
-| [Node.js](https://nodejs.org/) | 18+ | Frontend build tooling |
-| [pnpm](https://pnpm.io/) | 8+ | Package manager |
-| [Rust](https://rustup.rs/) | 1.70+ | Backend compilation |
-| System libs | — | See [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) |
+5-Layer Security Model:
 
-### Install & Run
+| Layer | Component | Function |
+|-------|-----------|----------|
+| 1 | **Guardrail** | Sensitive data detection and redaction |
+| 2 | **Permission Gate** | Tool-level authorization |
+| 3 | **Policy Engine v2** | Configurable security policies |
+| 4 | **Sandbox** | Isolated execution environment |
+| 5 | **Audit Log** | Complete operation trail |
 
-```bash
-# Clone the repository
-git clone https://github.com/plan-cascade/plan-cascade
-cd plan-cascade/desktop
+### 🎯 Quality Gates Pipeline
 
-# Install frontend dependencies
-pnpm install
+Automated multi-dimensional validation:
 
-# Start development (frontend + backend with hot reload)
-pnpm tauri:dev
+```
+┌─────────┐   ┌─────────┐   ┌─────────────┐   ┌─────────────┐   ┌─────────┐
+│   DoR   │ → │  Code   │ → │     DoD     │ → │ AI Verify   │ → │ Review  │
+│ (Ready) │   │ (Write) │   │   (Done)    │   │ (No Stubs)  │   │ (Score) │
+└─────────┘   └─────────┘   └─────────────┘   └─────────────┘   └─────────┘
+     │             │               │                 │               │
+     ▼             ▼               ▼                 ▼               ▼
+  Validate      Implement       All criteria     Detect stub     Code quality
+  requirements   solution       met             & TODO          scoring
 ```
 
-On first run, the Rust backend compiles from source — this takes a few minutes. Subsequent starts are fast.
+**Supported Checks:**
+- Format (Prettier, Black, rustfmt...)
+- Lint (ESLint, Ruff, Clippy...)
+- Type Check (TypeScript, mypy...)
+- Security (injection detection, credential scanning)
+- Complexity (cyclomatic complexity thresholds)
 
-### Production Build
+### 🧠 Growable Knowledge System
 
-```bash
-# Build for current platform
-pnpm tauri:build
+**Skill System (4 Sources + 2-Stage Selection):**
 
-# Platform-specific builds
-pnpm tauri:build:macos      # macOS Universal (Intel + Apple Silicon)
-pnpm tauri:build:windows    # Windows x64 MSI
-pnpm tauri:build:linux      # Linux x64 AppImage
+| Source | Priority | Examples |
+|--------|----------|----------|
+| Built-in Skills | Highest | hybrid-ralph, mega-plan, planning-with-files |
+| External Skills (Git Submodules) | High | React, Vue, Rust best practices |
+| User Skills (Project) | Medium | Project-specific workflows |
+| Dynamic Skills (Generated) | Low | On-the-fly instructions |
+
+**Memory System (TF-IDF + 4-Signal Ranking):**
+
 ```
+Score = w₁×Recency + w₂×Frequency + w₃×Semantic + w₄×Importance
+```
+
+- Automatic decay and pruning
+- Persistent across sessions
+- Context-aware retrieval
+
+### 🌐 Remote Control
+
+**A2A Protocol (Agent-to-Agent):**
+
+- JSON-RPC 2.0 + SSE transport
+- 5-layer security protection
+- Multi-platform adapters (Telegram, Discord, Slack)
+
+**Example — Telegram Remote Control:**
+
+```
+User: /task implement user login
+Bot: Task started. [View Progress → http://localhost:3000]
+Bot: ⚠️ Quality gate failed: test coverage below 80%
+User: /retry with --skip-coverage
+Bot: Task completed. ✓ 5/5 stories passed
+```
+
+### 🔌 MCP Full Stack
+
+| Capability | Description |
+|------------|-------------|
+| **MCP Client** | Connect to any MCP server |
+| **MCP Server** | Expose Desktop tools as MCP resources |
+| **Claude Desktop Import** | One-click config migration |
+| **Registry** | Discover and manage MCP servers |
+| **Health Check** | Monitor server availability |
 
 ---
 
-## Development
+## Multi-Model Support
 
-### Commands
-
-```bash
-# Frontend
-pnpm dev                    # Vite dev server only (port 8173)
-pnpm build                  # TypeScript compile + Vite build
-pnpm lint                   # ESLint (zero-warning policy)
-pnpm typecheck              # TypeScript strict mode check
-pnpm test                   # Run tests (Vitest)
-pnpm test:watch             # Watch mode
-pnpm test:coverage          # Coverage report (60% threshold)
-
-# Backend (from src-tauri/)
-cargo test                  # Unit + integration tests
-cargo clippy                # Rust linting
-cargo check                 # Type check
-cargo build --features browser  # Build with headless Chrome support
-
-# Full app
-pnpm tauri:dev              # Dev mode with hot reload + devtools
-pnpm tauri:build:dev        # Debug build
-```
-
-### Code Quality
-
-- **TypeScript**: strict mode with `noUnusedLocals` and `noUnusedParameters`
-- **ESLint**: zero-warning policy (`--max-warnings 0`)
-- **Prettier**: enforced via pre-commit hooks (Husky + lint-staged)
-- **Rust**: clippy for linting, release builds with LTO and symbol stripping
-- **Commits**: conventional format — `type(scope): description`
+| Provider | API Key | Offline | Best For |
+|----------|---------|---------|----------|
+| **Anthropic** | Required | ❌ | Complex reasoning |
+| **OpenAI** | Required | ❌ | General purpose |
+| **DeepSeek** | Required | ❌ | Cost-effective coding |
+| **Ollama** | Optional | ✅ | Privacy, air-gapped |
+| **GLM** | Required | ❌ | Chinese language |
+| **Qwen** | Required | ❌ | Multilingual |
+| **MiniMax** | Required | ❌ | Long context |
 
 ---
 
-## Supported LLM Providers
+## Simple Workspace Layout
 
-| Provider | Tool Calling | Local | Notes |
-|----------|:---:|:---:|-------|
-| [Anthropic](https://www.anthropic.com/) (Claude) | Native | | Prompt caching support |
-| [OpenAI](https://openai.com/) (GPT) | Native | | |
-| [DeepSeek](https://www.deepseek.com/) | Dual-channel | | Native + prompt fallback |
-| [Qwen](https://www.alibabacloud.com/en/solutions/generative-ai/qwen) (Alibaba) | Dual-channel | | |
-| [Zhipu GLM](https://www.zhipuai.cn/) | Dual-channel | | |
-| [Ollama](https://ollama.com/) | Prompt-only | Yes | Any local model |
-| [MiniMax](https://www.minimaxi.com/) | Prompt-only | | |
-
-**Dual-channel**: tools passed via native API and prompt-based fallback for reliability.
-
----
-
-## Documentation
-
-| Document | Description |
-|----------|-------------|
-| [User Guide](./docs/user-guide.md) | Feature walkthrough for end users |
-| [Developer Guide](./docs/developer-guide.md) | Architecture deep-dive and contribution guide |
-| [API Reference](./docs/api-reference.md) | Complete IPC command documentation |
-| [Migration Guide](./docs/migration-v5.md) | Upgrade from v4.x to v5.0 |
-| [Codebase Index Plan](./docs/codebase-index-iteration-plan.md) | Semantic search iteration roadmap |
-| [Memory Skill Plan](./docs/memory-skill-iteration-plan.md) | Agent memory system design |
-
----
-
-## Contributing
-
-Contributions are welcome! Please see the [Developer Guide](./docs/developer-guide.md) for architecture details and conventions.
-
-```bash
-# 1. Fork and clone
-git clone https://github.com/<your-username>/plan-cascade
-cd plan-cascade/desktop
-
-# 2. Create a feature branch
-git checkout -b feat/your-feature
-
-# 3. Make changes, ensure quality checks pass
-pnpm lint && pnpm typecheck && pnpm test
-
-# 4. Commit with conventional message
-git commit -m "feat(scope): add your feature"
-
-# 5. Push and open a Pull Request
-git push origin feat/your-feature
 ```
-
-### Guidelines
-
-- All tests must pass before merging
-- ESLint zero-warning policy — no suppressions without justification
-- Update relevant documentation for user-facing changes
-- Follow existing patterns for new commands, services, and components
-
----
-
-## Troubleshooting
-
-**Build fails with "linker 'cc' not found"**
-
-```bash
-# macOS
-xcode-select --install
-
-# Ubuntu / Debian
-sudo apt install build-essential libwebkit2gtk-4.1-dev libappindicator3-dev
-
-# Fedora
-sudo dnf install gcc webkit2gtk4.1-devel libappindicator-gtk3-devel
+┌────────────────────────────────────────────────────────────────────────┐
+│  Plan Cascade Desktop                              ─ □ ×             │
+├────────────────┬───────────────────────────────────────────────────────┤
+│                │  Messages                                           │
+│  Files         │  ┌─────────────────────────────────────────────────┐ │
+│  ┌──────────┐  │  │ 🤖 I'll help you implement the login feature.  │ │
+│  │ src/     │  │  │ Let me analyze the codebase first...           │ │
+│  │ ├─ api/  │  │  │                                                 │ │
+│  │ ├─ auth/ │  │  │ 📋 Created PRD with 5 stories:                  │ │
+│  │ └─ ...   │  │  │   ✓ story-001: JWT implementation               │ │
+│  └──────────┘  │  │   ✓ story-002: Password hashing                 │ │
+│                │  │   → story-003: Session management (in progress)  │ │
+│  Worktrees     │  │   ○ story-004: Token refresh                     │ │
+│  ┌──────────┐  │  │   ○ story-005: Logout                           │ │
+│  │ feature/ │  │  └─────────────────────────────────────────────────┘ │
+│  │ fix-bug/ │  │                                                       │
+│  └──────────┘  │  Input: [Implement user authentication...]  [Send]   │
+├────────────────┴───────────────────────────────────────────────────────┤
+│  [Chat] [Plan] [Task] [Debug]                    Quality Gates: ✓ 3/3  │
+└────────────────────────────────────────────────────────────────────────┘
 ```
-
-**Tauri dev server won't start**
-
-```bash
-cargo clean                           # Clear Rust build cache
-rm -rf node_modules && pnpm install   # Reinstall frontend deps
-```
-
-**API keys not saving**
-
-The app uses a local encrypted file store (AES-256-GCM) rather than the OS keychain. Check that the app has write permissions to its data directory.
 
 ---
 
 ## Tech Stack
 
-### Frontend
+| Layer | Technology | Purpose |
+|-------|------------|---------|
+| **Frontend** | React 18.3 + TypeScript | UI components |
+| **State** | Zustand + Immer | Client state management |
+| **Styling** | Tailwind CSS + Radix UI | Design system |
+| **Backend** | Rust (Tauri 2.0) | Native performance |
+| **IPC** | Tauri Commands | Frontend-Rust bridge |
+| **Database** | SQLite + Tauri SQL | Persistent storage |
+| **Indexing** | HNSW + FTS5 | Code & knowledge search |
 
-| Category | Library | Version |
-|----------|---------|---------|
-| Framework | React | 18.3 |
-| State Management | Zustand | 5.0 |
-| UI Primitives | Radix UI | latest |
-| Code Editor | Monaco Editor | 4.7 |
-| Styling | Tailwind CSS | 3.4 |
-| i18n | i18next | 25.8 |
-| Markdown | react-markdown + rehype + remark | 10.1 |
-| Math Rendering | KaTeX | 0.16 |
-| Drag & Drop | @dnd-kit | latest |
-| Syntax Highlighting | Prism React Renderer | 2.4 |
-| Fuzzy Search | Fuse.js | 7.1 |
+### Rust Crates
 
-### Backend
+| Crate | Purpose |
+|-------|---------|
+| `core` | Builders, LLM clients, quality gates |
+| `llm` | Multi-provider LLM abstraction |
+| `tools` | ReAct tool implementations |
+| `quality-gates` | Format, lint, type check, security |
 
-| Category | Library | Version |
-|----------|---------|---------|
-| Desktop Framework | Tauri | 2.0 |
-| Async Runtime | Tokio | 1.x |
-| Database | rusqlite (bundled SQLite) | 0.32 |
-| Connection Pool | r2d2 | latest |
-| HTTP Client | Reqwest | 0.12 |
-| Encryption | aes-gcm | 0.10 |
-| Code Parsing | tree-sitter | 0.24 |
-| Vector Search | hnsw_rs | 0.3 |
-| File Watching | notify | 6.x |
-| LLM SDKs | ollama-rs, async-dashscope, anthropic-async, zai-rs | various |
+---
+
+## Getting Started
+
+### Prerequisites
+
+- Node.js 20+
+- pnpm
+- Rust stable toolchain
+- Tauri CLI: `pnpm add -g @tauri-apps/cli`
+
+### Development
+
+```bash
+cd desktop
+pnpm install
+pnpm tauri:dev
+```
+
+### Production Build
+
+```bash
+cd desktop
+pnpm tauri:build
+```
+
+---
+
+## Commands Reference
+
+```bash
+# Frontend development
+pnpm dev              # Start Vite dev server
+pnpm build            # Build frontend
+pnpm lint             # Run ESLint
+pnpm typecheck        # TypeScript check
+pnpm test             # Run tests
+
+# Desktop application
+pnpm tauri:dev        # Development mode
+pnpm tauri:build      # Production build
+pnpm tauri:build:dev  # Development build
+
+# Rust backend
+cd src-tauri
+cargo test            # Run Rust tests
+cargo check           # Fast compile check
+```
+
+---
+
+## Project Structure
+
+```
+desktop/
+├── src/                    # React frontend
+│   ├── components/         # Reusable UI components
+│   ├── pages/              # Workspace pages
+│   ├── stores/             # Zustand state stores
+│   ├── hooks/              # Custom React hooks
+│   └── services/           # Frontend services
+├── src-tauri/              # Rust backend
+│   ├── src/
+│   │   ├── commands/       # Tauri IPC commands
+│   │   ├── models/         # Data models
+│   │   └── services/       # Core services
+│   └── crates/             # Rust crates
+│       ├── core/           # Core business logic
+│       ├── llm/            # LLM integrations
+│       ├── tools/          # Tool implementations
+│       └── quality-gates/  # Quality validation
+└── docs/                   # Desktop-specific docs
+```
+
+---
+
+## Roadmap
+
+| Version | Milestone | Status |
+|---------|-----------|--------|
+| 0.1.0 | Core 4 modes + basic quality gates | ✅ Current |
+| 0.2.0 | Full A2A remote control | 🚧 In Progress |
+| 0.3.0 | Analytics dashboard + cost tracking | 📋 Planned |
+| 0.4.0 | Team collaboration features | 📋 Planned |
+| 1.0.0 | Stable release | 📋 Planned |
 
 ---
 
 ## License
 
-[MIT](../LICENSE)
+MIT License - see [LICENSE](../LICENSE) for details.
 
 ---
 
-## Acknowledgments
+## Contributing
 
-- [Tauri](https://tauri.app/) — cross-platform desktop framework
-- [Anthropic](https://www.anthropic.com/) — Claude API and Claude Code
-- [Radix UI](https://www.radix-ui.com/) — accessible, headless UI primitives
-- [Monaco Editor](https://microsoft.github.io/monaco-editor/) — code editor component
-- [Tree-sitter](https://tree-sitter.github.io/) — incremental code parsing
+Contributions are welcome! Please read the contributing guidelines before submitting PRs.
