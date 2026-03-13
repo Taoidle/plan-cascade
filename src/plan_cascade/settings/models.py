@@ -21,6 +21,7 @@ class BackendType(Enum):
     - OPENAI: OpenAI API (requires API key)
     - DEEPSEEK: DeepSeek API (requires API key)
     - OLLAMA: Local Ollama instance (optional API key)
+    - NOVITA: Novita AI OpenAI-compatible API (requires API key)
     """
 
     CLAUDE_CODE = "claude-code"
@@ -28,6 +29,7 @@ class BackendType(Enum):
     OPENAI = "openai"
     DEEPSEEK = "deepseek"
     OLLAMA = "ollama"
+    NOVITA = "novita"
 
 
 @dataclass
