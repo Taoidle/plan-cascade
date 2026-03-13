@@ -17,6 +17,12 @@ export interface CommandResponse<T> {
   error: string | null;
 }
 
+export interface CustomProviderEndpoint {
+  id: string;
+  name: string;
+  baseUrl: string;
+}
+
 export interface AppConfig {
   theme: string;
   language: string;
@@ -26,6 +32,9 @@ export interface AppConfig {
   glm_endpoint: string;
   minimax_endpoint: string;
   qwen_endpoint: string;
+  custom_provider_base_urls: Record<string, string>;
+  custom_provider_endpoints: Record<string, CustomProviderEndpoint[]>;
+  selected_custom_provider_endpoint_ids: Record<string, string>;
   analytics_enabled: boolean;
   auto_save_interval: number;
   max_recent_projects: number;
@@ -43,6 +52,9 @@ export interface SettingsUpdate {
   glm_endpoint?: string;
   minimax_endpoint?: string;
   qwen_endpoint?: string;
+  custom_provider_base_urls?: Record<string, string>;
+  custom_provider_endpoints?: Record<string, CustomProviderEndpoint[]>;
+  selected_custom_provider_endpoint_ids?: Record<string, string>;
   analytics_enabled?: boolean;
   auto_save_interval?: number;
   max_recent_projects?: number;

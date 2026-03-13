@@ -47,11 +47,133 @@ function normalizeProviderKey(provider: string): string {
   return provider.trim().toLowerCase();
 }
 
+function createCustomProviderEndpointId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `endpoint-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function normalizeCustomProviderBaseUrls(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object') return {};
+
+  const normalized: Record<string, string> = {};
+  Object.entries(value as Record<string, unknown>).forEach(([provider, baseUrl]) => {
+    if (typeof baseUrl !== 'string') return;
+    const canonical = normalizeProviderKey(provider);
+    const trimmed = baseUrl.trim();
+    if (!canonical || !trimmed) return;
+    normalized[canonical] = trimmed;
+  });
+  return normalized;
+}
+
 interface Agent {
   name: string;
   enabled: boolean;
   command: string;
   isDefault: boolean;
+}
+
+export interface CustomProviderEndpoint {
+  id: string;
+  name: string;
+  baseUrl: string;
+}
+
+function normalizeCustomProviderEndpoints(value: unknown): Record<string, CustomProviderEndpoint[]> {
+  if (!value || typeof value !== 'object') return {};
+
+  const normalized: Record<string, CustomProviderEndpoint[]> = {};
+  Object.entries(value as Record<string, unknown>).forEach(([provider, endpoints]) => {
+    const canonical = normalizeProviderKey(provider);
+    if (!canonical || !Array.isArray(endpoints)) return;
+
+    const nextEndpoints = endpoints
+      .map((entry) => {
+        if (!entry || typeof entry !== 'object') return null;
+        const candidate = entry as Record<string, unknown>;
+        const id =
+          typeof candidate.id === 'string' && candidate.id.trim()
+            ? candidate.id.trim()
+            : createCustomProviderEndpointId();
+        const name =
+          typeof candidate.name === 'string' && candidate.name.trim() ? candidate.name.trim() : 'Custom endpoint';
+        const baseUrl = typeof candidate.baseUrl === 'string' ? candidate.baseUrl.trim() : '';
+        if (!baseUrl) return null;
+        return { id, name, baseUrl };
+      })
+      .filter((entry): entry is CustomProviderEndpoint => entry !== null);
+
+    if (nextEndpoints.length > 0) {
+      normalized[canonical] = nextEndpoints;
+    }
+  });
+
+  return normalized;
+}
+
+function normalizeSelectedCustomProviderEndpointIds(
+  value: unknown,
+  endpointsByProvider: Record<string, CustomProviderEndpoint[]>,
+): Record<string, string> {
+  if (!value || typeof value !== 'object') return {};
+
+  const normalized: Record<string, string> = {};
+  Object.entries(value as Record<string, unknown>).forEach(([provider, endpointId]) => {
+    if (typeof endpointId !== 'string' || !endpointId.trim()) return;
+    const canonical = normalizeProviderKey(provider);
+    if (!canonical) return;
+    const hasEndpoint = (endpointsByProvider[canonical] || []).some((entry) => entry.id === endpointId.trim());
+    if (hasEndpoint) {
+      normalized[canonical] = endpointId.trim();
+    }
+  });
+  return normalized;
+}
+
+function buildCustomProviderEndpointsFromBaseUrls(
+  customProviderBaseUrls: Record<string, string>,
+): Record<string, CustomProviderEndpoint[]> {
+  const endpoints: Record<string, CustomProviderEndpoint[]> = {};
+  Object.entries(customProviderBaseUrls).forEach(([provider, baseUrl]) => {
+    const trimmed = baseUrl.trim();
+    if (!trimmed) return;
+    endpoints[provider] = [
+      {
+        id: `legacy-${provider}`,
+        name: 'Custom endpoint',
+        baseUrl: trimmed,
+      },
+    ];
+  });
+  return endpoints;
+}
+
+function buildSelectedCustomEndpointIdsFromBaseUrls(
+  customProviderBaseUrls: Record<string, string>,
+): Record<string, string> {
+  const selectedIds: Record<string, string> = {};
+  Object.entries(customProviderBaseUrls).forEach(([provider, baseUrl]) => {
+    if (baseUrl.trim()) {
+      selectedIds[provider] = `legacy-${provider}`;
+    }
+  });
+  return selectedIds;
+}
+
+function buildCustomProviderBaseUrlsFromSelection(
+  endpointsByProvider: Record<string, CustomProviderEndpoint[]>,
+  selectedIdsByProvider: Record<string, string>,
+): Record<string, string> {
+  const baseUrls: Record<string, string> = {};
+  Object.entries(selectedIdsByProvider).forEach(([provider, endpointId]) => {
+    const endpoint = (endpointsByProvider[provider] || []).find((entry) => entry.id === endpointId);
+    if (endpoint?.baseUrl.trim()) {
+      baseUrls[provider] = endpoint.baseUrl.trim();
+    }
+  });
+  return baseUrls;
 }
 
 export interface PhaseAgentConfig {
@@ -156,6 +278,11 @@ interface SettingsState {
   // Qwen endpoint
   qwenEndpoint: QwenEndpoint;
 
+  // Custom provider endpoints
+  customProviderBaseUrls: Record<string, string>;
+  customProviderEndpoints: Record<string, CustomProviderEndpoint[]>;
+  selectedCustomProviderEndpointIds: Record<string, string>;
+
   // Search provider settings
   searchProvider: 'tavily' | 'brave' | 'duckduckgo';
 
@@ -192,6 +319,10 @@ interface SettingsState {
   setGlmEndpoint: (endpoint: GlmEndpoint) => void;
   setMinimaxEndpoint: (endpoint: MinimaxEndpoint) => void;
   setQwenEndpoint: (endpoint: QwenEndpoint) => void;
+  setCustomProviderBaseUrl: (provider: string, baseUrl: string) => void;
+  addCustomProviderEndpoint: (provider: string, endpoint: Omit<CustomProviderEndpoint, 'id'>) => string | null;
+  selectCustomProviderEndpoint: (provider: string, endpointId: string | null) => void;
+  removeCustomProviderEndpoint: (provider: string, endpointId: string) => void;
   setMaxConcurrentSubagents: (value: number) => void;
   setSearchProvider: (provider: 'tavily' | 'brave' | 'duckduckgo') => void;
   setDebugDefaultEnvironment: (environment: DebugEnvironment) => void;
@@ -330,6 +461,11 @@ const defaultSettings = {
 
   // Qwen endpoint
   qwenEndpoint: 'china' as QwenEndpoint,
+
+  // Custom provider endpoints
+  customProviderBaseUrls: {} as Record<string, string>,
+  customProviderEndpoints: {} as Record<string, CustomProviderEndpoint[]>,
+  selectedCustomProviderEndpointIds: {} as Record<string, string>,
 
   // Search provider
   searchProvider: 'duckduckgo' as const,
@@ -774,6 +910,116 @@ export const useSettingsStore = create<SettingsState>()(
       setGlmEndpoint: (glmEndpoint) => set({ glmEndpoint }),
       setMinimaxEndpoint: (minimaxEndpoint) => set({ minimaxEndpoint }),
       setQwenEndpoint: (qwenEndpoint) => set({ qwenEndpoint }),
+      setCustomProviderBaseUrl: (provider, baseUrl) =>
+        set((state) => {
+          const canonical = normalizeProviderKey(provider);
+          const trimmed = baseUrl.trim();
+          const nextCustomProviderBaseUrls = { ...state.customProviderBaseUrls };
+          if (!canonical) {
+            return state;
+          }
+          if (trimmed) {
+            nextCustomProviderBaseUrls[canonical] = trimmed;
+          } else {
+            delete nextCustomProviderBaseUrls[canonical];
+          }
+          return { customProviderBaseUrls: nextCustomProviderBaseUrls };
+        }),
+      addCustomProviderEndpoint: (provider, endpoint) => {
+        const canonical = normalizeProviderKey(provider);
+        const name = endpoint.name.trim();
+        const baseUrl = endpoint.baseUrl.trim();
+        if (!canonical || !baseUrl) return null;
+
+        const endpointId = createCustomProviderEndpointId();
+        set((state) => ({
+          customProviderEndpoints: {
+            ...state.customProviderEndpoints,
+            [canonical]: [
+              ...(state.customProviderEndpoints[canonical] || []),
+              {
+                id: endpointId,
+                name: name || 'Custom endpoint',
+                baseUrl,
+              },
+            ],
+          },
+          selectedCustomProviderEndpointIds: {
+            ...state.selectedCustomProviderEndpointIds,
+            [canonical]: endpointId,
+          },
+          customProviderBaseUrls: {
+            ...state.customProviderBaseUrls,
+            [canonical]: baseUrl,
+          },
+        }));
+        return endpointId;
+      },
+      selectCustomProviderEndpoint: (provider, endpointId) =>
+        set((state) => {
+          const canonical = normalizeProviderKey(provider);
+          if (!canonical) return state;
+
+          const endpoints = state.customProviderEndpoints[canonical] || [];
+          const nextSelectedIds = { ...state.selectedCustomProviderEndpointIds };
+          const nextBaseUrls = { ...state.customProviderBaseUrls };
+
+          if (!endpointId) {
+            delete nextSelectedIds[canonical];
+            delete nextBaseUrls[canonical];
+            return {
+              selectedCustomProviderEndpointIds: nextSelectedIds,
+              customProviderBaseUrls: nextBaseUrls,
+            };
+          }
+
+          const selectedEndpoint = endpoints.find((entry) => entry.id === endpointId);
+          if (!selectedEndpoint) return state;
+
+          nextSelectedIds[canonical] = endpointId;
+          nextBaseUrls[canonical] = selectedEndpoint.baseUrl;
+          return {
+            selectedCustomProviderEndpointIds: nextSelectedIds,
+            customProviderBaseUrls: nextBaseUrls,
+          };
+        }),
+      removeCustomProviderEndpoint: (provider, endpointId) =>
+        set((state) => {
+          const canonical = normalizeProviderKey(provider);
+          if (!canonical) return state;
+
+          const currentEndpoints = state.customProviderEndpoints[canonical] || [];
+          const nextEndpoints = currentEndpoints.filter((entry) => entry.id !== endpointId);
+          if (nextEndpoints.length === currentEndpoints.length) return state;
+
+          const nextEndpointsByProvider = { ...state.customProviderEndpoints };
+          const nextSelectedIds = { ...state.selectedCustomProviderEndpointIds };
+          const nextBaseUrls = { ...state.customProviderBaseUrls };
+
+          if (nextEndpoints.length > 0) {
+            nextEndpointsByProvider[canonical] = nextEndpoints;
+          } else {
+            delete nextEndpointsByProvider[canonical];
+          }
+
+          const removedSelected = state.selectedCustomProviderEndpointIds[canonical] === endpointId;
+          if (removedSelected) {
+            const replacement = nextEndpoints[0];
+            if (replacement) {
+              nextSelectedIds[canonical] = replacement.id;
+              nextBaseUrls[canonical] = replacement.baseUrl;
+            } else {
+              delete nextSelectedIds[canonical];
+              delete nextBaseUrls[canonical];
+            }
+          }
+
+          return {
+            customProviderEndpoints: nextEndpointsByProvider,
+            selectedCustomProviderEndpointIds: nextSelectedIds,
+            customProviderBaseUrls: nextBaseUrls,
+          };
+        }),
       setSearchProvider: (searchProvider) => set({ searchProvider }),
       setDebugDefaultEnvironment: (debugDefaultEnvironment) => set({ debugDefaultEnvironment }),
       setDebugBrowserProfile: (debugBrowserProfile) => set({ debugBrowserProfile }),
@@ -939,11 +1185,35 @@ export const useSettingsStore = create<SettingsState>()(
         if (version < 8) {
           phaseConfigs = resetPlanModePhaseConfigs(phaseConfigs);
         }
+        const customProviderBaseUrls = normalizeCustomProviderBaseUrls(state.customProviderBaseUrls);
+        let customProviderEndpoints = normalizeCustomProviderEndpoints(state.customProviderEndpoints);
+        if (Object.keys(customProviderEndpoints).length === 0 && Object.keys(customProviderBaseUrls).length > 0) {
+          customProviderEndpoints = buildCustomProviderEndpointsFromBaseUrls(customProviderBaseUrls);
+        }
+        let selectedCustomProviderEndpointIds = normalizeSelectedCustomProviderEndpointIds(
+          state.selectedCustomProviderEndpointIds,
+          customProviderEndpoints,
+        );
+        if (
+          Object.keys(selectedCustomProviderEndpointIds).length === 0 &&
+          Object.keys(customProviderBaseUrls).length > 0
+        ) {
+          selectedCustomProviderEndpointIds = buildSelectedCustomEndpointIdsFromBaseUrls(customProviderBaseUrls);
+        }
+
+        const resolvedCustomProviderBaseUrls =
+          Object.keys(customProviderBaseUrls).length > 0
+            ? customProviderBaseUrls
+            : buildCustomProviderBaseUrlsFromSelection(customProviderEndpoints, selectedCustomProviderEndpointIds);
+
         return {
           ...migrated,
           quality: ensureQualitySettings(nextState as Partial<SettingsState> & Record<string, unknown>),
           phaseConfigs,
           memorySettings: ensureMemorySettings(state),
+          customProviderBaseUrls: resolvedCustomProviderBaseUrls,
+          customProviderEndpoints,
+          selectedCustomProviderEndpointIds,
           developerPanels: ensureDeveloperPanels(state),
           updatePreferences: ensureUpdatePreferences(state),
           debugDefaultEnvironment:
@@ -978,6 +1248,37 @@ export const useSettingsStore = create<SettingsState>()(
         mergedState.modelByProvider = modelByProvider;
         if (!mergedState.model && typeof modelByProvider[canonicalProvider] === 'string') {
           mergedState.model = modelByProvider[canonicalProvider];
+        }
+        mergedState.customProviderBaseUrls = normalizeCustomProviderBaseUrls(mergedState.customProviderBaseUrls);
+        mergedState.customProviderEndpoints = normalizeCustomProviderEndpoints(mergedState.customProviderEndpoints);
+        if (
+          Object.keys(mergedState.customProviderEndpoints).length === 0 &&
+          Object.keys(mergedState.customProviderBaseUrls).length > 0
+        ) {
+          mergedState.customProviderEndpoints = buildCustomProviderEndpointsFromBaseUrls(
+            mergedState.customProviderBaseUrls,
+          );
+        }
+        mergedState.selectedCustomProviderEndpointIds = normalizeSelectedCustomProviderEndpointIds(
+          mergedState.selectedCustomProviderEndpointIds,
+          mergedState.customProviderEndpoints,
+        );
+        if (
+          Object.keys(mergedState.selectedCustomProviderEndpointIds).length === 0 &&
+          Object.keys(mergedState.customProviderBaseUrls).length > 0
+        ) {
+          mergedState.selectedCustomProviderEndpointIds = buildSelectedCustomEndpointIdsFromBaseUrls(
+            mergedState.customProviderBaseUrls,
+          );
+        }
+        if (
+          Object.keys(mergedState.customProviderBaseUrls).length === 0 &&
+          Object.keys(mergedState.selectedCustomProviderEndpointIds).length > 0
+        ) {
+          mergedState.customProviderBaseUrls = buildCustomProviderBaseUrlsFromSelection(
+            mergedState.customProviderEndpoints,
+            mergedState.selectedCustomProviderEndpointIds,
+          );
         }
         mergedState.phaseConfigs = ensurePhaseConfigs(mergedState.phaseConfigs);
         mergedState.quality = ensureQualitySettings(mergedState as SettingsState & Record<string, unknown>);

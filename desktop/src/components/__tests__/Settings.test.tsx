@@ -90,54 +90,56 @@ const { mockUpdateSettings, mockGetKnowledgeFeatureFlags, mockSetKnowledgeFeatur
     mockIsTauriAvailable: vi.fn(() => false),
   }));
 
-const mockInvoke = vi.fn(async (command: string, args?: { provider?: string; apiKey?: string; api_key?: string }) => {
-  switch (command) {
-    case 'get_context_policy':
-      return {
-        success: true,
-        data: {
-          context_v2_pipeline: true,
-          memory_v2_ranker: true,
-          context_inspector_ui: false,
-          pinned_sources: [],
-          excluded_sources: [],
-          soft_threshold_ratio: 0.85,
-          hard_threshold_ratio: 0.95,
-        },
-        error: null,
-      };
-    case 'set_context_policy':
-      return { success: true, data: { key: 'context_policy_v2', updated_at: '2026-03-02T00:00:00Z' }, error: null };
-    case 'list_configured_api_key_providers':
-      return { success: true, data: Object.keys(mockProviderKeys), error: null };
-    case 'list_providers':
-      return {
-        success: true,
-        data: [
-          { provider_type: 'anthropic', models: [{ id: 'claude-3-5-sonnet-20241022' }] },
-          { provider_type: 'glm', models: [{ id: 'glm-4.7' }, { id: 'glm-4.6' }] },
-        ],
-        error: null,
-      };
-    case 'configure_provider':
-      {
-        const provider = args?.provider || '';
-        const key = args?.apiKey ?? args?.api_key ?? '';
-        if (provider) {
-          if (typeof key === 'string' && key.trim().length > 0) {
-            mockProviderKeys[provider] = key.trim();
-          } else {
-            delete mockProviderKeys[provider];
+const mockInvoke = vi.fn(
+  async (command: string, args?: { provider?: string; apiKey?: string; api_key?: string; baseUrl?: string }) => {
+    switch (command) {
+      case 'get_context_policy':
+        return {
+          success: true,
+          data: {
+            context_v2_pipeline: true,
+            memory_v2_ranker: true,
+            context_inspector_ui: false,
+            pinned_sources: [],
+            excluded_sources: [],
+            soft_threshold_ratio: 0.85,
+            hard_threshold_ratio: 0.95,
+          },
+          error: null,
+        };
+      case 'set_context_policy':
+        return { success: true, data: { key: 'context_policy_v2', updated_at: '2026-03-02T00:00:00Z' }, error: null };
+      case 'list_configured_api_key_providers':
+        return { success: true, data: Object.keys(mockProviderKeys), error: null };
+      case 'list_providers':
+        return {
+          success: true,
+          data: [
+            { provider_type: 'anthropic', models: [{ id: 'claude-3-5-sonnet-20241022' }] },
+            { provider_type: 'glm', models: [{ id: 'glm-4.7' }, { id: 'glm-4.6' }] },
+          ],
+          error: null,
+        };
+      case 'configure_provider':
+        {
+          const provider = args?.provider || '';
+          const key = args?.apiKey ?? args?.api_key;
+          if (provider && typeof key === 'string') {
+            if (key.trim().length > 0) {
+              mockProviderKeys[provider] = key.trim();
+            } else {
+              delete mockProviderKeys[provider];
+            }
           }
         }
-      }
-      return { success: true, data: true, error: null };
-    case 'get_provider_api_key':
-      return { success: true, data: args?.provider ? mockProviderKeys[args.provider] || null : null, error: null };
-    default:
-      return { success: true, data: null, error: null };
-  }
-});
+        return { success: true, data: true, error: null };
+      case 'get_provider_api_key':
+        return { success: true, data: args?.provider ? mockProviderKeys[args.provider] || null : null, error: null };
+      default:
+        return { success: true, data: null, error: null };
+    }
+  },
+);
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: (...args: unknown[]) => mockInvoke(...(args as [string])),
@@ -154,10 +156,20 @@ const mockSetStandaloneContextTurns = vi.fn();
 const mockSetGlmEndpoint = vi.fn();
 const mockSetMinimaxEndpoint = vi.fn();
 const mockSetQwenEndpoint = vi.fn();
+const mockSetCustomProviderBaseUrl = vi.fn();
+const mockAddCustomProviderEndpoint = vi.fn(() => 'endpoint-openai-1');
+const mockSelectCustomProviderEndpoint = vi.fn();
+const mockRemoveCustomProviderEndpoint = vi.fn();
+const mockSetDebugDefaultEnvironment = vi.fn();
+const mockSetDebugBrowserProfile = vi.fn();
+const mockSetDebugViewportPresets = vi.fn();
+const mockSetDebugProductionDiagnosticsAllowlist = vi.fn();
 const mockSetEnableContextCompaction = vi.fn();
 const mockSetShowReasoningOutput = vi.fn();
+const mockSetEnableThinking = vi.fn();
 const mockSetShowSubAgentEvents = vi.fn();
 const mockSetSearchProvider = vi.fn();
+const mockSetWorktreeAutoCleanupOnSessionDelete = vi.fn();
 const mockSetKnowledgeAutoEnsureDocsCollection = vi.fn();
 const mockSetKbQueryRunsV2 = vi.fn();
 const mockSetKbPickerServerSearch = vi.fn();
@@ -167,6 +179,8 @@ const mockSetDeveloperPanels = vi.fn();
 const mockSetDeveloperSettingsInitialized = vi.fn();
 const mockSetAutoPanelHoverEnabled = vi.fn();
 const mockSetCloseToBackgroundEnabled = vi.fn();
+const mockSetUpdateChannel = vi.fn();
+const mockSetAutoCheckForUpdates = vi.fn();
 
 const mockSettingsState = {
   backend: 'claude-code' as string,
@@ -181,12 +195,21 @@ const mockSettingsState = {
   glmEndpoint: 'standard' as string,
   minimaxEndpoint: 'international' as string,
   qwenEndpoint: 'china' as string,
+  customProviderBaseUrls: {} as Record<string, string>,
+  customProviderEndpoints: {} as Record<string, Array<{ id: string; name: string; baseUrl: string }>>,
+  selectedCustomProviderEndpointIds: {} as Record<string, string>,
+  debugDefaultEnvironment: 'dev' as string,
+  debugBrowserProfile: 'desktop' as string,
+  debugViewportPresets: ['desktop:1440x900'] as string[],
+  debugProductionDiagnosticsAllowlist: [] as string[],
   enableContextCompaction: true,
   showReasoningOutput: false,
+  enableThinking: true,
   showSubAgentEvents: true,
   searchProvider: 'duckduckgo' as string,
   autoPanelHoverEnabled: false,
   closeToBackgroundEnabled: true,
+  worktreeAutoCleanupOnSessionDelete: false,
   knowledgeAutoEnsureDocsCollection: false,
   kbQueryRunsV2: true,
   kbPickerServerSearch: true,
@@ -199,6 +222,12 @@ const mockSettingsState = {
     streamingOutput: true,
   },
   developerSettingsInitialized: false,
+  updatePreferences: {
+    updateChannel: 'stable',
+    autoCheckForUpdates: true,
+    ignoredUpdateVersionByChannel: { stable: null, beta: null, alpha: null },
+    lastUpdateCheckAt: null,
+  },
   agents: [
     { name: 'claude-code', enabled: true, command: 'claude', isDefault: true },
     { name: 'aider', enabled: false, command: 'aider', isDefault: false },
@@ -219,12 +248,22 @@ const mockSettingsState = {
   setGlmEndpoint: mockSetGlmEndpoint,
   setMinimaxEndpoint: mockSetMinimaxEndpoint,
   setQwenEndpoint: mockSetQwenEndpoint,
+  setCustomProviderBaseUrl: mockSetCustomProviderBaseUrl,
+  addCustomProviderEndpoint: mockAddCustomProviderEndpoint,
+  selectCustomProviderEndpoint: mockSelectCustomProviderEndpoint,
+  removeCustomProviderEndpoint: mockRemoveCustomProviderEndpoint,
+  setDebugDefaultEnvironment: mockSetDebugDefaultEnvironment,
+  setDebugBrowserProfile: mockSetDebugBrowserProfile,
+  setDebugViewportPresets: mockSetDebugViewportPresets,
+  setDebugProductionDiagnosticsAllowlist: mockSetDebugProductionDiagnosticsAllowlist,
   setEnableContextCompaction: mockSetEnableContextCompaction,
   setShowReasoningOutput: mockSetShowReasoningOutput,
+  setEnableThinking: mockSetEnableThinking,
   setShowSubAgentEvents: mockSetShowSubAgentEvents,
   setSearchProvider: mockSetSearchProvider,
   setAutoPanelHoverEnabled: mockSetAutoPanelHoverEnabled,
   setCloseToBackgroundEnabled: mockSetCloseToBackgroundEnabled,
+  setWorktreeAutoCleanupOnSessionDelete: mockSetWorktreeAutoCleanupOnSessionDelete,
   setKnowledgeAutoEnsureDocsCollection: mockSetKnowledgeAutoEnsureDocsCollection,
   setKbQueryRunsV2: mockSetKbQueryRunsV2,
   setKbPickerServerSearch: mockSetKbPickerServerSearch,
@@ -232,6 +271,8 @@ const mockSettingsState = {
   setDeveloperModeEnabled: mockSetDeveloperModeEnabled,
   setDeveloperPanels: mockSetDeveloperPanels,
   setDeveloperSettingsInitialized: mockSetDeveloperSettingsInitialized,
+  setUpdateChannel: mockSetUpdateChannel,
+  setAutoCheckForUpdates: mockSetAutoCheckForUpdates,
 };
 
 vi.mock('../../store/settings', () => ({
@@ -550,6 +591,9 @@ describe('LLMBackendSection', () => {
     mockSettingsState.backend = 'claude-code';
     mockSettingsState.model = '';
     mockSettingsState.standaloneContextTurns = 8;
+    mockSettingsState.customProviderBaseUrls = {};
+    mockSettingsState.customProviderEndpoints = {};
+    mockSettingsState.selectedCustomProviderEndpointIds = {};
   });
 
   it('selects the current backend', () => {
@@ -593,6 +637,35 @@ describe('LLMBackendSection', () => {
         expect.objectContaining({
           provider: 'minimax',
           baseUrl: 'https://api.minimaxi.com/v1/chat/completions',
+        }),
+      ),
+    );
+  });
+
+  it('adds and syncs a custom provider endpoint override', async () => {
+    mockSettingsState.backend = 'openai';
+    mockSettingsState.provider = 'openai';
+
+    render(<LLMBackendSection />);
+
+    fireEvent.change(screen.getByPlaceholderText('llm.baseUrl.namePlaceholder'), {
+      target: { value: 'My Gateway' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('llm.baseUrl.placeholder'), {
+      target: { value: 'https://gateway.example.com/v1/chat/completions' },
+    });
+    fireEvent.click(screen.getByText('llm.baseUrl.add'));
+
+    expect(mockAddCustomProviderEndpoint).toHaveBeenCalledWith('openai', {
+      name: 'My Gateway',
+      baseUrl: 'https://gateway.example.com/v1/chat/completions',
+    });
+    await waitFor(() =>
+      expect(mockInvoke).toHaveBeenCalledWith(
+        'configure_provider',
+        expect.objectContaining({
+          provider: 'openai',
+          baseUrl: 'https://gateway.example.com/v1/chat/completions',
         }),
       ),
     );

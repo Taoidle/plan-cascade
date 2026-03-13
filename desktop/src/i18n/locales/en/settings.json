@@ -256,6 +256,25 @@
       }
     },
 
+    "baseUrl": {
+      "label": "Custom Endpoint",
+      "customLabel": "Custom provider endpoint",
+      "saved": "Saved custom endpoints",
+      "empty": "No custom endpoints saved for this provider yet.",
+      "namePlaceholder": "Endpoint name",
+      "placeholder": "Leave blank to use the default endpoint",
+      "help": "Optional. When set, this URL overrides the provider default and any preset region selection.",
+      "add": "Add endpoint",
+      "delete": "Delete",
+      "active": "Active",
+      "useDefault": "Use default",
+      "defaultEndpointName": "Custom endpoint",
+      "clear": "Clear",
+      "customActive": "Custom override",
+      "effective": "Effective endpoint: {{url}}",
+      "defaultValue": "provider default"
+    },
+
     "model": {
       "label": "Model",
       "providerDefault": "Use provider default",

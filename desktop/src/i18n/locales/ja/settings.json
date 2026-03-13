@@ -256,6 +256,25 @@
       }
     },
 
+    "baseUrl": {
+      "label": "カスタムエンドポイント",
+      "customLabel": "プロバイダー別のカスタムエンドポイント",
+      "saved": "保存済みカスタムエンドポイント",
+      "empty": "このプロバイダーにはまだカスタムエンドポイントがありません。",
+      "namePlaceholder": "エンドポイント名",
+      "placeholder": "空欄の場合はデフォルトエンドポイントを使用",
+      "help": "任意設定です。入力すると、このURLがデフォルトやリージョンのプリセットより優先されます。",
+      "add": "追加",
+      "delete": "削除",
+      "active": "有効",
+      "useDefault": "既定を使用",
+      "defaultEndpointName": "カスタムエンドポイント",
+      "clear": "クリア",
+      "customActive": "カスタム上書き中",
+      "effective": "現在有効なエンドポイント: {{url}}",
+      "defaultValue": "プロバイダー既定"
+    },
+
     "model": {
       "label": "モデル",
       "providerDefault": "プロバイダーのデフォルトを使用",

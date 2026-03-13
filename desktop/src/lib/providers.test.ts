@@ -15,6 +15,7 @@ import {
   setLocalProviderApiKey,
   getCustomModelsByProvider,
   setCustomModelsByProvider,
+  resolveProviderBaseUrl,
   type BackendOption,
   type ApiKeyStatus,
 } from './providers';
@@ -288,6 +289,38 @@ describe('providers module', () => {
         const stored = localStorage.getItem(CUSTOM_MODELS_STORAGE_KEY);
         expect(JSON.parse(stored!)).toEqual({ openai: ['my-model'] });
       });
+    });
+  });
+
+  describe('resolveProviderBaseUrl', () => {
+    it('returns preset endpoint overrides for regional providers', () => {
+      expect(resolveProviderBaseUrl('glm', { glmEndpoint: 'international' })).toBe(
+        'https://api.z.ai/api/paas/v4/chat/completions',
+      );
+      expect(resolveProviderBaseUrl('qwen', { qwenEndpoint: 'us' })).toBe(
+        'https://dashscope-us.aliyuncs.com/compatible-mode/v1/chat/completions',
+      );
+      expect(resolveProviderBaseUrl('minimax', { minimaxEndpoint: 'china' })).toBe(
+        'https://api.minimaxi.com/v1/chat/completions',
+      );
+    });
+
+    it('prefers explicit custom provider base URLs over presets', () => {
+      expect(
+        resolveProviderBaseUrl('glm', {
+          glmEndpoint: 'international',
+          customProviderBaseUrls: {
+            glm: 'https://glm.example.com/chat/completions',
+          },
+        }),
+      ).toBe('https://glm.example.com/chat/completions');
+      expect(
+        resolveProviderBaseUrl('openai', {
+          customProviderBaseUrls: {
+            openai: 'https://gateway.example.com/v1/chat/completions',
+          },
+        }),
+      ).toBe('https://gateway.example.com/v1/chat/completions');
     });
   });
 });

@@ -88,9 +88,18 @@ export function resolveStandaloneProvider(
  */
 export function resolveProviderBaseUrl(
   provider: string,
-  settings: { glmEndpoint?: string; minimaxEndpoint?: string; qwenEndpoint?: string },
+  settings: {
+    glmEndpoint?: string;
+    minimaxEndpoint?: string;
+    qwenEndpoint?: string;
+    customProviderBaseUrls?: Record<string, string>;
+  },
 ): string | undefined {
   const normalized = normalizeProviderName(provider);
+  const customBaseUrl = normalized ? settings.customProviderBaseUrls?.[normalized]?.trim() : '';
+  if (customBaseUrl) {
+    return customBaseUrl;
+  }
   if (normalized === 'glm' && settings.glmEndpoint === 'coding') {
     return GLM_CODING_BASE_URL;
   }

@@ -256,6 +256,25 @@
       }
     },
 
+    "baseUrl": {
+      "label": "自定义端点",
+      "customLabel": "自定义 Provider 端点",
+      "saved": "已保存的自定义端点",
+      "empty": "这个 Provider 还没有保存任何自定义端点。",
+      "namePlaceholder": "端点名称",
+      "placeholder": "留空则使用默认端点",
+      "help": "可选。设置后会覆盖当前 Provider 的默认端点和区域预设端点。",
+      "add": "添加端点",
+      "delete": "删除",
+      "active": "当前生效",
+      "useDefault": "使用默认端点",
+      "defaultEndpointName": "自定义端点",
+      "clear": "清除",
+      "customActive": "已启用自定义覆盖",
+      "effective": "当前生效端点：{{url}}",
+      "defaultValue": "Provider 默认端点"
+    },
+
     "model": {
       "label": "模型",
       "providerDefault": "使用提供商默认模型",

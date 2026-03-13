@@ -18,7 +18,11 @@ import {
 import { useTranslation } from 'react-i18next';
 import { useSettingsStore } from '../../store/settings';
 import { useEmbeddingStore } from '../../store/embedding';
-import { CUSTOM_MODELS_STORAGE_KEY, LOCAL_PROVIDER_API_KEY_CACHE_STORAGE_KEY } from '../../lib/providers';
+import {
+  CUSTOM_MODELS_STORAGE_KEY,
+  LOCAL_PROVIDER_API_KEY_CACHE_STORAGE_KEY,
+  normalizeProvider,
+} from '../../lib/providers';
 import {
   clearAllData,
   exportAllSettings,
@@ -890,6 +894,9 @@ function buildFrontendExportState(settings: ReturnType<typeof useSettingsStore.g
     glm_endpoint: settings.glmEndpoint,
     minimax_endpoint: settings.minimaxEndpoint,
     qwen_endpoint: settings.qwenEndpoint,
+    custom_provider_base_urls: settings.customProviderBaseUrls,
+    custom_provider_endpoints: settings.customProviderEndpoints,
+    selected_custom_provider_endpoint_ids: settings.selectedCustomProviderEndpointIds,
     search_provider: settings.searchProvider,
     debug_default_environment: settings.debugDefaultEnvironment,
     debug_browser_profile: settings.debugBrowserProfile,
@@ -1061,6 +1068,47 @@ function syncSettingsToStore(settings: Record<string, unknown>) {
   }
   if (settings.qwen_endpoint) {
     store.setQwenEndpoint(settings.qwen_endpoint as Parameters<typeof store.setQwenEndpoint>[0]);
+  }
+  if (settings.custom_provider_base_urls && typeof settings.custom_provider_base_urls === 'object') {
+    const normalizedBaseUrls = Object.fromEntries(
+      Object.entries(settings.custom_provider_base_urls as Record<string, unknown>)
+        .filter(([, value]) => typeof value === 'string')
+        .map(([provider, value]) => [normalizeProvider(provider), (value as string).trim()])
+        .filter(([, value]) => value.length > 0),
+    );
+    useSettingsStore.setState({
+      customProviderBaseUrls: normalizedBaseUrls,
+      ...(settings.custom_provider_endpoints
+        ? {}
+        : {
+            customProviderEndpoints: Object.fromEntries(
+              Object.entries(normalizedBaseUrls).map(([provider, baseUrl]) => {
+                const normalizedUrl = typeof baseUrl === 'string' ? baseUrl : String(baseUrl);
+                return [provider, [{ id: `legacy-${provider}`, name: 'Custom endpoint', baseUrl: normalizedUrl }]];
+              }),
+            ),
+            selectedCustomProviderEndpointIds: Object.fromEntries(
+              Object.keys(normalizedBaseUrls).map((provider) => [provider, `legacy-${provider}`]),
+            ),
+          }),
+    });
+  }
+  if (settings.custom_provider_endpoints && typeof settings.custom_provider_endpoints === 'object') {
+    useSettingsStore.setState({
+      customProviderEndpoints: settings.custom_provider_endpoints as ReturnType<
+        typeof useSettingsStore.getState
+      >['customProviderEndpoints'],
+    });
+  }
+  if (
+    settings.selected_custom_provider_endpoint_ids &&
+    typeof settings.selected_custom_provider_endpoint_ids === 'object'
+  ) {
+    useSettingsStore.setState({
+      selectedCustomProviderEndpointIds: settings.selected_custom_provider_endpoint_ids as ReturnType<
+        typeof useSettingsStore.getState
+      >['selectedCustomProviderEndpointIds'],
+    });
   }
 
   // Search

@@ -289,6 +289,9 @@ async function saveSettingsToBackend() {
         glm_endpoint: settings.glmEndpoint,
         minimax_endpoint: settings.minimaxEndpoint,
         qwen_endpoint: settings.qwenEndpoint,
+        custom_provider_base_urls: settings.customProviderBaseUrls,
+        custom_provider_endpoints: settings.customProviderEndpoints,
+        selected_custom_provider_endpoint_ids: settings.selectedCustomProviderEndpointIds,
         close_to_background_enabled: settings.closeToBackgroundEnabled,
         worktree_auto_cleanup_on_session_delete: settings.worktreeAutoCleanupOnSessionDelete,
       });

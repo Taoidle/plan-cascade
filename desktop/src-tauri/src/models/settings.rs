@@ -5,6 +5,14 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomProviderEndpoint {
+    pub id: String,
+    pub name: String,
+    pub base_url: String,
+}
+
 /// Application configuration stored in config.json
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
@@ -28,6 +36,15 @@ pub struct AppConfig {
     /// Qwen endpoint selection persisted for backend-only workflows.
     #[serde(default = "default_qwen_endpoint")]
     pub qwen_endpoint: String,
+    /// Explicit provider base URL overrides keyed by canonical provider name.
+    #[serde(default)]
+    pub custom_provider_base_urls: HashMap<String, String>,
+    /// Full custom endpoint catalog per provider.
+    #[serde(default)]
+    pub custom_provider_endpoints: HashMap<String, Vec<CustomProviderEndpoint>>,
+    /// Selected custom endpoint ID per provider.
+    #[serde(default)]
+    pub selected_custom_provider_endpoint_ids: HashMap<String, String>,
     /// Enable analytics tracking
     pub analytics_enabled: bool,
     /// Auto-save interval in seconds
@@ -87,6 +104,9 @@ impl Default for AppConfig {
             glm_endpoint: default_glm_endpoint(),
             minimax_endpoint: default_minimax_endpoint(),
             qwen_endpoint: default_qwen_endpoint(),
+            custom_provider_base_urls: HashMap::new(),
+            custom_provider_endpoints: HashMap::new(),
+            selected_custom_provider_endpoint_ids: HashMap::new(),
             analytics_enabled: true,
             auto_save_interval: 30,
             max_recent_projects: 10,
@@ -109,6 +129,9 @@ pub struct SettingsUpdate {
     pub glm_endpoint: Option<String>,
     pub minimax_endpoint: Option<String>,
     pub qwen_endpoint: Option<String>,
+    pub custom_provider_base_urls: Option<HashMap<String, String>>,
+    pub custom_provider_endpoints: Option<HashMap<String, Vec<CustomProviderEndpoint>>>,
+    pub selected_custom_provider_endpoint_ids: Option<HashMap<String, String>>,
     pub analytics_enabled: Option<bool>,
     pub auto_save_interval: Option<u32>,
     pub max_recent_projects: Option<u32>,
@@ -121,6 +144,148 @@ pub struct SettingsUpdate {
 impl AppConfig {
     fn canonical_provider_name(provider: &str) -> String {
         provider.trim().to_ascii_lowercase()
+    }
+
+    fn normalize_custom_provider_endpoints(
+        endpoints: HashMap<String, Vec<CustomProviderEndpoint>>,
+    ) -> HashMap<String, Vec<CustomProviderEndpoint>> {
+        let mut normalized = HashMap::new();
+        for (provider, entries) in endpoints {
+            let canonical = Self::canonical_provider_name(&provider);
+            if canonical.is_empty() {
+                continue;
+            }
+
+            let valid_entries = entries
+                .into_iter()
+                .filter_map(|entry| {
+                    let id = entry.id.trim().to_string();
+                    let name = entry.name.trim().to_string();
+                    let base_url = entry.base_url.trim().to_string();
+                    if id.is_empty() || base_url.is_empty() {
+                        return None;
+                    }
+                    Some(CustomProviderEndpoint {
+                        id,
+                        name: if name.is_empty() {
+                            "Custom endpoint".to_string()
+                        } else {
+                            name
+                        },
+                        base_url,
+                    })
+                })
+                .collect::<Vec<_>>();
+
+            if !valid_entries.is_empty() {
+                normalized.insert(canonical, valid_entries);
+            }
+        }
+        normalized
+    }
+
+    fn normalize_selected_custom_provider_endpoint_ids(
+        selected_ids: HashMap<String, String>,
+        endpoints: &HashMap<String, Vec<CustomProviderEndpoint>>,
+    ) -> HashMap<String, String> {
+        let mut normalized = HashMap::new();
+        for (provider, endpoint_id) in selected_ids {
+            let canonical = Self::canonical_provider_name(&provider);
+            let trimmed_id = endpoint_id.trim().to_string();
+            if canonical.is_empty() || trimmed_id.is_empty() {
+                continue;
+            }
+            let exists = endpoints
+                .get(&canonical)
+                .map(|entries| entries.iter().any(|entry| entry.id == trimmed_id))
+                .unwrap_or(false);
+            if exists {
+                normalized.insert(canonical, trimmed_id);
+            }
+        }
+        normalized
+    }
+
+    fn build_custom_provider_base_urls(
+        endpoints: &HashMap<String, Vec<CustomProviderEndpoint>>,
+        selected_ids: &HashMap<String, String>,
+    ) -> HashMap<String, String> {
+        let mut base_urls = HashMap::new();
+        for (provider, endpoint_id) in selected_ids {
+            if let Some(endpoint) = endpoints
+                .get(provider)
+                .and_then(|entries| entries.iter().find(|entry| entry.id == *endpoint_id))
+            {
+                base_urls.insert(provider.clone(), endpoint.base_url.clone());
+            }
+        }
+        base_urls
+    }
+
+    fn derive_endpoint_catalog_from_base_urls(
+        base_urls: &HashMap<String, String>,
+    ) -> (
+        HashMap<String, Vec<CustomProviderEndpoint>>,
+        HashMap<String, String>,
+    ) {
+        let mut endpoints = HashMap::new();
+        let mut selected_ids = HashMap::new();
+        for (provider, base_url) in base_urls {
+            let trimmed = base_url.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let endpoint_id = format!("legacy-{}", provider);
+            endpoints.insert(
+                provider.clone(),
+                vec![CustomProviderEndpoint {
+                    id: endpoint_id.clone(),
+                    name: "Custom endpoint".to_string(),
+                    base_url: trimmed.to_string(),
+                }],
+            );
+            selected_ids.insert(provider.clone(), endpoint_id);
+        }
+        (endpoints, selected_ids)
+    }
+
+    pub fn normalize_persistence_fields(&mut self) {
+        self.custom_provider_base_urls = self
+            .custom_provider_base_urls
+            .iter()
+            .filter_map(|(provider, base_url)| {
+                let canonical = Self::canonical_provider_name(provider);
+                let trimmed = base_url.trim().to_string();
+                if canonical.is_empty() || trimmed.is_empty() {
+                    None
+                } else {
+                    Some((canonical, trimmed))
+                }
+            })
+            .collect();
+
+        self.custom_provider_endpoints = Self::normalize_custom_provider_endpoints(std::mem::take(
+            &mut self.custom_provider_endpoints,
+        ));
+        self.selected_custom_provider_endpoint_ids =
+            Self::normalize_selected_custom_provider_endpoint_ids(
+                std::mem::take(&mut self.selected_custom_provider_endpoint_ids),
+                &self.custom_provider_endpoints,
+            );
+
+        if self.custom_provider_endpoints.is_empty() && !self.custom_provider_base_urls.is_empty() {
+            let (endpoints, selected_ids) =
+                Self::derive_endpoint_catalog_from_base_urls(&self.custom_provider_base_urls);
+            self.custom_provider_endpoints = endpoints;
+            self.selected_custom_provider_endpoint_ids = selected_ids;
+        }
+
+        if self.custom_provider_base_urls.is_empty() && !self.custom_provider_endpoints.is_empty() {
+            self.custom_provider_base_urls = Self::build_custom_provider_base_urls(
+                &self.custom_provider_endpoints,
+                &self.selected_custom_provider_endpoint_ids,
+            );
+        }
     }
 
     /// Resolve a provider-specific model from `model_by_provider`, falling back to
@@ -142,10 +307,24 @@ impl AppConfig {
     }
 
     pub fn provider_base_url(&self, provider: &str) -> Option<String> {
-        match Self::canonical_provider_name(provider).as_str() {
+        let canonical = Self::canonical_provider_name(provider);
+        if let Some(custom) = self
+            .custom_provider_base_urls
+            .get(&canonical)
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+        {
+            return Some(custom.to_string());
+        }
+
+        match canonical.as_str() {
             "glm" => match self.glm_endpoint.as_str() {
-                "coding" => Some("https://open.bigmodel.cn/api/coding/paas/v4/chat/completions".to_string()),
-                "international" => Some("https://api.z.ai/api/paas/v4/chat/completions".to_string()),
+                "coding" => {
+                    Some("https://open.bigmodel.cn/api/coding/paas/v4/chat/completions".to_string())
+                }
+                "international" => {
+                    Some("https://api.z.ai/api/paas/v4/chat/completions".to_string())
+                }
                 "international-coding" => {
                     Some("https://api.z.ai/api/coding/paas/v4/chat/completions".to_string())
                 }
@@ -156,12 +335,14 @@ impl AppConfig {
                 _ => None,
             },
             "qwen" => match self.qwen_endpoint.as_str() {
-                "singapore" => {
-                    Some("https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions".to_string())
-                }
-                "us" => {
-                    Some("https://dashscope-us.aliyuncs.com/compatible-mode/v1/chat/completions".to_string())
-                }
+                "singapore" => Some(
+                    "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions"
+                        .to_string(),
+                ),
+                "us" => Some(
+                    "https://dashscope-us.aliyuncs.com/compatible-mode/v1/chat/completions"
+                        .to_string(),
+                ),
                 _ => None,
             },
             _ => None,
@@ -223,6 +404,40 @@ impl AppConfig {
         if let Some(endpoint) = update.qwen_endpoint {
             self.qwen_endpoint = endpoint;
         }
+        if let Some(base_urls) = update.custom_provider_base_urls {
+            let mut normalized = HashMap::new();
+            for (provider, base_url) in base_urls {
+                let canonical = Self::canonical_provider_name(&provider);
+                let trimmed = base_url.trim().to_string();
+                if !canonical.is_empty() && !trimmed.is_empty() {
+                    normalized.insert(canonical, trimmed);
+                }
+            }
+            self.custom_provider_base_urls = normalized;
+        }
+        if let Some(endpoints) = update.custom_provider_endpoints {
+            self.custom_provider_endpoints = Self::normalize_custom_provider_endpoints(endpoints);
+        }
+        if let Some(selected_ids) = update.selected_custom_provider_endpoint_ids {
+            self.selected_custom_provider_endpoint_ids =
+                Self::normalize_selected_custom_provider_endpoint_ids(
+                    selected_ids,
+                    &self.custom_provider_endpoints,
+                );
+        }
+        if self.custom_provider_endpoints.is_empty() && !self.custom_provider_base_urls.is_empty() {
+            let (endpoints, selected_ids) =
+                Self::derive_endpoint_catalog_from_base_urls(&self.custom_provider_base_urls);
+            self.custom_provider_endpoints = endpoints;
+            self.selected_custom_provider_endpoint_ids = selected_ids;
+        }
+        if self.custom_provider_base_urls.is_empty() && !self.custom_provider_endpoints.is_empty() {
+            self.custom_provider_base_urls = Self::build_custom_provider_base_urls(
+                &self.custom_provider_endpoints,
+                &self.selected_custom_provider_endpoint_ids,
+            );
+        }
+        self.normalize_persistence_fields();
         if let Some(enabled) = update.analytics_enabled {
             self.analytics_enabled = enabled;
         }
@@ -293,6 +508,9 @@ mod tests {
         assert_eq!(config.glm_endpoint, "standard");
         assert_eq!(config.minimax_endpoint, "international");
         assert_eq!(config.qwen_endpoint, "china");
+        assert!(config.custom_provider_base_urls.is_empty());
+        assert!(config.custom_provider_endpoints.is_empty());
+        assert!(config.selected_custom_provider_endpoint_ids.is_empty());
         assert!(config.close_to_background_enabled);
         assert_eq!(
             config.model_by_provider.get("anthropic"),
@@ -365,6 +583,53 @@ mod tests {
         assert_eq!(
             config.provider_base_url("qwen").as_deref(),
             Some("https://dashscope-us.aliyuncs.com/compatible-mode/v1/chat/completions")
+        );
+    }
+
+    #[test]
+    fn test_provider_base_url_prefers_custom_override() {
+        let mut config = AppConfig::default();
+        config.custom_provider_base_urls.insert(
+            "openai".to_string(),
+            "https://gateway.example.com/v1/chat/completions".to_string(),
+        );
+        config.custom_provider_base_urls.insert(
+            "glm".to_string(),
+            "https://glm.example.com/chat/completions".to_string(),
+        );
+        config.glm_endpoint = "international".to_string();
+
+        assert_eq!(
+            config.provider_base_url("openai").as_deref(),
+            Some("https://gateway.example.com/v1/chat/completions")
+        );
+        assert_eq!(
+            config.provider_base_url("glm").as_deref(),
+            Some("https://glm.example.com/chat/completions")
+        );
+    }
+
+    #[test]
+    fn test_normalize_persistence_fields_derives_catalog_from_legacy_base_urls() {
+        let mut config = AppConfig::default();
+        config.custom_provider_base_urls.insert(
+            "openai".to_string(),
+            "https://gateway.example.com/v1/chat/completions".to_string(),
+        );
+
+        config.normalize_persistence_fields();
+
+        assert_eq!(
+            config.selected_custom_provider_endpoint_ids.get("openai"),
+            Some(&"legacy-openai".to_string())
+        );
+        assert_eq!(
+            config
+                .custom_provider_endpoints
+                .get("openai")
+                .and_then(|entries| entries.first())
+                .map(|entry| entry.base_url.as_str()),
+            Some("https://gateway.example.com/v1/chat/completions")
         );
     }
 

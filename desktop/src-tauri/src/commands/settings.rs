@@ -116,7 +116,15 @@ fn sync_provider_base_urls(
     db: &crate::storage::Database,
     config: &AppConfig,
 ) -> crate::utils::error::AppResult<()> {
-    for provider in ["glm", "minimax", "qwen"] {
+    for provider in [
+        "anthropic",
+        "openai",
+        "deepseek",
+        "glm",
+        "qwen",
+        "minimax",
+        "ollama",
+    ] {
         let key = format!("provider_{}_base_url", provider);
         let value = config.provider_base_url(provider).unwrap_or_default();
         db.set_setting(&key, &value)?;
@@ -497,6 +505,11 @@ pub async fn import_all_settings(
                 glm_endpoint: Some(new_config.glm_endpoint),
                 minimax_endpoint: Some(new_config.minimax_endpoint),
                 qwen_endpoint: Some(new_config.qwen_endpoint),
+                custom_provider_base_urls: Some(new_config.custom_provider_base_urls),
+                custom_provider_endpoints: Some(new_config.custom_provider_endpoints),
+                selected_custom_provider_endpoint_ids: Some(
+                    new_config.selected_custom_provider_endpoint_ids,
+                ),
                 analytics_enabled: Some(new_config.analytics_enabled),
                 auto_save_interval: Some(new_config.auto_save_interval),
                 max_recent_projects: Some(new_config.max_recent_projects),
@@ -675,10 +688,7 @@ fn import_guardrails(
     conn.execute("DELETE FROM guardrail_rules", [])?;
     let mode = crate::services::guardrail::GuardrailMode::parse(guardrail_mode.unwrap_or("strict"))
         .unwrap_or_default();
-    db.set_setting(
-        "guardrail_mode_v1",
-        &mode.to_string(),
-    )?;
+    db.set_setting("guardrail_mode_v1", &mode.to_string())?;
     for rule in guardrails {
         conn.execute(
             "INSERT INTO guardrail_rules

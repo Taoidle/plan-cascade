@@ -995,6 +995,9 @@ async function saveSettings() {
         glm_endpoint: settings.glmEndpoint,
         minimax_endpoint: settings.minimaxEndpoint,
         qwen_endpoint: settings.qwenEndpoint,
+        custom_provider_base_urls: settings.customProviderBaseUrls,
+        custom_provider_endpoints: settings.customProviderEndpoints,
+        selected_custom_provider_endpoint_ids: settings.selectedCustomProviderEndpointIds,
       });
     }
   } catch (error) {

@@ -250,9 +250,18 @@ const QWEN_US_BASE_URL = 'https://dashscope-us.aliyuncs.com/compatible-mode/v1/c
  */
 export function resolveProviderBaseUrl(
   provider: string,
-  settings: { glmEndpoint?: string; minimaxEndpoint?: string; qwenEndpoint?: string },
+  settings: {
+    glmEndpoint?: string;
+    minimaxEndpoint?: string;
+    qwenEndpoint?: string;
+    customProviderBaseUrls?: Record<string, string>;
+  },
 ): string | undefined {
   const normalized = normalizeProvider(provider);
+  const customBaseUrl = settings.customProviderBaseUrls?.[normalized]?.trim();
+  if (customBaseUrl) {
+    return customBaseUrl;
+  }
   if (normalized === 'glm') {
     if (settings.glmEndpoint === 'coding') return GLM_CODING_BASE_URL;
     if (settings.glmEndpoint === 'international') return GLM_INTL_BASE_URL;

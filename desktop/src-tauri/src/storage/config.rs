@@ -40,7 +40,8 @@ impl ConfigService {
     /// Load configuration from a file
     fn load_from_file(path: &PathBuf) -> AppResult<AppConfig> {
         let content = fs::read_to_string(path)?;
-        let config: AppConfig = serde_json::from_str(&content)?;
+        let mut config: AppConfig = serde_json::from_str(&content)?;
+        config.normalize_persistence_fields();
         config.validate().map_err(AppError::validation)?;
         Ok(config)
     }

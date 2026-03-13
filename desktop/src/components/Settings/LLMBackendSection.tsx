@@ -12,6 +12,7 @@ import { useTranslation } from 'react-i18next';
 import {
   useSettingsStore,
   type Backend,
+  type CustomProviderEndpoint,
   type StandaloneContextTurns,
   type GlmEndpoint,
   type MinimaxEndpoint,
@@ -77,6 +78,12 @@ export function LLMBackendSection() {
     setMinimaxEndpoint,
     qwenEndpoint,
     setQwenEndpoint,
+    customProviderBaseUrls,
+    customProviderEndpoints,
+    selectedCustomProviderEndpointIds,
+    addCustomProviderEndpoint,
+    selectCustomProviderEndpoint,
+    removeCustomProviderEndpoint,
   } = useSettingsStore();
   const [apiKeyStatuses, setApiKeyStatuses] = useState<ApiKeyStatus>({});
   const [apiKeyInputs, setApiKeyInputs] = useState<{ [provider: string]: string }>({});
@@ -89,6 +96,8 @@ export function LLMBackendSection() {
   const [modelsByProvider, setModelsByProvider] = useState<Record<string, string[]>>(FALLBACK_MODELS_BY_PROVIDER);
   const [customModelsByProvider, setCustomModelsByProvider] = useState<Record<string, string[]>>({});
   const [customModelInput, setCustomModelInput] = useState('');
+  const [customEndpointNameInput, setCustomEndpointNameInput] = useState('');
+  const [customEndpointUrlInput, setCustomEndpointUrlInput] = useState('');
 
   const fetchProviderModels = useCallback(async () => {
     try {
@@ -204,6 +213,8 @@ export function LLMBackendSection() {
       setModelsByProvider(FALLBACK_MODELS_BY_PROVIDER);
       setCustomModelsByProvider({});
       setCustomModelInput('');
+      setCustomEndpointNameInput('');
+      setCustomEndpointUrlInput('');
       void fetchProviderModels();
       void fetchApiKeyStatuses();
     };
@@ -289,6 +300,26 @@ export function LLMBackendSection() {
     });
   }, []);
 
+  const resolveEffectiveProviderBaseUrl = useCallback(
+    (
+      provider: string,
+      overrides?: Partial<{
+        glmEndpoint: GlmEndpoint;
+        minimaxEndpoint: MinimaxEndpoint;
+        qwenEndpoint: QwenEndpoint;
+        customProviderBaseUrls: Record<string, string>;
+      }>,
+    ) =>
+      resolveProviderBaseUrl(provider, {
+        glmEndpoint,
+        minimaxEndpoint,
+        qwenEndpoint,
+        customProviderBaseUrls,
+        ...overrides,
+      }),
+    [customProviderBaseUrls, glmEndpoint, minimaxEndpoint, qwenEndpoint],
+  );
+
   const handleToggleApiKeyVisibility = async (provider: string) => {
     const canonicalProvider = normalizeProvider(provider);
     const nextVisible = !showApiKey[canonicalProvider];
@@ -330,6 +361,10 @@ export function LLMBackendSection() {
 
   const selectedOption = backendOptions.find((o) => o.id === backend);
   const selectedProvider = normalizeProvider(selectedOption?.provider || selectedOption?.id || '');
+  const selectedCustomBaseUrl = customProviderBaseUrls[selectedProvider] || '';
+  const selectedCustomEndpoints = customProviderEndpoints[selectedProvider] || [];
+  const selectedCustomEndpointId = selectedCustomProviderEndpointIds[selectedProvider] || '';
+  const effectiveSelectedBaseUrl = selectedProvider ? resolveEffectiveProviderBaseUrl(selectedProvider) : undefined;
   const builtinModels = dedupeModels(modelsByProvider[selectedProvider] || []);
   const customModels = dedupeModels(customModelsByProvider[selectedProvider] || []);
   const allModels = dedupeModels([...builtinModels, ...customModels]);
@@ -375,6 +410,65 @@ export function LLMBackendSection() {
     const key = `llm.model.placeholders.${b}`;
     const result = t(key);
     return result !== key ? result : t('llm.model.placeholders.default');
+  };
+
+  const handleAddCustomEndpoint = async () => {
+    if (!selectedProvider) return;
+    const endpointName = customEndpointNameInput.trim();
+    const endpointUrl = customEndpointUrlInput.trim();
+    if (!endpointUrl) return;
+
+    const endpointId = addCustomProviderEndpoint(selectedProvider, {
+      name: endpointName || t('llm.baseUrl.defaultEndpointName'),
+      baseUrl: endpointUrl,
+    });
+    if (!endpointId) return;
+
+    setCustomEndpointNameInput('');
+    setCustomEndpointUrlInput('');
+    await syncProviderBaseUrl(selectedProvider, endpointUrl);
+  };
+
+  const handleSelectCustomEndpoint = async (endpoint: CustomProviderEndpoint | null) => {
+    if (!selectedProvider) return;
+
+    selectCustomProviderEndpoint(selectedProvider, endpoint?.id ?? null);
+    const nextCustomProviderBaseUrls = { ...customProviderBaseUrls };
+    if (endpoint) {
+      nextCustomProviderBaseUrls[selectedProvider] = endpoint.baseUrl;
+    } else {
+      delete nextCustomProviderBaseUrls[selectedProvider];
+    }
+    await syncProviderBaseUrl(
+      selectedProvider,
+      resolveEffectiveProviderBaseUrl(selectedProvider, {
+        customProviderBaseUrls: nextCustomProviderBaseUrls,
+      }),
+    );
+  };
+
+  const handleRemoveCustomEndpoint = async (endpoint: CustomProviderEndpoint) => {
+    if (!selectedProvider) return;
+
+    const remainingEndpoints = selectedCustomEndpoints.filter((entry) => entry.id !== endpoint.id);
+    removeCustomProviderEndpoint(selectedProvider, endpoint.id);
+
+    const nextCustomProviderBaseUrls = { ...customProviderBaseUrls };
+    const replacement = selectedCustomEndpointId === endpoint.id ? remainingEndpoints[0] : null;
+    if (selectedCustomEndpointId === endpoint.id) {
+      if (replacement) {
+        nextCustomProviderBaseUrls[selectedProvider] = replacement.baseUrl;
+      } else {
+        delete nextCustomProviderBaseUrls[selectedProvider];
+      }
+    }
+
+    await syncProviderBaseUrl(
+      selectedProvider,
+      resolveEffectiveProviderBaseUrl(selectedProvider, {
+        customProviderBaseUrls: nextCustomProviderBaseUrls,
+      }),
+    );
   };
 
   return (
@@ -575,7 +669,12 @@ export function LLMBackendSection() {
                   checked={glmEndpoint === ep}
                   onChange={() => {
                     setGlmEndpoint(ep);
-                    void syncProviderBaseUrl('glm', resolveProviderBaseUrl('glm', { glmEndpoint: ep }));
+                    void syncProviderBaseUrl(
+                      'glm',
+                      resolveEffectiveProviderBaseUrl('glm', {
+                        glmEndpoint: ep,
+                      }),
+                    );
                   }}
                   className="mt-0.5 text-primary-600"
                 />
@@ -620,7 +719,12 @@ export function LLMBackendSection() {
                   checked={qwenEndpoint === ep}
                   onChange={() => {
                     setQwenEndpoint(ep);
-                    void syncProviderBaseUrl('qwen', resolveProviderBaseUrl('qwen', { qwenEndpoint: ep }));
+                    void syncProviderBaseUrl(
+                      'qwen',
+                      resolveEffectiveProviderBaseUrl('qwen', {
+                        qwenEndpoint: ep,
+                      }),
+                    );
                   }}
                   className="mt-0.5 text-primary-600"
                 />
@@ -665,7 +769,12 @@ export function LLMBackendSection() {
                   checked={minimaxEndpoint === ep}
                   onChange={() => {
                     setMinimaxEndpoint(ep);
-                    void syncProviderBaseUrl('minimax', resolveProviderBaseUrl('minimax', { minimaxEndpoint: ep }));
+                    void syncProviderBaseUrl(
+                      'minimax',
+                      resolveEffectiveProviderBaseUrl('minimax', {
+                        minimaxEndpoint: ep,
+                      }),
+                    );
                   }}
                   className="mt-0.5 text-primary-600"
                 />
@@ -684,6 +793,162 @@ export function LLMBackendSection() {
             ))}
           </div>
           <p className="text-sm text-gray-500 dark:text-gray-400">{t('llm.minimaxEndpoint.help')}</p>
+        </section>
+      )}
+
+      {selectedProvider && backend !== 'claude-code' && (
+        <section className="space-y-4">
+          <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('llm.baseUrl.label')}</h3>
+          <div
+            className={clsx(
+              'max-w-2xl rounded-xl border p-4',
+              'border-gray-200 dark:border-gray-700',
+              'bg-gray-50/80 dark:bg-gray-900/40',
+            )}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-gray-900 dark:text-white">{t('llm.baseUrl.customLabel')}</p>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t('llm.baseUrl.help')}</p>
+              </div>
+              {selectedCustomBaseUrl && (
+                <span
+                  className={clsx(
+                    'inline-flex rounded-full px-2 py-0.5 text-xs font-medium',
+                    'bg-primary-100 text-primary-700 dark:bg-primary-900/40 dark:text-primary-300',
+                  )}
+                >
+                  {t('llm.baseUrl.customActive')}
+                </span>
+              )}
+            </div>
+
+            <div className="mt-3 grid gap-2 md:grid-cols-[minmax(0,180px)_minmax(0,1fr)_auto]">
+              <input
+                type="text"
+                value={customEndpointNameInput}
+                placeholder={t('llm.baseUrl.namePlaceholder')}
+                onChange={(e) => setCustomEndpointNameInput(e.target.value)}
+                className={clsx(
+                  'px-3 py-2 rounded-lg border',
+                  'border-gray-200 dark:border-gray-700',
+                  'bg-white dark:bg-gray-800',
+                  'text-gray-900 dark:text-white',
+                  'focus:outline-none focus:ring-2 focus:ring-primary-500',
+                )}
+              />
+              <input
+                type="text"
+                value={customEndpointUrlInput}
+                placeholder={selectedProvider === 'ollama' ? 'http://localhost:11434' : t('llm.baseUrl.placeholder')}
+                onChange={(e) => setCustomEndpointUrlInput(e.target.value)}
+                className={clsx(
+                  'px-3 py-2 rounded-lg border',
+                  'border-gray-200 dark:border-gray-700',
+                  'bg-white dark:bg-gray-800',
+                  'text-gray-900 dark:text-white',
+                  'focus:outline-none focus:ring-2 focus:ring-primary-500',
+                )}
+              />
+              <button
+                type="button"
+                onClick={() => void handleAddCustomEndpoint()}
+                disabled={!customEndpointUrlInput.trim()}
+                className={clsx(
+                  'px-4 py-2 rounded-lg',
+                  'bg-primary-600 text-white',
+                  'hover:bg-primary-700',
+                  'focus:outline-none focus:ring-2 focus:ring-primary-500',
+                  'disabled:opacity-50 disabled:cursor-not-allowed',
+                )}
+              >
+                {t('llm.baseUrl.add')}
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  {t('llm.baseUrl.saved')}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void handleSelectCustomEndpoint(null)}
+                  className={clsx(
+                    'text-xs px-2 py-1 rounded border',
+                    'border-gray-200 dark:border-gray-700',
+                    'text-gray-600 dark:text-gray-300',
+                    'hover:bg-gray-100 dark:hover:bg-gray-800',
+                  )}
+                >
+                  {t('llm.baseUrl.useDefault')}
+                </button>
+              </div>
+
+              {selectedCustomEndpoints.length > 0 ? (
+                selectedCustomEndpoints.map((endpoint) => {
+                  const isActive = selectedCustomEndpointId === endpoint.id;
+                  return (
+                    <label
+                      key={endpoint.id}
+                      className={clsx(
+                        'flex items-start gap-3 rounded-lg border p-3',
+                        isActive
+                          ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
+                          : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/60',
+                      )}
+                    >
+                      <input
+                        type="radio"
+                        name={`custom-endpoint-${selectedProvider}`}
+                        checked={isActive}
+                        onChange={() => void handleSelectCustomEndpoint(endpoint)}
+                        className="mt-1 text-primary-600"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium text-gray-900 dark:text-white">{endpoint.name}</span>
+                          {isActive && (
+                            <span
+                              className={clsx(
+                                'inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium',
+                                'bg-primary-100 text-primary-700 dark:bg-primary-900/40 dark:text-primary-300',
+                              )}
+                            >
+                              {t('llm.baseUrl.active')}
+                            </span>
+                          )}
+                        </div>
+                        <code className="mt-1 block break-all text-xs text-gray-500 dark:text-gray-400">
+                          {endpoint.baseUrl}
+                        </code>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void handleRemoveCustomEndpoint(endpoint)}
+                        className={clsx(
+                          'text-xs px-2 py-1 rounded border',
+                          'border-gray-200 dark:border-gray-700',
+                          'text-gray-600 dark:text-gray-300',
+                          'hover:bg-gray-100 dark:hover:bg-gray-800',
+                        )}
+                      >
+                        {t('llm.baseUrl.delete')}
+                      </button>
+                    </label>
+                  );
+                })
+              ) : (
+                <p className="text-sm text-gray-500 dark:text-gray-400">{t('llm.baseUrl.empty')}</p>
+              )}
+            </div>
+
+            <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+              {t('llm.baseUrl.effective', {
+                url: effectiveSelectedBaseUrl || t('llm.baseUrl.defaultValue'),
+              })}
+            </p>
+          </div>
         </section>
       )}
 
