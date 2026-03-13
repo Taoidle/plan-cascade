@@ -135,6 +135,30 @@ pub struct IndexManager {
 }
 
 impl IndexManager {
+    fn normalize_project_path_key(project_path: &str) -> String {
+        IndexStore::normalize_project_path_key(project_path)
+    }
+
+    async fn resolve_cached_project_key<T>(
+        map: &RwLock<HashMap<String, T>>,
+        project_path: &str,
+    ) -> Option<String> {
+        let normalized_target = Self::normalize_project_path_key(project_path);
+        if normalized_target.is_empty() {
+            return None;
+        }
+
+        let guard = map.read().await;
+        if guard.contains_key(project_path) {
+            return Some(project_path.to_string());
+        }
+
+        guard
+            .keys()
+            .find(|key| Self::normalize_project_path_key(key) == normalized_target)
+            .cloned()
+    }
+
     /// Create a new `IndexManager` backed by the given database connection pool.
     pub fn new(pool: DbPool) -> Self {
         let index_store = Arc::new(IndexStore::new(pool.clone()));
@@ -745,8 +769,9 @@ impl IndexManager {
     /// Get the embedding service for a project directory, if one has been
     /// created by a previous indexing run.
     pub async fn get_embedding_service(&self, project_path: &str) -> Option<Arc<EmbeddingService>> {
+        let resolved = Self::resolve_cached_project_key(&self.embedding_services, project_path).await?;
         let embeds = self.embedding_services.read().await;
-        embeds.get(project_path).cloned()
+        embeds.get(&resolved).cloned()
     }
 
     /// Get the `EmbeddingManager` for a project directory, if one has been
@@ -756,14 +781,16 @@ impl IndexManager {
     /// `TfIdfEmbeddingProvider`) and provides the dispatch-layer API with
     /// caching, batching, and optional fallback support.
     pub async fn get_embedding_manager(&self, project_path: &str) -> Option<Arc<EmbeddingManager>> {
+        let resolved = Self::resolve_cached_project_key(&self.embedding_managers, project_path).await?;
         let managers = self.embedding_managers.read().await;
-        managers.get(project_path).cloned()
+        managers.get(&resolved).cloned()
     }
 
     /// Get the HNSW index for a project directory, if one has been created.
     pub async fn get_hnsw_index(&self, project_path: &str) -> Option<Arc<HnswIndex>> {
+        let resolved = Self::resolve_cached_project_key(&self.hnsw_indexes, project_path).await?;
         let indexes = self.hnsw_indexes.read().await;
-        indexes.get(project_path).cloned()
+        indexes.get(&resolved).cloned()
     }
 
     /// Remove a directory from the manager, aborting any active indexer

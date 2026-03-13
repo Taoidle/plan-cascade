@@ -160,7 +160,7 @@ impl OrchestratorService {
             return CodebaseIndexStatus::default();
         };
         let project_path = self.config.project_root.to_string_lossy();
-        match store.get_project_summary(&project_path) {
+        match store.get_project_summary_resolved(&project_path) {
             Ok(summary) => CodebaseIndexStatus {
                 available: true,
                 ready: summary.total_files > 0,

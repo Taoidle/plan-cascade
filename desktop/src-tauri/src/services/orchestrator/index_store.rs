@@ -82,6 +82,53 @@ pub struct IndexStore {
 }
 
 impl IndexStore {
+    pub(crate) fn normalize_project_path_key(project_path: &str) -> String {
+        let trimmed = project_path.trim();
+        if trimmed.is_empty() {
+            return String::new();
+        }
+
+        let mut normalized = trimmed.replace('\\', "/");
+
+        #[cfg(target_os = "windows")]
+        {
+            if let Some(stripped) = normalized.strip_prefix("//?/UNC/") {
+                normalized = format!("//{}", stripped);
+            } else if let Some(stripped) = normalized.strip_prefix("//?/") {
+                normalized = stripped.to_string();
+            }
+            normalized.make_ascii_lowercase();
+        }
+
+        while normalized.len() > 1 && normalized.ends_with('/') {
+            normalized.pop();
+        }
+
+        normalized
+    }
+
+    pub fn resolve_equivalent_project_path(&self, project_path: &str) -> AppResult<String> {
+        let normalized_target = Self::normalize_project_path_key(project_path);
+        if normalized_target.is_empty() {
+            return Ok(project_path.to_string());
+        }
+
+        let projects = self.list_indexed_projects()?;
+        if let Some(project) = projects
+            .into_iter()
+            .find(|project| Self::normalize_project_path_key(&project.project_path) == normalized_target)
+        {
+            return Ok(project.project_path);
+        }
+
+        Ok(project_path.to_string())
+    }
+
+    pub fn get_project_summary_resolved(&self, project_path: &str) -> AppResult<ProjectIndexSummary> {
+        let resolved = self.resolve_equivalent_project_path(project_path)?;
+        self.get_project_summary(&resolved)
+    }
+
     /// Create a new IndexStore wrapping the given connection pool.
     pub fn new(pool: DbPool) -> Self {
         Self { pool }

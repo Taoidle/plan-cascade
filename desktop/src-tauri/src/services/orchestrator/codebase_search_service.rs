@@ -167,6 +167,11 @@ impl CodebaseSearchService {
             return Err("query is empty".to_string());
         }
 
+        let resolved_project_path = self
+            .index_store
+            .resolve_equivalent_project_path(&request.project_path)
+            .unwrap_or_else(|_| request.project_path.clone());
+
         let mut engine = HybridSearchEngine::with_defaults(
             Arc::clone(&self.index_store),
             self.embedding_manager.clone(),
@@ -176,7 +181,7 @@ impl CodebaseSearchService {
         }
 
         let outcome = engine
-            .search(&request.query, &request.project_path)
+            .search(&request.query, &resolved_project_path)
             .await
             .map_err(|e| format!("Search failed: {}", e))?;
 
@@ -195,13 +200,13 @@ impl CodebaseSearchService {
             .filter(|v| !v.is_empty());
 
         let allowed_language_paths: Option<HashSet<String>> = if let Some(lang) = filters
-            .language
-            .as_ref()
-            .map(|v| v.trim())
-            .filter(|v| !v.is_empty())
+                .language
+                .as_ref()
+                .map(|v| v.trim())
+                .filter(|v| !v.is_empty())
         {
             match self.index_store.list_project_files(
-                &request.project_path,
+                &resolved_project_path,
                 Some(lang),
                 None,
                 0,
@@ -218,7 +223,7 @@ impl CodebaseSearchService {
             if let Some(component) = component_filter {
                 match self
                     .index_store
-                    .query_files_by_component(&request.project_path, component)
+                    .query_files_by_component(&resolved_project_path, component)
                 {
                     Ok(files) => Some(files.into_iter().map(|f| f.file_path).collect()),
                     Err(_) => Some(HashSet::new()),
@@ -273,7 +278,7 @@ impl CodebaseSearchService {
                 } else {
                     let metadata = match self
                         .index_store
-                        .query_files_by_path(&request.project_path, &file_path)
+                        .query_files_by_path(&resolved_project_path, &file_path)
                     {
                         Ok(rows) => rows
                             .into_iter()
@@ -293,7 +298,7 @@ impl CodebaseSearchService {
                     } else {
                         let resolved = match self
                             .index_store
-                            .get_file_symbols(&request.project_path, &file_path)
+                            .get_file_symbols(&resolved_project_path, &file_path)
                         {
                             Ok(symbols) => symbols
                                 .into_iter()
