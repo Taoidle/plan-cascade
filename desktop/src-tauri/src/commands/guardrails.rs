@@ -10,7 +10,7 @@ use tokio::sync::RwLock;
 use crate::models::response::CommandResponse;
 use crate::services::guardrail::{
     shared_guardrail_registry, CustomRuleConfig, Direction, GuardrailAction, GuardrailEventEntry,
-    GuardrailInfo, GuardrailRegistry,
+    GuardrailInfo, GuardrailMode, GuardrailRegistry,
 };
 use crate::storage::Database;
 
@@ -42,6 +42,7 @@ impl Default for GuardrailState {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GuardrailRuntimeStatus {
+    pub mode: GuardrailMode,
     pub strict_mode: bool,
     pub native_runtime_managed: bool,
     pub claude_code_managed: bool,
@@ -96,12 +97,33 @@ pub async fn list_guardrails(
     Ok(CommandResponse::ok(GuardrailOverview {
         guardrails: registry.list_guardrails(),
         runtime: GuardrailRuntimeStatus {
+            mode: registry.mode(),
             strict_mode: registry.strict_mode(),
             native_runtime_managed: registry.native_runtime_managed(),
             claude_code_managed: registry.claude_code_managed(),
             init_error: registry.init_error(),
         },
     }))
+}
+
+#[tauri::command]
+pub async fn set_guardrail_mode(
+    mode: String,
+    state: State<'_, GuardrailState>,
+) -> Result<CommandResponse<GuardrailRuntimeStatus>, String> {
+    let parsed_mode = GuardrailMode::parse(&mode)
+        .ok_or_else(|| format!("Invalid guardrail mode '{}'", mode))?;
+    let mut registry = state.registry.write().await;
+    match registry.set_mode(parsed_mode) {
+        Ok(applied_mode) => Ok(CommandResponse::ok(GuardrailRuntimeStatus {
+            mode: applied_mode,
+            strict_mode: applied_mode == GuardrailMode::Strict,
+            native_runtime_managed: registry.native_runtime_managed(),
+            claude_code_managed: registry.claude_code_managed(),
+            init_error: registry.init_error(),
+        })),
+        Err(error) => Ok(CommandResponse::err(error)),
+    }
 }
 
 #[tauri::command]

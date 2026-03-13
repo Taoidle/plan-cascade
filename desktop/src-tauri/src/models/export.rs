@@ -35,6 +35,9 @@ pub struct BackendSettingsExport {
     pub proxy: ProxyExport,
     /// Webhook channel configurations
     pub webhooks: Vec<serde_json::Value>,
+    /// Guardrail runtime mode
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guardrail_mode: Option<String>,
     /// Custom guardrail rules
     pub guardrails: Vec<GuardrailRuleExport>,
     /// Remote control settings (gateway + telegram)

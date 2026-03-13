@@ -447,6 +447,7 @@ fn main() {
             plan_cascade_desktop::commands::lsp::set_lsp_preferences,
             // Guardrail commands
             plan_cascade_desktop::commands::guardrails::list_guardrails,
+            plan_cascade_desktop::commands::guardrails::set_guardrail_mode,
             plan_cascade_desktop::commands::guardrails::toggle_guardrail,
             plan_cascade_desktop::commands::guardrails::create_custom_guardrail,
             plan_cascade_desktop::commands::guardrails::update_guardrail,

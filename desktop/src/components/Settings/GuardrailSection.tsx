@@ -2,10 +2,11 @@ import { clsx } from 'clsx';
 import * as Switch from '@radix-ui/react-switch';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { CustomGuardrailInput, GuardrailInfo, GuardrailScope } from '../../lib/guardrailsApi';
+import type { CustomGuardrailInput, GuardrailInfo, GuardrailMode, GuardrailScope } from '../../lib/guardrailsApi';
 import { useGuardrailsStore } from '../../store/guardrails';
 
 const SCOPE_OPTIONS: GuardrailScope[] = ['input', 'tool_call', 'tool_result', 'assistant_output', 'artifact'];
+const MODE_OPTIONS: GuardrailMode[] = ['off', 'monitor_only', 'balanced', 'strict'];
 
 function getScopeLabel(t: (key: string, options?: Record<string, unknown>) => string, scope: GuardrailScope) {
   return t(`security.scope.${scope}`);
@@ -13,6 +14,38 @@ function getScopeLabel(t: (key: string, options?: Record<string, unknown>) => st
 
 function getActionLabel(t: (key: string, options?: Record<string, unknown>) => string, action: string) {
   return t(`security.actions.${action}`, { defaultValue: action });
+}
+
+function getModeLabel(t: (key: string, options?: Record<string, unknown>) => string, mode: GuardrailMode) {
+  return t(`security.mode.options.${mode}.label`);
+}
+
+function getModeDescription(t: (key: string, options?: Record<string, unknown>) => string, mode: GuardrailMode) {
+  return t(`security.mode.options.${mode}.description`);
+}
+
+function getGuardrailDisplayName(
+  t: (key: string, options?: Record<string, unknown>) => string,
+  guardrail: GuardrailInfo,
+) {
+  if (guardrail.builtin_key) {
+    return t(`security.builtin.items.${guardrail.builtin_key}.name`, {
+      defaultValue: guardrail.name,
+    });
+  }
+  return guardrail.name;
+}
+
+function getGuardrailDisplayDescription(
+  t: (key: string, options?: Record<string, unknown>) => string,
+  guardrail: GuardrailInfo,
+) {
+  if (guardrail.builtin_key) {
+    return t(`security.builtin.items.${guardrail.builtin_key}.description`, {
+      defaultValue: guardrail.description,
+    });
+  }
+  return guardrail.description;
 }
 
 const PANEL_CLASS = 'rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800';
@@ -60,7 +93,9 @@ function GuardrailCard({
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <h5 className="truncate text-sm font-semibold text-gray-900 dark:text-white">{guardrail.name}</h5>
+            <h5 className="truncate text-sm font-semibold text-gray-900 dark:text-white">
+              {getGuardrailDisplayName(t, guardrail)}
+            </h5>
             <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-700 dark:bg-gray-700 dark:text-gray-200">
               {t(`security.types.${guardrail.guardrail_type}`)}
             </span>
@@ -77,7 +112,9 @@ function GuardrailCard({
               {getActionLabel(t, guardrail.action)}
             </span>
           </div>
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{guardrail.description}</p>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            {getGuardrailDisplayDescription(t, guardrail)}
+          </p>
           <ScopePills scope={guardrail.scope} />
           {guardrail.pattern && (
             <pre className="mt-3 overflow-x-auto rounded-lg bg-gray-950 p-3 text-xs text-gray-100">
@@ -323,6 +360,56 @@ function EventsTable() {
   );
 }
 
+function ModeSelector({
+  mode,
+  isMutating,
+  onChange,
+}: {
+  mode: GuardrailMode;
+  isMutating: boolean;
+  onChange: (mode: GuardrailMode) => Promise<boolean>;
+}) {
+  const { t } = useTranslation('settings');
+
+  return (
+    <section className="space-y-3">
+      <div>
+        <h4 className="text-sm font-medium text-gray-900 dark:text-white">{t('security.mode.title')}</h4>
+        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t('security.mode.description')}</p>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {MODE_OPTIONS.map((option) => {
+          const selected = option === mode;
+          return (
+            <button
+              key={option}
+              type="button"
+              disabled={isMutating}
+              onClick={() => onChange(option)}
+              className={clsx(
+                'rounded-xl border p-4 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60',
+                selected
+                  ? 'border-primary-500 bg-primary-50 dark:border-primary-500 dark:bg-primary-950/20'
+                  : 'border-gray-200 bg-white hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:hover:bg-gray-700',
+              )}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-semibold text-gray-900 dark:text-white">{getModeLabel(t, option)}</span>
+                {selected && (
+                  <span className="rounded-full bg-primary-600 px-2 py-0.5 text-[11px] font-medium text-white">
+                    {t('security.mode.active')}
+                  </span>
+                )}
+              </div>
+              <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">{getModeDescription(t, option)}</p>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 export function GuardrailSection() {
   const { t } = useTranslation('settings');
   const {
@@ -332,6 +419,7 @@ export function GuardrailSection() {
     isMutating,
     error,
     fetchGuardrails,
+    setMode,
     toggleGuardrail,
     createRule,
     updateRule,
@@ -376,12 +464,12 @@ export function GuardrailSection() {
             </div>
             <p className="mt-1 text-sm text-gray-900 dark:text-white">
               {runtime.native_runtime_managed
-                ? t('security.runtime.native.managed')
+                ? t(`security.runtime.native.${runtime.mode}`)
                 : t('security.runtime.native.unmanaged')}
             </p>
             <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-              {t('security.runtime.strictMode', {
-                status: runtime.strict_mode ? t('security.runtime.enabled') : t('security.runtime.disabled'),
+              {t('security.runtime.currentMode', {
+                mode: getModeLabel(t, runtime.mode),
               })}
             </p>
             {runtime.init_error && <p className="mt-2 text-xs text-red-600">{runtime.init_error}</p>}
@@ -398,6 +486,8 @@ export function GuardrailSection() {
           </div>
         </div>
       )}
+
+      {runtime && <ModeSelector mode={runtime.mode} isMutating={isMutating} onChange={setMode} />}
 
       <div className={clsx(PANEL_MUTED_CLASS, 'text-sm text-gray-600 dark:text-gray-300')}>
         {t('security.runtime.networkHint')}

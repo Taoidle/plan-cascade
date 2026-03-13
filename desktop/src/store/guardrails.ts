@@ -3,6 +3,7 @@ import type {
   CustomGuardrailInput,
   GuardrailEventEntry,
   GuardrailInfo,
+  GuardrailMode,
   GuardrailRuntimeStatus,
 } from '../lib/guardrailsApi';
 import {
@@ -11,6 +12,7 @@ import {
   deleteGuardrail,
   listGuardrailEvents,
   listGuardrails,
+  setGuardrailMode as setGuardrailModeApi,
   toggleGuardrailEnabled,
   updateGuardrail as updateGuardrailApi,
 } from '../lib/guardrailsApi';
@@ -26,6 +28,7 @@ export interface GuardrailsState {
   isLoadingLog: boolean;
   error: string | null;
   fetchGuardrails: () => Promise<void>;
+  setMode: (mode: GuardrailMode) => Promise<boolean>;
   toggleGuardrail: (id: string, enabled: boolean) => Promise<void>;
   createRule: (rule: CustomGuardrailInput) => Promise<boolean>;
   updateRule: (rule: CustomGuardrailInput) => Promise<boolean>;
@@ -65,6 +68,20 @@ export const useGuardrailsStore = create<GuardrailsState>()((set, get) => ({
       isLoading: false,
       error: result.error ?? 'Failed to fetch guardrails',
     });
+  },
+
+  setMode: async (mode) => {
+    set({ isMutating: true, error: null });
+    const result = await setGuardrailModeApi(mode);
+    if (result.success && result.data) {
+      set({ runtime: result.data, isMutating: false });
+      return true;
+    }
+    set({
+      isMutating: false,
+      error: result.error ?? 'Failed to update guardrail mode',
+    });
+    return false;
   },
 
   toggleGuardrail: async (id, enabled) => {

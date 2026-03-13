@@ -16,11 +16,12 @@ use crate::storage::database::Database;
 
 use super::{
     CodeSecurityGuardrail, CustomGuardrail, CustomRuleConfig, Direction, Guardrail,
-    GuardrailAction, GuardrailEventEntry, GuardrailInfo, GuardrailResult, GuardrailRuntimeContext,
-    SchemaValidationGuardrail, SensitiveDataGuardrail,
+    GuardrailAction, GuardrailEventEntry, GuardrailInfo, GuardrailMode, GuardrailResult,
+    GuardrailRuntimeContext, SchemaValidationGuardrail, SensitiveDataGuardrail,
 };
 
 static GLOBAL_GUARDRAIL_REGISTRY: OnceLock<Arc<RwLock<GuardrailRegistry>>> = OnceLock::new();
+const GUARDRAIL_MODE_SETTING_KEY: &str = "guardrail_mode_v1";
 
 fn table_has_column(conn: &rusqlite::Connection, table: &str, column: &str) -> bool {
     let sql = format!("PRAGMA table_info({})", table);
@@ -99,7 +100,7 @@ impl GuardrailEntry {
 pub struct GuardrailRegistry {
     entries: Vec<GuardrailEntry>,
     database: Option<Arc<Database>>,
-    strict_mode: bool,
+    mode: GuardrailMode,
     native_runtime_managed: bool,
     claude_code_managed: bool,
     init_error: Option<String>,
@@ -110,7 +111,7 @@ impl GuardrailRegistry {
         Self {
             entries: Vec::new(),
             database: None,
-            strict_mode: true,
+            mode: GuardrailMode::Strict,
             native_runtime_managed: false,
             claude_code_managed: false,
             init_error: None,
@@ -125,8 +126,12 @@ impl GuardrailRegistry {
         registry
     }
 
+    pub fn mode(&self) -> GuardrailMode {
+        self.mode
+    }
+
     pub fn strict_mode(&self) -> bool {
-        self.strict_mode
+        self.mode == GuardrailMode::Strict
     }
 
     pub fn native_runtime_managed(&self) -> bool {
@@ -142,11 +147,20 @@ impl GuardrailRegistry {
     }
 
     pub fn initialize_with_database(&mut self, database: Arc<Database>) -> Result<(), String> {
-        self.database = Some(database);
+        self.database = Some(database.clone());
         if let Err(error) = self.ensure_database_layout() {
             self.init_error = Some(error.clone());
             return Err(error);
         }
+        self.mode = database
+            .get_setting(GUARDRAIL_MODE_SETTING_KEY)
+            .map_err(|e| e.to_string())?
+            .as_deref()
+            .and_then(GuardrailMode::parse)
+            .unwrap_or_default();
+        database
+            .set_setting(GUARDRAIL_MODE_SETTING_KEY, &self.mode.to_string())
+            .map_err(|e| e.to_string())?;
         if let Err(error) = self.sync_from_database() {
             self.init_error = Some(error.clone());
             return Err(error);
@@ -659,12 +673,66 @@ impl GuardrailRegistry {
         );
     }
 
+    fn effective_result_for_mode(
+        &self,
+        entry: &GuardrailEntry,
+        surface: Direction,
+        result: GuardrailResult,
+    ) -> GuardrailResult {
+        match self.mode {
+            GuardrailMode::Off => GuardrailResult::Pass,
+            GuardrailMode::MonitorOnly => match result {
+                GuardrailResult::Pass => GuardrailResult::Pass,
+                GuardrailResult::Warn { message } => GuardrailResult::Warn {
+                    message: format!("Monitor only: {}", message),
+                },
+                GuardrailResult::Redact { redacted_items, .. } => {
+                    let suffix = if redacted_items.is_empty() {
+                        "would redact matching content".to_string()
+                    } else {
+                        format!("would redact {}", redacted_items.join(", "))
+                    };
+                    GuardrailResult::Warn {
+                        message: format!("Monitor only: {}", suffix),
+                    }
+                }
+                GuardrailResult::Block { reason } => GuardrailResult::Warn {
+                    message: format!("Monitor only: would block: {}", reason),
+                },
+            },
+            GuardrailMode::Balanced => result,
+            GuardrailMode::Strict => self.strictify_result(entry, surface, result),
+        }
+    }
+
+    fn strictify_result(
+        &self,
+        entry: &GuardrailEntry,
+        surface: Direction,
+        result: GuardrailResult,
+    ) -> GuardrailResult {
+        if entry.builtin_key.as_deref() == Some("code_security")
+            && matches!(surface, Direction::Tool | Direction::Artifact)
+        {
+            if let GuardrailResult::Warn { message } = result {
+                return GuardrailResult::Block {
+                    reason: format!("Strict mode blocked code security issue: {}", message),
+                };
+            }
+        }
+        result
+    }
+
     pub async fn validate_all(
         &self,
         content: &str,
         surface: Direction,
         runtime: &GuardrailRuntimeContext,
     ) -> GuardrailResult {
+        if self.mode == GuardrailMode::Off {
+            return GuardrailResult::Pass;
+        }
+
         let mut current_content = content.to_string();
         let mut warnings = Vec::new();
         let mut redacted_items = Vec::new();
@@ -678,12 +746,13 @@ impl GuardrailRegistry {
                 .guardrail
                 .validate(&current_content, surface, runtime)
                 .await;
+            let effective_result = self.effective_result_for_mode(entry, surface, result);
 
-            if !result.is_pass() {
-                self.log_event(entry, surface, &current_content, &result, runtime);
+            if !effective_result.is_pass() {
+                self.log_event(entry, surface, &current_content, &effective_result, runtime);
             }
 
-            match result {
+            match effective_result {
                 GuardrailResult::Pass => {}
                 GuardrailResult::Warn { message } => {
                     warnings.push(format!("{}: {}", entry.guardrail.name(), message));
@@ -713,6 +782,15 @@ impl GuardrailRegistry {
         } else {
             GuardrailResult::Pass
         }
+    }
+
+    pub fn set_mode(&mut self, mode: GuardrailMode) -> Result<GuardrailMode, String> {
+        self.mode = mode;
+        if let Some(db) = &self.database {
+            db.set_setting(GUARDRAIL_MODE_SETTING_KEY, &mode.to_string())
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(self.mode)
     }
 }
 
@@ -901,6 +979,48 @@ mod tests {
             .validate_all(
                 r#"{"token":"sk-abcdefghijklmnopqrstuvwxyz123456789012345678"}"#,
                 Direction::ToolCall,
+                &GuardrailRuntimeContext::default(),
+            )
+            .await;
+        assert!(matches!(result, GuardrailResult::Block { .. }));
+    }
+
+    #[tokio::test]
+    async fn monitor_only_downgrades_block_to_warn() {
+        let mut registry = GuardrailRegistry::with_defaults();
+        registry.mode = GuardrailMode::MonitorOnly;
+        let result = registry
+            .validate_all(
+                r#"{"token":"sk-abcdefghijklmnopqrstuvwxyz123456789012345678"}"#,
+                Direction::ToolCall,
+                &GuardrailRuntimeContext::default(),
+            )
+            .await;
+        assert!(matches!(result, GuardrailResult::Warn { .. }));
+    }
+
+    #[tokio::test]
+    async fn off_mode_bypasses_guardrail_actions() {
+        let mut registry = GuardrailRegistry::with_defaults();
+        registry.mode = GuardrailMode::Off;
+        let result = registry
+            .validate_all(
+                "secret sk-abcdefghijklmnopqrstuvwxyz123456789012345678",
+                Direction::Input,
+                &GuardrailRuntimeContext::default(),
+            )
+            .await;
+        assert!(matches!(result, GuardrailResult::Pass));
+    }
+
+    #[tokio::test]
+    async fn strict_mode_blocks_code_security_in_artifacts() {
+        let mut registry = GuardrailRegistry::with_defaults();
+        registry.mode = GuardrailMode::Strict;
+        let result = registry
+            .validate_all(
+                r#"exec("import os; os.system('rm -rf /')")"#,
+                Direction::Artifact,
                 &GuardrailRuntimeContext::default(),
             )
             .await;

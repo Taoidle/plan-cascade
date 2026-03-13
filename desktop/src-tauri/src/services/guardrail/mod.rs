@@ -21,12 +21,16 @@ pub use sensitive_data::SensitiveDataGuardrail;
 
 /// Execution surface being validated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 pub enum Direction {
+    #[serde(rename = "input")]
     Input,
+    #[serde(rename = "tool_call")]
     ToolCall,
+    #[serde(rename = "tool_result", alias = "tool")]
     Tool,
+    #[serde(rename = "assistant_output", alias = "output")]
     Output,
+    #[serde(rename = "artifact")]
     Artifact,
 }
 
@@ -135,6 +139,49 @@ impl GuardrailAction {
             "redact" => Some(Self::Redact),
             _ => None,
         }
+    }
+}
+
+/// Runtime enforcement mode for native guardrails.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GuardrailMode {
+    Off,
+    MonitorOnly,
+    Balanced,
+    Strict,
+}
+
+impl Default for GuardrailMode {
+    fn default() -> Self {
+        Self::Strict
+    }
+}
+
+impl std::fmt::Display for GuardrailMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GuardrailMode::Off => write!(f, "off"),
+            GuardrailMode::MonitorOnly => write!(f, "monitor_only"),
+            GuardrailMode::Balanced => write!(f, "balanced"),
+            GuardrailMode::Strict => write!(f, "strict"),
+        }
+    }
+}
+
+impl GuardrailMode {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "off" => Some(Self::Off),
+            "monitor_only" | "monitor-only" | "monitor" => Some(Self::MonitorOnly),
+            "balanced" => Some(Self::Balanced),
+            "strict" => Some(Self::Strict),
+            _ => None,
+        }
+    }
+
+    pub fn is_enforcing(&self) -> bool {
+        !matches!(self, GuardrailMode::Off | GuardrailMode::MonitorOnly)
     }
 }
 
@@ -249,9 +296,58 @@ mod tests {
     }
 
     #[test]
+    fn direction_serializes_using_frontend_surface_names() {
+        assert_eq!(
+            serde_json::to_string(&Direction::Tool).expect("serialize tool"),
+            "\"tool_result\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Direction::Output).expect("serialize output"),
+            "\"assistant_output\""
+        );
+    }
+
+    #[test]
+    fn direction_deserializes_legacy_and_current_surface_names() {
+        assert_eq!(
+            serde_json::from_str::<Direction>("\"tool_result\"").expect("deserialize current tool"),
+            Direction::Tool
+        );
+        assert_eq!(
+            serde_json::from_str::<Direction>("\"tool\"").expect("deserialize legacy tool"),
+            Direction::Tool
+        );
+        assert_eq!(
+            serde_json::from_str::<Direction>("\"assistant_output\"")
+                .expect("deserialize current output"),
+            Direction::Output
+        );
+        assert_eq!(
+            serde_json::from_str::<Direction>("\"output\"").expect("deserialize legacy output"),
+            Direction::Output
+        );
+    }
+
+    #[test]
     fn guardrail_action_parse_is_case_insensitive() {
         assert_eq!(GuardrailAction::parse("BLOCK"), Some(GuardrailAction::Block));
         assert_eq!(GuardrailAction::parse(" redact "), Some(GuardrailAction::Redact));
         assert_eq!(GuardrailAction::parse("unknown"), None);
+    }
+
+    #[test]
+    fn guardrail_mode_parse_supports_expected_values() {
+        assert_eq!(GuardrailMode::parse("off"), Some(GuardrailMode::Off));
+        assert_eq!(
+            GuardrailMode::parse("monitor_only"),
+            Some(GuardrailMode::MonitorOnly)
+        );
+        assert_eq!(
+            GuardrailMode::parse("monitor-only"),
+            Some(GuardrailMode::MonitorOnly)
+        );
+        assert_eq!(GuardrailMode::parse("balanced"), Some(GuardrailMode::Balanced));
+        assert_eq!(GuardrailMode::parse("strict"), Some(GuardrailMode::Strict));
+        assert_eq!(GuardrailMode::parse("unknown"), None);
     }
 }

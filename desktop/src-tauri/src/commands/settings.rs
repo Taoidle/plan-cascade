@@ -576,7 +576,7 @@ fn import_db_sections(
     }
 
     // Guardrails
-    match import_guardrails(db, &backend.guardrails) {
+    match import_guardrails(db, backend.guardrail_mode.as_deref(), &backend.guardrails) {
         Ok(()) => result.imported_sections.push("guardrails".to_string()),
         Err(e) => result.errors.push(format!("guardrails: {}", e)),
     }
@@ -668,10 +668,17 @@ fn import_webhooks(
 
 fn import_guardrails(
     db: &crate::storage::Database,
+    guardrail_mode: Option<&str>,
     guardrails: &[crate::models::export::GuardrailRuleExport],
 ) -> crate::utils::error::AppResult<()> {
     let conn = db.get_connection()?;
     conn.execute("DELETE FROM guardrail_rules", [])?;
+    let mode = crate::services::guardrail::GuardrailMode::parse(guardrail_mode.unwrap_or("strict"))
+        .unwrap_or_default();
+    db.set_setting(
+        "guardrail_mode_v1",
+        &mode.to_string(),
+    )?;
     for rule in guardrails {
         conn.execute(
             "INSERT INTO guardrail_rules

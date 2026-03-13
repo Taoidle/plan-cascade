@@ -21,7 +21,7 @@ import {
   updateBackgroundSessionByTaskId,
 } from './sessionRouting';
 import { inferInjectedSourceKinds } from './contextAssembly';
-import { getActiveKernelChatTranscript } from './kernelTranscript';
+import { getActiveKernelChatTranscriptForPrompt } from './kernelTranscript';
 import { buildActiveChatRuntimeRegistryPatch } from './runtimeRegistryActions';
 import type { ExecutionState, ExecutionStatus, StandaloneTurn, StreamLine } from './types';
 
@@ -176,7 +176,7 @@ export function createStartAction(
     const settingsSnapshot = useSettingsStore.getState();
     const backendSnapshot = String((settingsSnapshot as { backend?: unknown }).backend || '');
     const isClaudeBackend = isClaudeCodeBackend(backendSnapshot);
-    const kernelTranscriptSnapshot = getActiveKernelChatTranscript();
+    const kernelTranscriptSnapshot = getActiveKernelChatTranscriptForPrompt(description);
     const activeKernelRootSessionId = kernelTranscriptSnapshot.rootSessionId;
     const kernelChatLines = kernelTranscriptSnapshot.lines;
     const existingStandaloneTurns = get().standaloneTurns;
@@ -300,7 +300,7 @@ export function createStartAction(
         const claudeContextSources = resolveSessionScopedContext(sessionId, 'claude');
         const assembledPrompt = await buildClaudePromptWithContextEnvelope({
           query: description,
-          lines: getActiveKernelChatTranscript().lines,
+          lines: kernelChatLines,
           projectPath,
           sessionId,
           contextSources: claudeContextSources,

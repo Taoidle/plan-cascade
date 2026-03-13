@@ -5,6 +5,7 @@ const workflowKernelState = vi.hoisted(() => ({
   getCachedModeTranscript: vi.fn(),
   openSession: vi.fn(),
   patchModeTranscript: vi.fn(),
+  session: null as Record<string, unknown> | null,
 }));
 
 vi.mock('../workflowKernel', () => ({
@@ -13,7 +14,11 @@ vi.mock('../workflowKernel', () => ({
   },
 }));
 
-import { buildForkedChatSessionPayload, forkKernelChatSessionAtTurn } from './kernelTranscript';
+import {
+  buildForkedChatSessionPayload,
+  buildOptimisticKernelChatTranscript,
+  forkKernelChatSessionAtTurn,
+} from './kernelTranscript';
 
 function buildTranscript(): StreamLine[] {
   return [
@@ -53,6 +58,15 @@ function buildTranscript(): StreamLine[] {
 describe('kernelTranscript fork helpers', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    workflowKernelState.session = {
+      sessionId: 'root-session-1',
+      modeSnapshots: {
+        chat: {
+          turnCount: 2,
+          lastUserMessage: 'second user',
+        },
+      },
+    };
     workflowKernelState.getCachedModeTranscript.mockReturnValue({
       lines: buildTranscript(),
     });
@@ -79,6 +93,38 @@ describe('kernelTranscript fork helpers', () => {
       ],
       truncatedLines: buildTranscript().slice(0, 2),
     });
+  });
+
+  it('optimistically appends the pending user turn when transcript lags session state', () => {
+    const laggingTranscript = buildTranscript().slice(0, 2);
+
+    const lines = buildOptimisticKernelChatTranscript('root-session-1', laggingTranscript, 'second user');
+
+    expect(lines).toEqual([
+      ...laggingTranscript,
+      expect.objectContaining({
+        type: 'info',
+        content: 'second user',
+        turnBoundary: 'user',
+        turnId: 2,
+      }),
+    ]);
+  });
+
+  it('does not append an optimistic user turn once transcript turn count is already current', () => {
+    workflowKernelState.session = {
+      sessionId: 'root-session-1',
+      modeSnapshots: {
+        chat: {
+          turnCount: 2,
+          lastUserMessage: 'second user',
+        },
+      },
+    };
+
+    const lines = buildOptimisticKernelChatTranscript('root-session-1', buildTranscript(), 'second user');
+
+    expect(lines).toEqual(buildTranscript());
   });
 
   it('opens and seeds a new workflow session when forking a chat turn', async () => {

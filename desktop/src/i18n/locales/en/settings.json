@@ -980,7 +980,8 @@
     "actions": {
       "warn": "Warn",
       "block": "Block",
-      "redact": "Redact"
+      "redact": "Redact",
+      "mixed": "Mixed"
     },
     "scope": {
       "input": "Input",
@@ -992,7 +993,10 @@
     "runtime": {
       "native": {
         "title": "Native execution",
-        "managed": "Protected by production guardrails.",
+        "off": "Guardrails are configured but currently turned off.",
+        "monitor_only": "Guardrails are observing traffic but not enforcing decisions.",
+        "balanced": "Protected by balanced production guardrails.",
+        "strict": "Protected by strict production guardrails.",
         "unmanaged": "Guardrails are not fully initialized."
       },
       "claudeCode": {
@@ -1000,15 +1004,52 @@
         "managed": "Claude Code is covered by the same guardrails.",
         "unmanaged": "Claude Code is currently unmanaged and excluded from the production guardrail guarantee."
       },
-      "strictMode": "Strict mode: {{status}}",
+      "currentMode": "Current mode: {{mode}}",
       "enabled": "enabled",
       "disabled": "disabled",
       "networkHint": "Network allowlists and approval prompts still live in the Network settings section. Content guardrails and tool execution policy are complementary, not interchangeable."
     },
+    "mode": {
+      "title": "Protection Mode",
+      "description": "Choose how aggressively native guardrails should enforce decisions across input, tool execution, outputs, and artifacts.",
+      "active": "Active",
+      "options": {
+        "off": {
+          "label": "Off",
+          "description": "Disable guardrail enforcement and bypass content decisions."
+        },
+        "monitor_only": {
+          "label": "Monitor only",
+          "description": "Detect and audit issues without blocking or redacting content."
+        },
+        "balanced": {
+          "label": "Balanced",
+          "description": "Use the default production policy: block clear violations, redact secrets, and warn on code risks."
+        },
+        "strict": {
+          "label": "Strict",
+          "description": "Apply the most conservative native policy, including blocking high-risk code issues in tool results and artifacts."
+        }
+      }
+    },
 
     "builtin": {
       "title": "Built-in Guardrails",
-      "empty": "No built-in guardrails available."
+      "empty": "No built-in guardrails available.",
+      "items": {
+        "sensitive_data": {
+          "name": "Sensitive Data",
+          "description": "Detects API keys, passwords, private keys, connection strings, and other secrets. It redacts content on input, output, tool results, and artifacts, and blocks secrets from being passed into tool arguments."
+        },
+        "code_security": {
+          "name": "Code Security",
+          "description": "Scans generated code and tool output for risky patterns such as SQL injection, command injection, eval/exec usage, and Rust unsafe blocks. It currently warns by default."
+        },
+        "schema_validation": {
+          "name": "Schema Validation",
+          "description": "Validates structured JSON outputs against registered schemas before they are accepted. Invalid PRD or analysis-style artifacts are blocked."
+        }
+      }
     },
 
     "custom": {

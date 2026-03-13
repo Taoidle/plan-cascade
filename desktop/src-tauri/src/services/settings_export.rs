@@ -18,6 +18,7 @@ use crate::models::export::{
     BackendSettingsExport, GuardrailRuleExport, LspPreferencesExport, ProxyExport, RemoteExport,
     SettingsImportResult,
 };
+use crate::services::guardrail::GuardrailMode;
 use crate::models::settings::AppConfig;
 use crate::storage::{ConfigService, Database};
 use crate::utils::error::{AppError, AppResult};
@@ -160,7 +161,10 @@ pub fn collect_backend_settings(
         .filter_map(|ch| serde_json::to_value(ch).ok())
         .collect();
 
-    // 5. Guardrail rules (direct SQL)
+    // 5. Guardrail mode + rules
+    let guardrail_mode = db
+        .get_setting("guardrail_mode_v1")?
+        .or_else(|| Some("strict".to_string()));
     let guardrails = collect_guardrail_rules(db)?;
 
     // 6. Remote settings
@@ -199,6 +203,7 @@ pub fn collect_backend_settings(
         lsp,
         proxy,
         webhooks,
+        guardrail_mode,
         guardrails,
         remote,
         a2a_agents,
@@ -399,6 +404,15 @@ pub fn import_backend_settings(
     import_section(&mut result, "guardrails", || {
         let conn = db.get_connection()?;
         conn.execute("DELETE FROM guardrail_rules", [])?;
+        let mode = GuardrailMode::parse(
+            backend
+            .guardrail_mode
+            .clone()
+            .unwrap_or_else(|| "strict".to_string())
+            .as_str(),
+        )
+        .unwrap_or_default();
+        db.set_setting("guardrail_mode_v1", &mode.to_string())?;
         for rule in &backend.guardrails {
             conn.execute(
                 "INSERT INTO guardrail_rules
@@ -603,6 +617,7 @@ mod tests {
         assert!(result.is_ok());
         let export = result.unwrap();
         assert!(export.webhooks.is_empty());
+        assert_eq!(export.guardrail_mode.as_deref(), Some("strict"));
         assert!(export.guardrails.is_empty());
         assert!(export.a2a_agents.is_empty());
         assert!(export.mcp_servers.is_empty());

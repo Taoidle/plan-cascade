@@ -980,7 +980,8 @@
     "actions": {
       "warn": "警告",
       "block": "阻止",
-      "redact": "脱敏"
+      "redact": "脱敏",
+      "mixed": "混合"
     },
     "scope": {
       "input": "输入",
@@ -992,7 +993,10 @@
     "runtime": {
       "native": {
         "title": "原生执行链",
-        "managed": "已受生产级护栏保护。",
+        "off": "护栏已配置，但当前处于关闭状态。",
+        "monitor_only": "护栏正在监控流量，但不会执行阻断或脱敏。",
+        "balanced": "当前受平衡模式的生产级护栏保护。",
+        "strict": "当前受严格模式的生产级护栏保护。",
         "unmanaged": "护栏尚未完成初始化。"
       },
       "claudeCode": {
@@ -1000,15 +1004,52 @@
         "managed": "Claude Code 已纳入同一套护栏保护。",
         "unmanaged": "Claude Code 当前未被纳管，不在生产级护栏保证范围内。"
       },
-      "strictMode": "严格模式：{{status}}",
+      "currentMode": "当前模式：{{mode}}",
       "enabled": "已启用",
       "disabled": "已关闭",
       "networkHint": "网络白名单和审批提示仍在“网络设置”中维护。内容护栏与工具执行策略是互补关系，不能互相替代。"
     },
+    "mode": {
+      "title": "防护模式",
+      "description": "选择原生护栏在输入、工具执行、输出和产物链路上的执行强度。",
+      "active": "当前",
+      "options": {
+        "off": {
+          "label": "关闭",
+          "description": "关闭护栏执行，旁路内容决策。"
+        },
+        "monitor_only": {
+          "label": "仅监控",
+          "description": "继续检测和审计，但不会阻断或脱敏。"
+        },
+        "balanced": {
+          "label": "平衡",
+          "description": "采用默认生产策略：明确违规时阻断，敏感信息脱敏，代码风险以告警为主。"
+        },
+        "strict": {
+          "label": "严格",
+          "description": "采用最保守的原生策略，对工具结果和产物中的高风险代码问题也会直接阻断。"
+        }
+      }
+    },
 
     "builtin": {
       "title": "内置护栏",
-      "empty": "没有可用的内置护栏。"
+      "empty": "没有可用的内置护栏。",
+      "items": {
+        "sensitive_data": {
+          "name": "敏感数据",
+          "description": "检测 API Key、密码、私钥、连接串等敏感信息。在输入、输出、工具结果和产物上会进行脱敏；如果敏感信息出现在工具参数中，会直接阻断。"
+        },
+        "code_security": {
+          "name": "代码安全",
+          "description": "扫描生成代码和工具输出中的高风险模式，例如 SQL 注入、命令注入、eval/exec 调用以及 Rust unsafe 代码块。当前默认以警告方式提示。"
+        },
+        "schema_validation": {
+          "name": "结构校验",
+          "description": "对结构化 JSON 输出执行已注册 schema 校验，通过后才会接受结果。无效的 PRD 或分析类产物会被直接阻断。"
+        }
+      }
     },
 
     "custom": {

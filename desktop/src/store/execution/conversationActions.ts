@@ -13,7 +13,12 @@ import {
   resolveProviderBaseUrl,
   resolveStandaloneProvider,
 } from './providerUtils';
-import { buildReplacementUserLine, getActiveKernelChatTranscript, patchKernelChatTranscript } from './kernelTranscript';
+import {
+  buildReplacementUserLine,
+  getActiveKernelChatTranscript,
+  getActiveKernelChatTranscriptForPrompt,
+  patchKernelChatTranscript,
+} from './kernelTranscript';
 import { ensurePromptContent, extractPluginInvocationsFromPrompt } from './messageDispatch';
 import { buildActiveChatRuntimeRegistryPatch } from './runtimeRegistryActions';
 import { createStandaloneExecutionId, createStandaloneSessionId } from './sessionLifecycle';
@@ -151,7 +156,7 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
 
   return {
     sendFollowUp: async (prompt: string) => {
-      const kernelTranscript = getActiveKernelChatTranscript();
+      const kernelTranscript = getActiveKernelChatTranscriptForPrompt(prompt);
       const kernelSessionId = kernelTranscript.rootSessionId;
       const sessionId = get().taskId;
       if (!sessionId || !get().isChatSession) {
@@ -188,7 +193,7 @@ export function createConversationActions(deps: ConversationActionDeps): Convers
       const followUpContextSources = resolveSessionScopedContext(sessionId, 'claude');
       const assembledPrompt = await buildClaudePromptWithContextEnvelope({
         query: prompt,
-        lines: getActiveKernelChatTranscript().lines,
+        lines: kernelTranscript.lines,
         projectPath: useSettingsStore.getState().workspacePath || '.',
         sessionId,
         contextSources: followUpContextSources,

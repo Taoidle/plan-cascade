@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type { CommandResponse } from './tauri';
 
 export type GuardrailScope = 'input' | 'tool_call' | 'tool_result' | 'assistant_output' | 'artifact';
+export type GuardrailMode = 'off' | 'monitor_only' | 'balanced' | 'strict';
 
 export interface GuardrailInfo {
   id: string;
@@ -17,6 +18,7 @@ export interface GuardrailInfo {
 }
 
 export interface GuardrailRuntimeStatus {
+  mode: GuardrailMode;
   strict_mode: boolean;
   native_runtime_managed: boolean;
   claude_code_managed: boolean;
@@ -71,6 +73,14 @@ export async function listGuardrails(): Promise<CommandResponse<GuardrailOvervie
 export async function toggleGuardrailEnabled(id: string, enabled: boolean): Promise<CommandResponse<GuardrailInfo>> {
   try {
     return await invoke<CommandResponse<GuardrailInfo>>('toggle_guardrail', { id, enabled });
+  } catch (error) {
+    return toErrorResponse(error);
+  }
+}
+
+export async function setGuardrailMode(mode: GuardrailMode): Promise<CommandResponse<GuardrailRuntimeStatus>> {
+  try {
+    return await invoke<CommandResponse<GuardrailRuntimeStatus>>('set_guardrail_mode', { mode });
   } catch (error) {
     return toErrorResponse(error);
   }

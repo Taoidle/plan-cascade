@@ -1,4 +1,9 @@
-import { deriveConversationTurns, getNextTurnId, normalizeTurnBoundaries } from '../../lib/conversationUtils';
+import {
+  countUserTurnBoundaries,
+  deriveConversationTurns,
+  getNextTurnId,
+  normalizeTurnBoundaries,
+} from '../../lib/conversationUtils';
 import type { WorkflowSession } from '../../types/workflowKernel';
 import { useWorkflowKernelStore } from '../workflowKernel';
 import type { NonCardStreamLineType, StreamLine } from './types';
@@ -40,6 +45,52 @@ export function getActiveKernelChatTranscript(): { rootSessionId: string | null;
   return {
     rootSessionId,
     lines: getKernelChatTranscript(rootSessionId),
+  };
+}
+
+export function buildOptimisticKernelChatTranscript(
+  rootSessionId: string | null,
+  transcriptLines: StreamLine[],
+  pendingUserContent?: string | null,
+): StreamLine[] {
+  const normalizedPendingUserContent = pendingUserContent?.trim() ?? '';
+  if (!rootSessionId || !normalizedPendingUserContent) {
+    return transcriptLines;
+  }
+
+  const kernel = useWorkflowKernelStore.getState();
+  const session = kernel.session?.sessionId === rootSessionId ? kernel.session : null;
+  const chatSnapshot = session?.modeSnapshots.chat ?? null;
+  if (!chatSnapshot) {
+    return transcriptLines;
+  }
+
+  const normalizedLines = normalizeTurnBoundaries(cloneStreamLines(transcriptLines));
+  const currentTurnCount = countUserTurnBoundaries(normalizedLines);
+  const expectedTurnCount = chatSnapshot.turnCount;
+  const hasTurnGap = Number.isFinite(expectedTurnCount) && expectedTurnCount > currentTurnCount;
+  const expectedLastUserMessage = chatSnapshot.lastUserMessage?.trim() ?? '';
+
+  if (!hasTurnGap) {
+    return transcriptLines;
+  }
+
+  if (expectedLastUserMessage && expectedLastUserMessage !== normalizedPendingUserContent) {
+    return transcriptLines;
+  }
+
+  const appendedUserLine = buildAppendedUserLine(normalizedPendingUserContent, normalizedLines);
+  return [...normalizedLines, appendedUserLine];
+}
+
+export function getActiveKernelChatTranscriptForPrompt(pendingUserContent?: string | null): {
+  rootSessionId: string | null;
+  lines: StreamLine[];
+} {
+  const transcript = getActiveKernelChatTranscript();
+  return {
+    rootSessionId: transcript.rootSessionId,
+    lines: buildOptimisticKernelChatTranscript(transcript.rootSessionId, transcript.lines, pendingUserContent),
   };
 }
 

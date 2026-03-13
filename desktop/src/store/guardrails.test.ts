@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../lib/guardrailsApi', () => ({
   listGuardrails: vi.fn(),
+  setGuardrailMode: vi.fn(),
   toggleGuardrailEnabled: vi.fn(),
   createCustomGuardrail: vi.fn(),
   updateGuardrail: vi.fn(),
@@ -59,6 +60,7 @@ describe('GuardrailsStore', () => {
       data: {
         guardrails: [builtinRule],
         runtime: {
+          mode: 'strict',
           strict_mode: true,
           native_runtime_managed: true,
           claude_code_managed: false,
@@ -71,6 +73,24 @@ describe('GuardrailsStore', () => {
 
     expect(useGuardrailsStore.getState().guardrails).toEqual([builtinRule]);
     expect(useGuardrailsStore.getState().runtime?.native_runtime_managed).toBe(true);
+  });
+
+  it('updates guardrail mode', async () => {
+    vi.mocked(api.setGuardrailMode).mockResolvedValue({
+      success: true,
+      data: {
+        mode: 'monitor_only',
+        strict_mode: false,
+        native_runtime_managed: true,
+        claude_code_managed: false,
+      },
+      error: null,
+    });
+
+    const result = await useGuardrailsStore.getState().setMode('monitor_only');
+
+    expect(result).toBe(true);
+    expect(useGuardrailsStore.getState().runtime?.mode).toBe('monitor_only');
   });
 
   it('toggles a guardrail by id', async () => {

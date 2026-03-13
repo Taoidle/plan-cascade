@@ -295,6 +295,7 @@ pub use commands::{
     send_message,
     set_embedding_api_key,
     set_embedding_config,
+    set_guardrail_mode,
     set_knowledge_feature_flags,
     set_lsp_preferences,
     set_working_directory,
