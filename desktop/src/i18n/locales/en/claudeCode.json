@@ -35,6 +35,15 @@
     "clearChat": "Clear Chat",
     "cancel": "Cancel"
   },
+  "guardrailBanner": "Claude Code mode is currently excluded from the native production guardrail guarantee. Use the native chat/task/plan flows when you need enforced guardrails.",
+  "conversationPanel": {
+    "title": "Conversations",
+    "emptyTitle": "No saved conversations",
+    "emptyDescription": "Conversations are auto-saved when cleared",
+    "messageCount": "{{count}} message",
+    "messageCount_plural": "{{count}} messages",
+    "delete": "Delete"
+  },
 
   "shortcuts": {
     "title": "Keyboard Shortcuts",

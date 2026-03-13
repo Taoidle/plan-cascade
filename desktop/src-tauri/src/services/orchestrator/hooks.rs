@@ -55,6 +55,10 @@ pub struct HookContext {
     pub provider_name: String,
     /// LLM model name (e.g., "claude-3-5-sonnet-20241022")
     pub model_name: String,
+    /// Execution identifier if the parent command provided one.
+    pub execution_id: Option<String>,
+    /// Structured task/content type if known (e.g. "prd").
+    pub task_type: Option<String>,
 }
 
 /// Summary of a completed session, provided to on_session_end hooks.
@@ -97,11 +101,24 @@ impl Default for BeforeToolResult {
     }
 }
 
+/// Result of an on_user_message hook.
+#[derive(Debug, Clone, Default)]
+pub struct UserMessageHookResult {
+    /// Replacement message to pass to downstream hooks/providers.
+    pub modified_message: Option<String>,
+    /// If set, stop the current turn before the LLM call.
+    pub stop_reason: Option<String>,
+}
+
 /// Result of an on_after_tool hook: can optionally inject context into the conversation.
 #[derive(Debug, Clone, Default)]
 pub struct AfterToolResult {
     /// If present, this context is appended to the tool result message so the LLM sees it.
     pub injected_context: Option<String>,
+    /// Replacement output to persist/show instead of the original tool result text.
+    pub replacement_output: Option<String>,
+    /// If set, treat the tool output as blocked and convert it into an error.
+    pub block_reason: Option<String>,
 }
 
 impl AfterToolResult {
@@ -109,8 +126,19 @@ impl AfterToolResult {
     pub fn with_context(context: String) -> Self {
         Self {
             injected_context: Some(context),
+            replacement_output: None,
+            block_reason: None,
         }
     }
+}
+
+/// Result of an on_after_llm hook.
+#[derive(Debug, Clone, Default)]
+pub struct AfterLlmResult {
+    /// Replacement assistant text.
+    pub replacement_text: Option<String>,
+    /// If set, the current turn should be terminated and surfaced as an error.
+    pub block_reason: Option<String>,
 }
 
 // ============================================================================
@@ -122,13 +150,12 @@ pub type OnSessionStartHook = Box<
     dyn Fn(HookContext) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> + Send + Sync,
 >;
 
-/// Hook fired on user message. Returns Option<modified_message>.
-/// If None, the original message is used unchanged.
+/// Hook fired on user message. Can modify the message or stop the current turn.
 pub type OnUserMessageHook = Box<
     dyn Fn(
             HookContext,
             String,
-        ) -> Pin<Box<dyn Future<Output = Result<Option<String>, String>> + Send>>
+        ) -> Pin<Box<dyn Future<Output = Result<UserMessageHookResult, String>> + Send>>
         + Send
         + Sync,
 >;
@@ -142,7 +169,10 @@ pub type OnBeforeLlmHook = Box<
 
 /// Hook fired after each LLM response. Receives the response text (if any).
 pub type OnAfterLlmHook = Box<
-    dyn Fn(HookContext, Option<String>) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>>
+    dyn Fn(
+            HookContext,
+            Option<String>,
+        ) -> Pin<Box<dyn Future<Output = Result<AfterLlmResult, String>> + Send>>
         + Send
         + Sync,
 >;
@@ -322,25 +352,36 @@ impl AgenticHooks {
 
     /// Fire all on_user_message hooks sequentially.
     ///
-    /// Each hook can optionally modify the message. If a hook returns
-    /// `Ok(Some(modified))`, the modified message is passed to subsequent
-    /// hooks and ultimately used in place of the original.
-    pub async fn fire_on_user_message(&self, ctx: &HookContext, message: String) -> String {
+    /// Each hook can optionally modify the message or stop the current turn.
+    pub async fn fire_on_user_message(
+        &self,
+        ctx: &HookContext,
+        message: String,
+    ) -> UserMessageHookResult {
         let mut current_message = message;
+        let mut aggregate = UserMessageHookResult::default();
         for (i, hook) in self.on_user_message.iter().enumerate() {
             match hook(ctx.clone(), current_message.clone()).await {
-                Ok(Some(modified)) => {
-                    current_message = modified;
-                }
-                Ok(None) => {
-                    // No modification
+                Ok(result) => {
+                    if let Some(reason) = result.stop_reason {
+                        aggregate.stop_reason = Some(reason);
+                        aggregate.modified_message = Some(current_message);
+                        return aggregate;
+                    }
+                    if let Some(modified) = result.modified_message {
+                        current_message = modified.clone();
+                        aggregate.modified_message = Some(modified);
+                    }
                 }
                 Err(e) => {
                     tracing::info!("[hooks] on_user_message hook {} failed: {}", i, e);
                 }
             }
         }
-        current_message
+        if aggregate.modified_message.is_none() {
+            aggregate.modified_message = Some(current_message);
+        }
+        aggregate
     }
 
     /// Fire all on_before_llm hooks sequentially.
@@ -353,12 +394,30 @@ impl AgenticHooks {
     }
 
     /// Fire all on_after_llm hooks sequentially.
-    pub async fn fire_on_after_llm(&self, ctx: &HookContext, response_text: Option<String>) {
+    pub async fn fire_on_after_llm(
+        &self,
+        ctx: &HookContext,
+        response_text: Option<String>,
+    ) -> AfterLlmResult {
+        let mut current_response = response_text;
+        let mut aggregate = AfterLlmResult::default();
         for (i, hook) in self.on_after_llm.iter().enumerate() {
-            if let Err(e) = hook(ctx.clone(), response_text.clone()).await {
-                tracing::info!("[hooks] on_after_llm hook {} failed: {}", i, e);
+            match hook(ctx.clone(), current_response.clone()).await {
+                Ok(result) => {
+                    if let Some(reason) = result.block_reason {
+                        aggregate.block_reason = Some(reason);
+                        aggregate.replacement_text = current_response;
+                        return aggregate;
+                    }
+                    if let Some(replacement) = result.replacement_text {
+                        current_response = Some(replacement.clone());
+                        aggregate.replacement_text = Some(replacement);
+                    }
+                }
+                Err(e) => tracing::info!("[hooks] on_after_llm hook {} failed: {}", i, e),
             }
         }
+        aggregate
     }
 
     /// Fire all on_before_tool hooks sequentially.
@@ -418,18 +477,28 @@ impl AgenticHooks {
         tool_name: &str,
         success: bool,
         output_snippet: Option<String>,
-    ) -> Option<String> {
+    ) -> AfterToolResult {
+        let mut aggregate = AfterToolResult::default();
+        let mut current_output = output_snippet;
         let mut injected_parts: Vec<String> = Vec::new();
         for (i, hook) in self.on_after_tool.iter().enumerate() {
             match hook(
                 ctx.clone(),
                 tool_name.to_string(),
                 success,
-                output_snippet.clone(),
+                current_output.clone(),
             )
             .await
             {
                 Ok(result) => {
+                    if let Some(reason) = result.block_reason {
+                        aggregate.block_reason = Some(reason);
+                        return aggregate;
+                    }
+                    if let Some(replacement) = result.replacement_output {
+                        current_output = Some(replacement.clone());
+                        aggregate.replacement_output = Some(replacement);
+                    }
                     if let Some(ctx_text) = result.injected_context {
                         if !ctx_text.trim().is_empty() {
                             injected_parts.push(ctx_text);
@@ -441,11 +510,10 @@ impl AgenticHooks {
                 }
             }
         }
-        if injected_parts.is_empty() {
-            None
-        } else {
-            Some(injected_parts.join("\n"))
+        if !injected_parts.is_empty() {
+            aggregate.injected_context = Some(injected_parts.join("\n"));
         }
+        aggregate
     }
 
     /// Fire all on_session_end hooks sequentially.
@@ -746,7 +814,7 @@ pub fn register_skill_hooks(
                 let mut w = store.write().await;
                 *w = matches;
             }
-            Ok(None) // do not modify the message
+            Ok(UserMessageHookResult::default())
         })
     }));
 
@@ -1178,11 +1246,11 @@ pub fn register_memory_hooks_with_config(
             if !injection_enabled {
                 let mut w = out.write().await;
                 w.clear();
-                return Ok(None);
+                return Ok(UserMessageHookResult::default());
             }
             let query = message.trim().to_string();
             if query.is_empty() {
-                return Ok(None);
+                return Ok(UserMessageHookResult::default());
             }
 
             let project_path = ctx.project_path.to_string_lossy().to_string();
@@ -1206,7 +1274,7 @@ pub fn register_memory_hooks_with_config(
                 ctx.session_id,
                 count
             );
-            Ok(None)
+            Ok(UserMessageHookResult::default())
         })
     }));
 
@@ -1786,38 +1854,56 @@ mod tests {
     #[tokio::test]
     async fn test_fire_on_user_message_no_modification() {
         let mut hooks = AgenticHooks::new();
-        hooks.register_on_user_message(Box::new(|_ctx, _msg| Box::pin(async move { Ok(None) })));
+        hooks.register_on_user_message(Box::new(|_ctx, _msg| {
+            Box::pin(async move { Ok(UserMessageHookResult::default()) })
+        }));
 
         let ctx = test_context();
         let result = hooks.fire_on_user_message(&ctx, "hello".to_string()).await;
-        assert_eq!(result, "hello");
+        assert_eq!(result.modified_message.as_deref(), Some("hello"));
+        assert!(result.stop_reason.is_none());
     }
 
     #[tokio::test]
     async fn test_fire_on_user_message_with_modification() {
         let mut hooks = AgenticHooks::new();
         hooks.register_on_user_message(Box::new(|_ctx, msg| {
-            Box::pin(async move { Ok(Some(format!("[enhanced] {}", msg))) })
+            Box::pin(async move {
+                Ok(UserMessageHookResult {
+                    modified_message: Some(format!("[enhanced] {}", msg)),
+                    stop_reason: None,
+                })
+            })
         }));
 
         let ctx = test_context();
         let result = hooks.fire_on_user_message(&ctx, "hello".to_string()).await;
-        assert_eq!(result, "[enhanced] hello");
+        assert_eq!(result.modified_message.as_deref(), Some("[enhanced] hello"));
     }
 
     #[tokio::test]
     async fn test_fire_on_user_message_chained_modifications() {
         let mut hooks = AgenticHooks::new();
         hooks.register_on_user_message(Box::new(|_ctx, msg| {
-            Box::pin(async move { Ok(Some(format!("[hook1] {}", msg))) })
+            Box::pin(async move {
+                Ok(UserMessageHookResult {
+                    modified_message: Some(format!("[hook1] {}", msg)),
+                    stop_reason: None,
+                })
+            })
         }));
         hooks.register_on_user_message(Box::new(|_ctx, msg| {
-            Box::pin(async move { Ok(Some(format!("[hook2] {}", msg))) })
+            Box::pin(async move {
+                Ok(UserMessageHookResult {
+                    modified_message: Some(format!("[hook2] {}", msg)),
+                    stop_reason: None,
+                })
+            })
         }));
 
         let ctx = test_context();
         let result = hooks.fire_on_user_message(&ctx, "hello".to_string()).await;
-        assert_eq!(result, "[hook2] [hook1] hello");
+        assert_eq!(result.modified_message.as_deref(), Some("[hook2] [hook1] hello"));
     }
 
     #[tokio::test]

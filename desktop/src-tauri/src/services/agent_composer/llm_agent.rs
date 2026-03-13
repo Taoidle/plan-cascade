@@ -196,7 +196,8 @@ impl Agent for LlmAgent {
         // from the context would be used directly, but since the existing
         // OrchestratorService constructor always creates its own provider,
         // we pass the config and let it handle construction.
-        let orchestrator = OrchestratorService::new(orchestrator_config);
+        let orchestrator = OrchestratorService::new(orchestrator_config)
+            .with_guardrail_hooks(crate::services::guardrail::shared_guardrail_registry());
 
         // Create the mpsc channel pair
         let (tx, rx) = mpsc::channel::<UnifiedStreamEvent>(256);

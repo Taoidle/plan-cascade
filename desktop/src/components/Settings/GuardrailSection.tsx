@@ -1,288 +1,318 @@
-/**
- * GuardrailSection Component
- *
- * Settings panel for configuring guardrail security rules:
- * - Toggle built-in guardrails (SensitiveData, CodeSecurity)
- * - Add/remove custom rules
- * - View trigger log history
- */
-
 import { clsx } from 'clsx';
-import { useEffect, useState, useCallback } from 'react';
+import * as Switch from '@radix-ui/react-switch';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import type { CustomGuardrailInput, GuardrailInfo, GuardrailScope } from '../../lib/guardrailsApi';
 import { useGuardrailsStore } from '../../store/guardrails';
 
-// ---------------------------------------------------------------------------
-// Sub-components
-// ---------------------------------------------------------------------------
+const SCOPE_OPTIONS: GuardrailScope[] = ['input', 'tool_call', 'tool_result', 'assistant_output', 'artifact'];
 
-/** Toggle switch for a single guardrail. */
-function GuardrailToggle({
-  name,
-  description,
-  enabled,
-  guardrailType,
+function getScopeLabel(t: (key: string, options?: Record<string, unknown>) => string, scope: GuardrailScope) {
+  return t(`security.scope.${scope}`);
+}
+
+function getActionLabel(t: (key: string, options?: Record<string, unknown>) => string, action: string) {
+  return t(`security.actions.${action}`, { defaultValue: action });
+}
+
+const PANEL_CLASS = 'rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800';
+const PANEL_MUTED_CLASS = 'rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/50';
+const INPUT_CLASS =
+  'w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-primary-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white';
+const BUTTON_SECONDARY_CLASS =
+  'rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700';
+const BUTTON_PRIMARY_CLASS =
+  'rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50';
+
+function ScopePills({ scope }: { scope: GuardrailScope[] }) {
+  const { t } = useTranslation('settings');
+
+  return (
+    <div className="flex flex-wrap gap-1 mt-2">
+      {scope.map((item) => (
+        <span
+          key={item}
+          className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-700 dark:bg-gray-700 dark:text-gray-200"
+        >
+          {getScopeLabel(t, item)}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function GuardrailCard({
+  guardrail,
   onToggle,
-  onRemove,
+  onEdit,
+  onDelete,
 }: {
-  name: string;
-  description: string;
-  enabled: boolean;
-  guardrailType: string;
-  onToggle: (name: string, enabled: boolean) => void;
-  onRemove?: (name: string) => void;
+  guardrail: GuardrailInfo;
+  onToggle: (id: string, enabled: boolean) => void;
+  onEdit: (guardrail: GuardrailInfo) => void;
+  onDelete: (id: string) => void;
 }) {
   const { t } = useTranslation('settings');
+  const isCustom = guardrail.guardrail_type === 'custom';
+
   return (
-    <div
-      className={clsx(
-        'flex items-center justify-between py-3 px-4',
-        'border border-gray-200 dark:border-gray-700 rounded-lg',
-        'bg-white dark:bg-gray-800',
-      )}
-    >
-      <div className="flex-1 min-w-0 mr-4">
-        <div className="flex items-center gap-2">
-          <span className="font-medium text-gray-900 dark:text-white text-sm">{name}</span>
-          <span
-            className={clsx(
-              'text-xs px-1.5 py-0.5 rounded',
-              guardrailType === 'builtin'
-                ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300'
-                : 'bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300',
-            )}
-          >
-            {guardrailType}
-          </span>
-        </div>
-        {description && <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">{description}</p>}
-      </div>
-      <div className="flex items-center gap-2 shrink-0">
-        {guardrailType === 'custom' && onRemove && (
-          <button
-            onClick={() => onRemove(name)}
-            className={clsx(
-              'p-1 rounded text-gray-400 hover:text-red-500',
-              'dark:text-gray-500 dark:hover:text-red-400',
-              'focus:outline-none',
-            )}
-            title={t('security.removeRule')}
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-              />
-            </svg>
-          </button>
-        )}
-        <button
-          role="switch"
-          aria-checked={enabled}
-          onClick={() => onToggle(name, !enabled)}
-          className={clsx(
-            'relative w-10 h-5 rounded-full transition-colors',
-            'focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-            enabled ? 'bg-primary-600' : 'bg-gray-300 dark:bg-gray-600',
+    <div className={clsx(PANEL_CLASS, 'p-4')}>
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <h5 className="truncate text-sm font-semibold text-gray-900 dark:text-white">{guardrail.name}</h5>
+            <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-700 dark:bg-gray-700 dark:text-gray-200">
+              {t(`security.types.${guardrail.guardrail_type}`)}
+            </span>
+            <span
+              className={clsx(
+                'rounded-full px-2 py-0.5 text-[11px] font-medium',
+                guardrail.action === 'block'
+                  ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                  : guardrail.action === 'redact'
+                    ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+                    : 'bg-primary-50 text-primary-700 dark:bg-primary-950/20 dark:text-primary-300',
+              )}
+            >
+              {getActionLabel(t, guardrail.action)}
+            </span>
+          </div>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{guardrail.description}</p>
+          <ScopePills scope={guardrail.scope} />
+          {guardrail.pattern && (
+            <pre className="mt-3 overflow-x-auto rounded-lg bg-gray-950 p-3 text-xs text-gray-100">
+              {guardrail.pattern}
+            </pre>
           )}
-        >
-          <span
+        </div>
+
+        <div className="flex shrink-0 items-center gap-2">
+          {isCustom && (
+            <button type="button" onClick={() => onEdit(guardrail)} className={BUTTON_SECONDARY_CLASS}>
+              {t('security.custom.edit')}
+            </button>
+          )}
+          {isCustom && (
+            <button type="button" onClick={() => onDelete(guardrail.id)} className={BUTTON_SECONDARY_CLASS}>
+              {t('security.custom.delete')}
+            </button>
+          )}
+          <Switch.Root
+            checked={guardrail.enabled}
+            onCheckedChange={(checked) => onToggle(guardrail.id, checked)}
             className={clsx(
-              'absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform',
-              enabled && 'translate-x-5',
+              'relative h-6 w-10 shrink-0 rounded-full bg-gray-200 transition-colors dark:bg-gray-700',
+              'data-[state=checked]:bg-primary-600',
             )}
-          />
-        </button>
+          >
+            <Switch.Thumb
+              className={clsx(
+                'block h-5 w-5 rounded-full bg-white shadow transition-transform',
+                'data-[state=checked]:translate-x-[18px]',
+                'data-[state=unchecked]:translate-x-[2px]',
+              )}
+            />
+          </Switch.Root>
+        </div>
       </div>
     </div>
   );
 }
 
-/** Form for adding a new custom rule. */
-function AddCustomRuleForm({ onAdd }: { onAdd: (name: string, pattern: string, action: string) => Promise<boolean> }) {
+function RuleEditor({
+  editing,
+  isMutating,
+  onSubmit,
+  onCancel,
+}: {
+  editing: GuardrailInfo | null;
+  isMutating: boolean;
+  onSubmit: (rule: CustomGuardrailInput) => Promise<boolean>;
+  onCancel: () => void;
+}) {
   const { t } = useTranslation('settings');
-  const [name, setName] = useState('');
-  const [pattern, setPattern] = useState('');
-  const [action, setAction] = useState('warn');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
+  const initialScope = editing?.scope?.length ? editing.scope : ['input', 'assistant_output', 'tool_result'];
+  const [name, setName] = useState(editing?.name ?? '');
+  const [pattern, setPattern] = useState(editing?.pattern ?? '');
+  const [action, setAction] = useState(editing?.action ?? 'warn');
+  const [scope, setScope] = useState<GuardrailScope[]>(initialScope as GuardrailScope[]);
+  const [description, setDescription] = useState(editing?.description ?? '');
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!name.trim() || !pattern.trim()) {
-      setFormError(t('security.custom.nameRequired'));
-      return;
-    }
-    setIsSubmitting(true);
-    setFormError(null);
-    const success = await onAdd(name.trim(), pattern.trim(), action);
-    setIsSubmitting(false);
-    if (success) {
+  useEffect(() => {
+    setName(editing?.name ?? '');
+    setPattern(editing?.pattern ?? '');
+    setAction(editing?.action ?? 'warn');
+    setScope(
+      (editing?.scope?.length ? editing.scope : ['input', 'assistant_output', 'tool_result']) as GuardrailScope[],
+    );
+    setDescription(editing?.description ?? '');
+  }, [editing]);
+
+  const toggleScope = (value: GuardrailScope) => {
+    setScope((current) => (current.includes(value) ? current.filter((item) => item !== value) : [...current, value]));
+  };
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const success = await onSubmit({
+      id: editing?.id,
+      name: name.trim(),
+      pattern: pattern.trim(),
+      action,
+      enabled: editing?.enabled ?? true,
+      scope,
+      description: description.trim(),
+    });
+    if (success && !editing) {
       setName('');
       setPattern('');
       setAction('warn');
-    } else {
-      setFormError(t('security.custom.addFailed'));
+      setScope(['input', 'assistant_output', 'tool_result']);
+      setDescription('');
     }
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-3">
-      <div className="grid grid-cols-3 gap-3">
-        <div>
-          <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+    <form onSubmit={submit} className={clsx(PANEL_CLASS, 'border-dashed')}>
+      <div className="mb-4 flex items-center justify-between">
+        <h5 className="text-sm font-semibold text-gray-900 dark:text-white">
+          {editing ? t('security.custom.editTitle') : t('security.custom.addTitle')}
+        </h5>
+        {editing && (
+          <button type="button" onClick={onCancel} className={BUTTON_SECONDARY_CLASS}>
+            {t('security.custom.cancel')}
+          </button>
+        )}
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2">
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
             {t('security.custom.ruleName')}
-          </label>
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder={t('security.custom.ruleNamePlaceholder')}
-            className={clsx(
-              'w-full px-3 py-1.5 rounded-lg text-sm',
-              'border border-gray-300 dark:border-gray-600',
-              'bg-white dark:bg-gray-800',
-              'text-gray-900 dark:text-white',
-              'focus:outline-none focus:ring-2 focus:ring-primary-500',
-            )}
-          />
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
-            {t('security.custom.regexPattern')}
-          </label>
-          <input
-            type="text"
-            value={pattern}
-            onChange={(e) => setPattern(e.target.value)}
-            placeholder={t('security.custom.regexPatternPlaceholder')}
-            className={clsx(
-              'w-full px-3 py-1.5 rounded-lg text-sm font-mono',
-              'border border-gray-300 dark:border-gray-600',
-              'bg-white dark:bg-gray-800',
-              'text-gray-900 dark:text-white',
-              'focus:outline-none focus:ring-2 focus:ring-primary-500',
-            )}
-          />
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+          </span>
+          <input value={name} onChange={(event) => setName(event.target.value)} className={INPUT_CLASS} />
+        </label>
+
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
             {t('security.custom.action')}
-          </label>
-          <select
-            value={action}
-            onChange={(e) => setAction(e.target.value)}
-            className={clsx(
-              'w-full px-3 py-1.5 rounded-lg text-sm',
-              'border border-gray-300 dark:border-gray-600',
-              'bg-white dark:bg-gray-800',
-              'text-gray-900 dark:text-white',
-              'focus:outline-none focus:ring-2 focus:ring-primary-500',
-            )}
-          >
-            <option value="warn">{t('security.custom.actionWarn')}</option>
-            <option value="block">{t('security.custom.actionBlock')}</option>
-            <option value="redact">{t('security.custom.actionRedact')}</option>
+          </span>
+          <select value={action} onChange={(event) => setAction(event.target.value)} className={INPUT_CLASS}>
+            <option value="warn">{t('security.actions.warn')}</option>
+            <option value="block">{t('security.actions.block')}</option>
+            <option value="redact">{t('security.actions.redact')}</option>
           </select>
+        </label>
+      </div>
+
+      <label className="mt-3 block">
+        <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+          {t('security.custom.regexPattern')}
+        </span>
+        <input
+          value={pattern}
+          onChange={(event) => setPattern(event.target.value)}
+          className={clsx(INPUT_CLASS, 'font-mono')}
+        />
+      </label>
+
+      <label className="mt-3 block">
+        <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+          {t('security.custom.description')}
+        </span>
+        <input value={description} onChange={(event) => setDescription(event.target.value)} className={INPUT_CLASS} />
+      </label>
+
+      <div className="mt-3">
+        <span className="mb-2 block text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+          {t('security.custom.scope')}
+        </span>
+        <div className="flex flex-wrap gap-2">
+          {SCOPE_OPTIONS.map((option) => {
+            const selected = scope.includes(option);
+            return (
+              <button
+                key={option}
+                type="button"
+                onClick={() => toggleScope(option)}
+                className={clsx(
+                  'rounded-lg border px-3 py-2 text-sm transition-colors',
+                  selected
+                    ? 'border-primary-500 bg-primary-50 text-primary-700 dark:border-primary-500 dark:bg-primary-950/20 dark:text-primary-300'
+                    : 'border-gray-200 bg-gray-50 text-gray-700 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-200',
+                )}
+              >
+                {getScopeLabel(t, option)}
+              </button>
+            );
+          })}
         </div>
       </div>
-      {formError && <p className="text-xs text-red-500">{formError}</p>}
+
       <button
         type="submit"
-        disabled={isSubmitting}
-        className={clsx(
-          'px-4 py-1.5 rounded-lg text-sm font-medium',
-          'bg-primary-600 text-white',
-          'hover:bg-primary-700',
-          'disabled:opacity-50 disabled:cursor-not-allowed',
-          'focus:outline-none focus:ring-2 focus:ring-primary-500',
-        )}
+        disabled={isMutating || !name.trim() || !pattern.trim() || scope.length === 0}
+        className={clsx('mt-4', BUTTON_PRIMARY_CLASS)}
       >
-        {isSubmitting ? t('security.custom.adding') : t('security.custom.addButton')}
+        {isMutating ? t('security.custom.saving') : editing ? t('security.custom.save') : t('security.custom.create')}
       </button>
     </form>
   );
 }
 
-/** Trigger log viewer table. */
-function TriggerLogViewer() {
+function EventsTable() {
   const { t } = useTranslation('settings');
-  const { triggerLog, isLoadingLog, fetchTriggerLog, clearTriggerLog } = useGuardrailsStore();
+  const { events, isLoadingEvents, fetchEvents, clearEvents } = useGuardrailsStore();
 
   useEffect(() => {
-    fetchTriggerLog(50, 0);
-  }, [fetchTriggerLog]);
+    fetchEvents(50, 0);
+  }, [fetchEvents]);
 
-  const resultTypeColor = (type: string) => {
-    switch (type) {
-      case 'block':
-        return 'text-red-600 dark:text-red-400';
-      case 'redact':
-        return 'text-yellow-600 dark:text-yellow-400';
-      case 'warn':
-        return 'text-orange-600 dark:text-orange-400';
-      default:
-        return 'text-gray-600 dark:text-gray-400';
-    }
-  };
-
-  if (isLoadingLog) {
-    return <p className="text-sm text-gray-500">{t('security.triggerLog.loading')}</p>;
+  if (isLoadingEvents) {
+    return <p className="text-sm text-slate-500">{t('security.events.loading')}</p>;
   }
 
-  if (triggerLog.length === 0) {
-    return <p className="text-sm text-gray-500 dark:text-gray-400">{t('security.triggerLog.empty')}</p>;
+  if (!events.length) {
+    return <p className="text-sm text-slate-500 dark:text-slate-400">{t('security.events.empty')}</p>;
   }
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
+    <div className={PANEL_CLASS}>
+      <div className="flex items-center justify-between border-b border-gray-200 px-0 pb-3 dark:border-gray-700">
         <span className="text-xs text-gray-500 dark:text-gray-400">
-          {t('security.triggerLog.eventCount', { count: triggerLog.length })}
+          {t('security.events.recentCount', { count: events.length })}
         </span>
-        <button
-          onClick={() => clearTriggerLog()}
-          className={clsx('text-xs text-red-500 hover:text-red-700', 'dark:text-red-400 dark:hover:text-red-300')}
-        >
-          {t('security.triggerLog.clearLog')}
+        <button type="button" onClick={() => clearEvents()} className={BUTTON_SECONDARY_CLASS}>
+          {t('security.events.clear')}
         </button>
       </div>
-      <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 dark:bg-gray-800">
+      <div className="overflow-x-auto pt-3">
+        <table className="min-w-full text-sm">
+          <thead className="bg-gray-50 text-left text-xs text-gray-500 dark:bg-gray-900 dark:text-gray-400">
             <tr>
-              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">
-                {t('security.triggerLog.colTime')}
-              </th>
-              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">
-                {t('security.triggerLog.colGuardrail')}
-              </th>
-              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">
-                {t('security.triggerLog.colDirection')}
-              </th>
-              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">
-                {t('security.triggerLog.colResult')}
-              </th>
-              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400">
-                {t('security.triggerLog.colContent')}
-              </th>
+              <th className="px-4 py-2">{t('security.events.columns.time')}</th>
+              <th className="px-4 py-2">{t('security.events.columns.rule')}</th>
+              <th className="px-4 py-2">{t('security.events.columns.surface')}</th>
+              <th className="px-4 py-2">{t('security.events.columns.decision')}</th>
+              <th className="px-4 py-2">{t('security.events.columns.preview')}</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-            {triggerLog.map((entry) => (
-              <tr key={entry.id} className="bg-white dark:bg-gray-900">
-                <td className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
-                  {new Date(entry.timestamp).toLocaleString()}
+          <tbody>
+            {events.map((event) => (
+              <tr key={event.id} className="border-t border-gray-100 dark:border-gray-700">
+                <td className="px-4 py-3 text-xs text-gray-500 dark:text-gray-400">
+                  {new Date(event.timestamp).toLocaleString()}
                 </td>
-                <td className="px-3 py-2 text-xs font-medium text-gray-900 dark:text-white">{entry.guardrail_name}</td>
-                <td className="px-3 py-2 text-xs text-gray-600 dark:text-gray-300">{entry.direction}</td>
-                <td className={clsx('px-3 py-2 text-xs font-medium', resultTypeColor(entry.result_type))}>
-                  {entry.result_type}
+                <td className="px-4 py-3 text-sm text-gray-900 dark:text-white">{event.rule_name}</td>
+                <td className="px-4 py-3 text-xs text-gray-600 dark:text-gray-300">
+                  {t(`security.scope.${event.surface}`, { defaultValue: event.surface })}
                 </td>
-                <td className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400 max-w-[200px] truncate">
-                  {entry.content_snippet}
+                <td className="px-4 py-3 text-xs font-medium uppercase tracking-wide text-gray-700 dark:text-gray-200">
+                  {getActionLabel(t, event.decision)}
+                </td>
+                <td className="px-4 py-3 text-xs text-gray-600 dark:text-gray-300">
+                  <div>{event.safe_preview || t('security.events.noPreview')}</div>
+                  <div className="mt-1 font-mono text-[10px] text-gray-400">{event.content_hash.slice(0, 16)}...</div>
                 </td>
               </tr>
             ))}
@@ -293,123 +323,141 @@ function TriggerLogViewer() {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Main Component
-// ---------------------------------------------------------------------------
-
 export function GuardrailSection() {
   const { t } = useTranslation('settings');
   const {
     guardrails,
+    runtime,
     isLoading,
+    isMutating,
     error,
     fetchGuardrails,
     toggleGuardrail,
-    addCustomRule,
-    removeCustomRule,
+    createRule,
+    updateRule,
+    deleteRule,
     clearError,
   } = useGuardrailsStore();
+  const [editing, setEditing] = useState<GuardrailInfo | null>(null);
 
   useEffect(() => {
     fetchGuardrails();
   }, [fetchGuardrails]);
 
-  const handleToggle = useCallback(
-    (name: string, enabled: boolean) => {
-      toggleGuardrail(name, enabled);
-    },
-    [toggleGuardrail],
+  const builtinGuardrails = useMemo(
+    () => guardrails.filter((guardrail) => guardrail.guardrail_type === 'builtin'),
+    [guardrails],
+  );
+  const customGuardrails = useMemo(
+    () => guardrails.filter((guardrail) => guardrail.guardrail_type === 'custom'),
+    [guardrails],
   );
 
-  const handleRemove = useCallback(
-    (name: string) => {
-      removeCustomRule(name);
-    },
-    [removeCustomRule],
-  );
-
-  const handleAddRule = useCallback(
-    async (name: string, pattern: string, action: string) => {
-      return await addCustomRule(name, pattern, action);
-    },
-    [addCustomRule],
-  );
-
-  const builtinGuardrails = guardrails.filter((g) => g.guardrail_type === 'builtin');
-  const customGuardrails = guardrails.filter((g) => g.guardrail_type === 'custom');
+  const submitRule = async (rule: CustomGuardrailInput) => {
+    const success = rule.id ? await updateRule(rule) : await createRule(rule);
+    if (success) {
+      setEditing(null);
+    }
+    return success;
+  };
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div>
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{t('security.title')}</h3>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{t('security.description')}</p>
+        <h3 className="mb-1 text-lg font-semibold text-gray-900 dark:text-white">{t('security.title')}</h3>
+        <p className="text-sm text-gray-500 dark:text-gray-400">{t('security.description')}</p>
       </div>
 
-      {/* Error */}
+      {runtime && (
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className={PANEL_CLASS}>
+            <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+              {t('security.runtime.native.title')}
+            </div>
+            <p className="mt-1 text-sm text-gray-900 dark:text-white">
+              {runtime.native_runtime_managed
+                ? t('security.runtime.native.managed')
+                : t('security.runtime.native.unmanaged')}
+            </p>
+            <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+              {t('security.runtime.strictMode', {
+                status: runtime.strict_mode ? t('security.runtime.enabled') : t('security.runtime.disabled'),
+              })}
+            </p>
+            {runtime.init_error && <p className="mt-2 text-xs text-red-600">{runtime.init_error}</p>}
+          </div>
+          <div className={PANEL_CLASS}>
+            <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+              {t('security.runtime.claudeCode.title')}
+            </div>
+            <p className="mt-1 text-sm text-gray-900 dark:text-white">
+              {runtime.claude_code_managed
+                ? t('security.runtime.claudeCode.managed')
+                : t('security.runtime.claudeCode.unmanaged')}
+            </p>
+          </div>
+        </div>
+      )}
+
+      <div className={clsx(PANEL_MUTED_CLASS, 'text-sm text-gray-600 dark:text-gray-300')}>
+        {t('security.runtime.networkHint')}
+      </div>
+
       {error && (
-        <div className="flex items-center justify-between p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-          <span className="text-sm text-red-700 dark:text-red-300">{error}</span>
-          <button onClick={clearError} className="text-xs text-red-500 hover:text-red-700">
+        <div className="flex items-center justify-between rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
+          <span>{error}</span>
+          <button type="button" onClick={clearError} className="text-xs">
             {t('security.dismiss')}
           </button>
         </div>
       )}
 
+      <RuleEditor editing={editing} isMutating={isMutating} onSubmit={submitRule} onCancel={() => setEditing(null)} />
+
       {isLoading ? (
-        <p className="text-sm text-gray-500">{t('security.loading')}</p>
+        <p className="text-sm text-gray-500 dark:text-gray-400">{t('security.loading')}</p>
       ) : (
         <>
-          {/* Built-in Guardrails */}
-          <div className="space-y-3">
-            <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">{t('security.builtin.title')}</h4>
-            <div className="space-y-2">
-              {builtinGuardrails.map((g) => (
-                <GuardrailToggle
-                  key={g.name}
-                  name={g.name}
-                  description={g.description}
-                  enabled={g.enabled}
-                  guardrailType={g.guardrail_type}
-                  onToggle={handleToggle}
+          <section className="space-y-3">
+            <h4 className="text-sm font-medium text-gray-900 dark:text-white">{t('security.builtin.title')}</h4>
+            <div className="space-y-3">
+              {builtinGuardrails.map((guardrail) => (
+                <GuardrailCard
+                  key={guardrail.id}
+                  guardrail={guardrail}
+                  onToggle={toggleGuardrail}
+                  onEdit={setEditing}
+                  onDelete={deleteRule}
                 />
               ))}
-              {builtinGuardrails.length === 0 && <p className="text-sm text-gray-400">{t('security.builtin.empty')}</p>}
             </div>
-          </div>
+          </section>
 
-          {/* Custom Rules */}
-          <div className="space-y-3">
-            <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">{t('security.custom.title')}</h4>
-            <div className="space-y-2">
-              {customGuardrails.map((g) => (
-                <GuardrailToggle
-                  key={g.name}
-                  name={g.name}
-                  description={g.description}
-                  enabled={g.enabled}
-                  guardrailType={g.guardrail_type}
-                  onToggle={handleToggle}
-                  onRemove={handleRemove}
-                />
-              ))}
-              {customGuardrails.length === 0 && <p className="text-sm text-gray-400">{t('security.custom.empty')}</p>}
+          <section className="space-y-3">
+            <h4 className="text-sm font-medium text-gray-900 dark:text-white">{t('security.custom.title')}</h4>
+            <div className="space-y-3">
+              {customGuardrails.length ? (
+                customGuardrails.map((guardrail) => (
+                  <GuardrailCard
+                    key={guardrail.id}
+                    guardrail={guardrail}
+                    onToggle={toggleGuardrail}
+                    onEdit={setEditing}
+                    onDelete={deleteRule}
+                  />
+                ))
+              ) : (
+                <div className="rounded-lg border border-dashed border-gray-300 px-4 py-3 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                  {t('security.custom.empty')}
+                </div>
+              )}
             </div>
+          </section>
 
-            {/* Add Custom Rule Form */}
-            <div className="mt-4 p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
-              <h5 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-                {t('security.custom.addTitle')}
-              </h5>
-              <AddCustomRuleForm onAdd={handleAddRule} />
-            </div>
-          </div>
-
-          {/* Trigger Log */}
-          <div className="space-y-3">
-            <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">{t('security.triggerLog.title')}</h4>
-            <TriggerLogViewer />
-          </div>
+          <section className="space-y-3">
+            <h4 className="text-sm font-medium text-gray-900 dark:text-white">{t('security.events.title')}</h4>
+            <EventsTable />
+          </section>
         </>
       )}
     </div>

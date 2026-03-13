@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use regex::Regex;
 use std::sync::OnceLock;
 
-use super::{Direction, Guardrail, GuardrailResult, SensitivePattern};
+use super::{Direction, Guardrail, GuardrailResult, GuardrailRuntimeContext, SensitivePattern};
 
 /// Compiled regex patterns for sensitive data detection.
 /// Compiled once using OnceLock for performance.
@@ -181,6 +181,10 @@ impl Default for SensitiveDataGuardrail {
 
 #[async_trait]
 impl Guardrail for SensitiveDataGuardrail {
+    fn id(&self) -> &str {
+        "builtin-sensitive-data"
+    }
+
     fn name(&self) -> &str {
         "SensitiveData"
     }
@@ -189,10 +193,41 @@ impl Guardrail for SensitiveDataGuardrail {
         "Detects API keys, passwords, and sensitive environment variables"
     }
 
-    async fn validate(&self, content: &str, direction: Direction) -> GuardrailResult {
+    fn builtin_key(&self) -> Option<&str> {
+        Some("sensitive_data")
+    }
+
+    fn default_scopes(&self) -> Vec<Direction> {
+        vec![
+            Direction::Input,
+            Direction::ToolCall,
+            Direction::Tool,
+            Direction::Output,
+            Direction::Artifact,
+        ]
+    }
+
+    fn default_action_label(&self) -> &'static str {
+        "mixed"
+    }
+
+    fn redact_preview(&self, content: &str) -> Option<String> {
+        let (redacted, items) = self.redact(content);
+        if items.is_empty() {
+            None
+        } else {
+            Some(redacted)
+        }
+    }
+
+    async fn validate(
+        &self,
+        content: &str,
+        direction: Direction,
+        _runtime: &GuardrailRuntimeContext,
+    ) -> GuardrailResult {
         match direction {
-            Direction::Input => {
-                // For user input: detect and redact
+            Direction::Input | Direction::Output | Direction::Tool | Direction::Artifact => {
                 let detections = self.detect(content);
                 if detections.is_empty() {
                     GuardrailResult::Pass
@@ -204,24 +239,19 @@ impl Guardrail for SensitiveDataGuardrail {
                     }
                 }
             }
-            Direction::Tool => {
-                // For tool output: detect and warn
+            Direction::ToolCall => {
                 let detections = self.detect(content);
                 if detections.is_empty() {
                     GuardrailResult::Pass
                 } else {
                     let names: Vec<String> = detections.iter().map(|(n, _)| n.clone()).collect();
-                    GuardrailResult::Warn {
-                        message: format!(
-                            "Sensitive data detected in tool output: {}",
+                    GuardrailResult::Block {
+                        reason: format!(
+                            "Sensitive data detected in tool arguments: {}",
                             names.join(", ")
                         ),
                     }
                 }
-            }
-            Direction::Output => {
-                // LLM output: pass through (not expected to contain user secrets)
-                GuardrailResult::Pass
             }
         }
     }

@@ -70,9 +70,20 @@ pub struct ProxyExport {
 pub struct GuardrailRuleExport {
     pub id: String,
     pub name: String,
-    pub pattern: String,
+    #[serde(default)]
+    pub guardrail_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub builtin_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pattern: Option<String>,
     pub action: String,
     pub enabled: bool,
+    #[serde(default)]
+    pub scope: Vec<String>,
+    #[serde(default)]
+    pub editable: bool,
+    #[serde(default)]
+    pub description: String,
 }
 
 /// Remote control settings export.

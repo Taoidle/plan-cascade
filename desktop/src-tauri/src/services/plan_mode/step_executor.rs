@@ -1744,7 +1744,8 @@ async fn execute_single_step(
             sub_agent_depth: None,
         };
 
-        let mut orchestrator = OrchestratorService::new(config);
+        let mut orchestrator = OrchestratorService::new(config)
+            .with_guardrail_hooks(crate::services::guardrail::shared_guardrail_registry());
         if let Some(tracker) = runtime.file_change_tracker.as_ref() {
             let turn_index = match tracker.lock() {
                 Ok(mut guard) => {

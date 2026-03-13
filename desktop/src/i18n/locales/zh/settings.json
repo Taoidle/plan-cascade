@@ -973,6 +973,38 @@
     "dismiss": "关闭",
     "loading": "正在加载护栏...",
     "removeRule": "移除规则",
+    "types": {
+      "builtin": "内置",
+      "custom": "自定义"
+    },
+    "actions": {
+      "warn": "警告",
+      "block": "阻止",
+      "redact": "脱敏"
+    },
+    "scope": {
+      "input": "输入",
+      "tool_call": "工具调用",
+      "tool_result": "工具结果",
+      "assistant_output": "助手输出",
+      "artifact": "产物"
+    },
+    "runtime": {
+      "native": {
+        "title": "原生执行链",
+        "managed": "已受生产级护栏保护。",
+        "unmanaged": "护栏尚未完成初始化。"
+      },
+      "claudeCode": {
+        "title": "Claude Code",
+        "managed": "Claude Code 已纳入同一套护栏保护。",
+        "unmanaged": "Claude Code 当前未被纳管，不在生产级护栏保证范围内。"
+      },
+      "strictMode": "严格模式：{{status}}",
+      "enabled": "已启用",
+      "disabled": "已关闭",
+      "networkHint": "网络白名单和审批提示仍在“网络设置”中维护。内容护栏与工具执行策略是互补关系，不能互相替代。"
+    },
 
     "builtin": {
       "title": "内置护栏",
@@ -983,32 +1015,44 @@
       "title": "自定义规则",
       "empty": "未定义自定义规则。",
       "addTitle": "添加自定义规则",
+      "editTitle": "编辑自定义规则",
       "ruleName": "规则名称",
       "ruleNamePlaceholder": "例如：禁止 TODO",
       "regexPattern": "正则表达式",
       "regexPatternPlaceholder": "例如：TODO|FIXME",
+      "description": "说明",
+      "scope": "作用范围",
       "action": "操作",
       "actionWarn": "警告",
       "actionBlock": "阻止",
       "actionRedact": "脱敏",
       "addButton": "添加规则",
       "adding": "添加中...",
+      "create": "创建规则",
+      "save": "保存规则",
+      "saving": "保存中...",
+      "edit": "编辑",
+      "delete": "删除",
+      "cancel": "取消",
       "nameRequired": "名称和模式为必填项",
       "addFailed": "添加规则失败。请检查正则表达式。"
     },
 
-    "triggerLog": {
-      "title": "触发日志",
-      "loading": "正在加载触发日志...",
+    "events": {
+      "title": "审计事件",
+      "loading": "正在加载护栏事件...",
       "empty": "暂无触发事件记录。",
-      "eventCount": "{{count}} 个事件",
-      "eventCount_plural": "{{count}} 个事件",
-      "clearLog": "清除日志",
-      "colTime": "时间",
-      "colGuardrail": "护栏",
-      "colDirection": "方向",
-      "colResult": "结果",
-      "colContent": "内容"
+      "recentCount": "最近 {{count}} 个事件",
+      "recentCount_plural": "最近 {{count}} 个事件",
+      "clear": "清空",
+      "noPreview": "无预览",
+      "columns": {
+        "time": "时间",
+        "rule": "规则",
+        "surface": "作用面",
+        "decision": "决策",
+        "preview": "预览"
+      }
     }
   },
 

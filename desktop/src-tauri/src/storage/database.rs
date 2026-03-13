@@ -1359,44 +1359,96 @@ impl Database {
         // Feature-004: Guardrail Security System tables
         // ====================================================================
 
-        // Custom guardrail rules persisted across sessions
+        // Unified guardrail rule storage (built-ins + custom rules)
         conn.execute(
             "CREATE TABLE IF NOT EXISTS guardrail_rules (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
-                pattern TEXT NOT NULL,
+                guardrail_type TEXT NOT NULL DEFAULT 'custom',
+                builtin_key TEXT,
+                pattern TEXT,
                 action TEXT NOT NULL DEFAULT 'warn',
+                scope TEXT NOT NULL DEFAULT '[\"input\",\"assistant_output\",\"tool_result\"]',
                 enabled INTEGER NOT NULL DEFAULT 1,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                editable INTEGER NOT NULL DEFAULT 1,
+                description TEXT NOT NULL DEFAULT '',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
             )",
             [],
         )?;
 
-        // Guardrail trigger event log
+        // Sanitized guardrail audit log
         conn.execute(
-            "CREATE TABLE IF NOT EXISTS guardrail_trigger_log (
+            "CREATE TABLE IF NOT EXISTS guardrail_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                guardrail_name TEXT NOT NULL,
-                direction TEXT NOT NULL,
-                result_type TEXT NOT NULL,
-                content_snippet TEXT NOT NULL DEFAULT '',
+                rule_id TEXT NOT NULL,
+                rule_name TEXT NOT NULL,
+                surface TEXT NOT NULL,
+                tool_name TEXT,
+                session_id TEXT,
+                execution_id TEXT,
+                decision TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                safe_preview TEXT NOT NULL DEFAULT '',
                 timestamp TEXT NOT NULL DEFAULT (datetime('now'))
             )",
             [],
         )?;
 
-        // Indexes for guardrail queries
         conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_guardrail_trigger_log_timestamp
-             ON guardrail_trigger_log(timestamp DESC)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_guardrail_rules_builtin_key
+             ON guardrail_rules(builtin_key)
+             WHERE builtin_key IS NOT NULL",
             [],
         )?;
 
         conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_guardrail_trigger_log_name
-             ON guardrail_trigger_log(guardrail_name)",
+            "CREATE INDEX IF NOT EXISTS idx_guardrail_events_timestamp
+             ON guardrail_events(timestamp DESC)",
             [],
         )?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_guardrail_events_rule_id
+             ON guardrail_events(rule_id)",
+            [],
+        )?;
+
+        if !Self::table_has_column(&conn, "guardrail_rules", "guardrail_type") {
+            let _ = conn.execute(
+                "ALTER TABLE guardrail_rules ADD COLUMN guardrail_type TEXT NOT NULL DEFAULT 'custom'",
+                [],
+            );
+        }
+        if !Self::table_has_column(&conn, "guardrail_rules", "builtin_key") {
+            let _ = conn.execute("ALTER TABLE guardrail_rules ADD COLUMN builtin_key TEXT", []);
+        }
+        if !Self::table_has_column(&conn, "guardrail_rules", "scope") {
+            let _ = conn.execute(
+                "ALTER TABLE guardrail_rules ADD COLUMN scope TEXT NOT NULL DEFAULT '[\"input\",\"assistant_output\",\"tool_result\"]'",
+                [],
+            );
+        }
+        if !Self::table_has_column(&conn, "guardrail_rules", "editable") {
+            let _ = conn.execute(
+                "ALTER TABLE guardrail_rules ADD COLUMN editable INTEGER NOT NULL DEFAULT 1",
+                [],
+            );
+        }
+        if !Self::table_has_column(&conn, "guardrail_rules", "description") {
+            let _ = conn.execute(
+                "ALTER TABLE guardrail_rules ADD COLUMN description TEXT NOT NULL DEFAULT ''",
+                [],
+            );
+        }
+        if !Self::table_has_column(&conn, "guardrail_rules", "updated_at") {
+            let _ = conn.execute(
+                "ALTER TABLE guardrail_rules ADD COLUMN updated_at TEXT DEFAULT CURRENT_TIMESTAMP",
+                [],
+            );
+        }
+        let _ = conn.execute("DELETE FROM guardrail_trigger_log", []);
 
         // ====================================================================
         // Webhook Notification System tables

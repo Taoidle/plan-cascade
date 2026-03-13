@@ -34,6 +34,15 @@
     "clearChat": "清除聊天",
     "cancel": "取消"
   },
+  "guardrailBanner": "Claude Code 模式当前不在原生生产级护栏保证范围内。需要强制护栏时，请使用原生聊天、任务或计划流程。",
+  "conversationPanel": {
+    "title": "会话",
+    "emptyTitle": "暂无已保存会话",
+    "emptyDescription": "清空时会自动保存当前会话",
+    "messageCount": "{{count}} 条消息",
+    "messageCount_plural": "{{count}} 条消息",
+    "delete": "删除"
+  },
 
   "shortcuts": {
     "title": "键盘快捷键",

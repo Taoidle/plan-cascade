@@ -674,8 +674,21 @@ fn import_guardrails(
     conn.execute("DELETE FROM guardrail_rules", [])?;
     for rule in guardrails {
         conn.execute(
-            "INSERT INTO guardrail_rules (id, name, pattern, action, enabled) VALUES (?1, ?2, ?3, ?4, ?5)",
-            rusqlite::params![rule.id, rule.name, rule.pattern, rule.action, rule.enabled as i32],
+            "INSERT INTO guardrail_rules
+             (id, name, guardrail_type, builtin_key, pattern, action, scope, enabled, editable, description, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, datetime('now'), datetime('now'))",
+            rusqlite::params![
+                rule.id,
+                rule.name,
+                if rule.guardrail_type.is_empty() { "custom".to_string() } else { rule.guardrail_type.clone() },
+                rule.builtin_key,
+                rule.pattern,
+                rule.action,
+                serde_json::to_string(&rule.scope)?,
+                rule.enabled as i32,
+                rule.editable as i32,
+                rule.description,
+            ],
         )?;
     }
     Ok(())
@@ -793,6 +806,7 @@ fn reset_backend_settings(db: &crate::storage::Database) -> crate::utils::error:
     let conn = db.get_connection()?;
     conn.execute("DELETE FROM webhook_channels", [])?;
     conn.execute("DELETE FROM guardrail_rules", [])?;
+    conn.execute("DELETE FROM guardrail_events", [])?;
     conn.execute("DELETE FROM remote_agents", [])?;
     conn.execute("DELETE FROM mcp_servers", [])?;
 

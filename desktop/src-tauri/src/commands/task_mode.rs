@@ -2616,6 +2616,7 @@ async fn execute_story_via_llm(
     let (search_provider, search_api_key) = resolve_search_provider_for_tools();
     let mut orchestrator = OrchestratorService::new(config)
         .with_search_provider(&search_provider, search_api_key)
+        .with_guardrail_hooks(crate::services::guardrail::shared_guardrail_registry())
         .with_permission_gate(permission_gate.clone());
 
     if let Some((analytics_tx, analytics_cost_calculator)) = analytics_components {

@@ -1219,6 +1219,47 @@ fn ensure_debug_artifact_dir(state: &DebugModeState, session_id: &str) -> Result
     Ok(dir)
 }
 
+fn sanitize_debug_artifact_contents(
+    session_id: &str,
+    file_name: &str,
+    contents: &[u8],
+) -> Result<Vec<u8>, String> {
+    let Ok(text) = std::str::from_utf8(contents) else {
+        return Ok(contents.to_vec());
+    };
+
+    let registry = crate::services::guardrail::shared_guardrail_registry();
+    let runtime = crate::services::guardrail::GuardrailRuntimeContext {
+        session_id: Some(session_id.to_string()),
+        execution_id: Some(session_id.to_string()),
+        tool_name: None,
+        content_kind: None,
+    };
+    let future = async {
+        registry
+            .read()
+            .await
+            .validate_all(text, crate::services::guardrail::Direction::Artifact, &runtime)
+            .await
+    };
+    let result = match tokio::runtime::Handle::try_current() {
+        Ok(handle) => tokio::task::block_in_place(|| handle.block_on(future)),
+        Err(_) => tauri::async_runtime::block_on(future),
+    };
+
+    match result {
+        crate::services::guardrail::GuardrailResult::Pass
+        | crate::services::guardrail::GuardrailResult::Warn { .. } => Ok(contents.to_vec()),
+        crate::services::guardrail::GuardrailResult::Redact {
+            redacted_content, ..
+        } => Ok(redacted_content.into_bytes()),
+        crate::services::guardrail::GuardrailResult::Block { reason } => Err(format!(
+            "Debug artifact '{}' blocked by guardrail: {}",
+            file_name, reason
+        )),
+    }
+}
+
 fn write_debug_artifact_file(
     state: &DebugModeState,
     session_id: &str,
@@ -1227,7 +1268,8 @@ fn write_debug_artifact_file(
 ) -> Result<String, String> {
     let dir = ensure_debug_artifact_dir(state, session_id)?;
     let path = dir.join(file_name);
-    fs::write(&path, contents)
+    let sanitized = sanitize_debug_artifact_contents(session_id, file_name, contents.as_ref())?;
+    fs::write(&path, sanitized)
         .map_err(|error| format!("Failed to write debug artifact '{file_name}' for '{session_id}': {error}"))?;
     Ok(path.to_string_lossy().to_string())
 }

@@ -211,15 +211,27 @@ pub fn collect_backend_settings(
 fn collect_guardrail_rules(db: &Database) -> AppResult<Vec<GuardrailRuleExport>> {
     let conn = db.get_connection()?;
     let mut stmt =
-        conn.prepare("SELECT id, name, pattern, action, enabled FROM guardrail_rules")?;
+        conn.prepare(
+            "SELECT id, name, guardrail_type, builtin_key, pattern, action, scope, enabled, editable, description
+             FROM guardrail_rules
+             ORDER BY CASE guardrail_type WHEN 'builtin' THEN 0 ELSE 1 END, name ASC",
+        )?;
     let rules = stmt
         .query_map([], |row| {
             Ok(GuardrailRuleExport {
                 id: row.get(0)?,
                 name: row.get(1)?,
-                pattern: row.get(2)?,
-                action: row.get(3)?,
-                enabled: row.get::<_, i32>(4)? != 0,
+                guardrail_type: row.get(2)?,
+                builtin_key: row.get(3)?,
+                pattern: row.get(4)?,
+                action: row.get(5)?,
+                scope: row
+                    .get::<_, Option<String>>(6)?
+                    .and_then(|raw| serde_json::from_str::<Vec<String>>(&raw).ok())
+                    .unwrap_or_default(),
+                enabled: row.get::<_, i32>(7)? != 0,
+                editable: row.get::<_, i32>(8)? != 0,
+                description: row.get(9)?,
             })
         })?
         .filter_map(|r| r.ok())
@@ -389,8 +401,21 @@ pub fn import_backend_settings(
         conn.execute("DELETE FROM guardrail_rules", [])?;
         for rule in &backend.guardrails {
             conn.execute(
-                "INSERT INTO guardrail_rules (id, name, pattern, action, enabled) VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![rule.id, rule.name, rule.pattern, rule.action, rule.enabled as i32],
+                "INSERT INTO guardrail_rules
+                 (id, name, guardrail_type, builtin_key, pattern, action, scope, enabled, editable, description, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, datetime('now'), datetime('now'))",
+                params![
+                    rule.id,
+                    rule.name,
+                    if rule.guardrail_type.is_empty() { "custom".to_string() } else { rule.guardrail_type.clone() },
+                    rule.builtin_key,
+                    rule.pattern,
+                    rule.action,
+                    serde_json::to_string(&rule.scope)?,
+                    rule.enabled as i32,
+                    rule.editable as i32,
+                    rule.description,
+                ],
             )?;
         }
         Ok(())

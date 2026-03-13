@@ -34,6 +34,15 @@
     "clearChat": "チャットをクリア",
     "cancel": "キャンセル"
   },
+  "guardrailBanner": "Claude Code モードは現在、ネイティブ本番用ガードレール保証の対象外です。強制ガードレールが必要な場合は、ネイティブのチャット、タスク、プランのフローを使用してください。",
+  "conversationPanel": {
+    "title": "会話",
+    "emptyTitle": "保存済みの会話はありません",
+    "emptyDescription": "会話をクリアすると自動保存されます",
+    "messageCount": "{{count}} 件のメッセージ",
+    "messageCount_plural": "{{count}} 件のメッセージ",
+    "delete": "削除"
+  },
 
   "shortcuts": {
     "title": "キーボードショートカット",

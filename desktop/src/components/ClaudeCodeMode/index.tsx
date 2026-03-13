@@ -197,7 +197,7 @@ function ClaudeCodeModeInner() {
                 ? 'bg-primary-100 dark:bg-primary-900/50 text-primary-600 dark:text-primary-400'
                 : 'bg-gray-100 dark:bg-gray-800 text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700',
             )}
-            title="Conversations"
+            title={t('conversationPanel.title')}
           >
             <ClockIcon className="w-4 h-4" />
           </button>
@@ -294,6 +294,10 @@ function ClaudeCodeModeInner() {
         </div>
       </div>
 
+      <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100">
+        {t('guardrailBanner')}
+      </div>
+
       {/* Error banner */}
       {error && (
         <div
@@ -330,7 +334,7 @@ function ClaudeCodeModeInner() {
         {showConversations && (
           <div className="w-72 flex-shrink-0 border-l border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 flex flex-col overflow-hidden">
             <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-700">
-              <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Conversations</h3>
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-white">{t('conversationPanel.title')}</h3>
               <button
                 onClick={() => setShowConversations(false)}
                 className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500"
@@ -342,8 +346,8 @@ function ClaudeCodeModeInner() {
               {conversations.length === 0 ? (
                 <div className="p-4 text-center text-sm text-gray-500 dark:text-gray-400">
                   <ChatBubbleIcon className="w-8 h-8 mx-auto mb-2 text-gray-300 dark:text-gray-600" />
-                  <p>No saved conversations</p>
-                  <p className="text-xs mt-1 text-gray-400">Conversations are auto-saved when cleared</p>
+                  <p>{t('conversationPanel.emptyTitle')}</p>
+                  <p className="text-xs mt-1 text-gray-400">{t('conversationPanel.emptyDescription')}</p>
                 </div>
               ) : (
                 <div className="p-2 space-y-1">
@@ -360,7 +364,7 @@ function ClaudeCodeModeInner() {
                       <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{conv.title}</p>
                       <div className="flex items-center justify-between mt-1">
                         <span className="text-xs text-gray-500 dark:text-gray-400">
-                          {conv.messages.length} messages
+                          {t('conversationPanel.messageCount', { count: conv.messages.length })}
                         </span>
                         <span className="text-xs text-gray-400 dark:text-gray-500">
                           {new Date(conv.updatedAt).toLocaleDateString(undefined, {
@@ -382,7 +386,7 @@ function ClaudeCodeModeInner() {
                         )}
                       >
                         <TrashIcon className="w-3 h-3" />
-                        Delete
+                        {t('conversationPanel.delete')}
                       </button>
                     </div>
                   ))}

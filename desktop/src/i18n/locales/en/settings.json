@@ -973,6 +973,38 @@
     "dismiss": "Dismiss",
     "loading": "Loading guardrails...",
     "removeRule": "Remove rule",
+    "types": {
+      "builtin": "Built-in",
+      "custom": "Custom"
+    },
+    "actions": {
+      "warn": "Warn",
+      "block": "Block",
+      "redact": "Redact"
+    },
+    "scope": {
+      "input": "Input",
+      "tool_call": "Tool call",
+      "tool_result": "Tool result",
+      "assistant_output": "Assistant output",
+      "artifact": "Artifact"
+    },
+    "runtime": {
+      "native": {
+        "title": "Native execution",
+        "managed": "Protected by production guardrails.",
+        "unmanaged": "Guardrails are not fully initialized."
+      },
+      "claudeCode": {
+        "title": "Claude Code",
+        "managed": "Claude Code is covered by the same guardrails.",
+        "unmanaged": "Claude Code is currently unmanaged and excluded from the production guardrail guarantee."
+      },
+      "strictMode": "Strict mode: {{status}}",
+      "enabled": "enabled",
+      "disabled": "disabled",
+      "networkHint": "Network allowlists and approval prompts still live in the Network settings section. Content guardrails and tool execution policy are complementary, not interchangeable."
+    },
 
     "builtin": {
       "title": "Built-in Guardrails",
@@ -983,32 +1015,44 @@
       "title": "Custom Rules",
       "empty": "No custom rules defined.",
       "addTitle": "Add Custom Rule",
+      "editTitle": "Edit custom rule",
       "ruleName": "Rule Name",
       "ruleNamePlaceholder": "e.g., No TODOs",
       "regexPattern": "Regex Pattern",
       "regexPatternPlaceholder": "e.g., TODO|FIXME",
+      "description": "Description",
+      "scope": "Scope",
       "action": "Action",
       "actionWarn": "Warn",
       "actionBlock": "Block",
       "actionRedact": "Redact",
       "addButton": "Add Rule",
       "adding": "Adding...",
+      "create": "Create rule",
+      "save": "Save rule",
+      "saving": "Saving...",
+      "edit": "Edit",
+      "delete": "Delete",
+      "cancel": "Cancel",
       "nameRequired": "Name and pattern are required",
       "addFailed": "Failed to add rule. Check the regex pattern."
     },
 
-    "triggerLog": {
-      "title": "Trigger Log",
-      "loading": "Loading trigger log...",
-      "empty": "No trigger events recorded yet.",
-      "eventCount": "{{count}} event",
-      "eventCount_plural": "{{count}} events",
-      "clearLog": "Clear Log",
-      "colTime": "Time",
-      "colGuardrail": "Guardrail",
-      "colDirection": "Direction",
-      "colResult": "Result",
-      "colContent": "Content"
+    "events": {
+      "title": "Audit events",
+      "loading": "Loading guardrail events...",
+      "empty": "No guardrail events recorded yet.",
+      "recentCount": "{{count}} recent event",
+      "recentCount_plural": "{{count}} recent events",
+      "clear": "Clear",
+      "noPreview": "No preview",
+      "columns": {
+        "time": "Time",
+        "rule": "Rule",
+        "surface": "Surface",
+        "decision": "Decision",
+        "preview": "Preview"
+      }
     }
   },
 

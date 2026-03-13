@@ -1580,6 +1580,7 @@ pub async fn execute_standalone(
 
     let mut orchestrator = OrchestratorService::new(orchestrator_config)
         .with_search_provider(&search_provider, search_api_key)
+        .with_guardrail_hooks(crate::services::guardrail::shared_guardrail_registry())
         .with_permission_gate(permission_state.gate.clone())
         .with_file_change_source_mode(crate::services::file_change_tracker::FileChangeSourceMode::Chat)
         .with_file_change_actor_metadata(
@@ -2203,6 +2204,7 @@ pub async fn execute_standalone_with_session(
     // Create orchestrator with database (IndexStore is auto-wired to ToolExecutor)
     let mut orchestrator = OrchestratorService::new(orchestrator_config)
         .with_database(pool)
+        .with_guardrail_hooks(crate::services::guardrail::shared_guardrail_registry())
         .with_permission_gate(permission_state.gate.clone())
         .with_file_change_source_mode(crate::services::file_change_tracker::FileChangeSourceMode::Chat)
         .with_file_change_actor_metadata(
@@ -2857,6 +2859,7 @@ pub async fn resume_standalone_execution(
 
     let mut orchestrator = OrchestratorService::new(orchestrator_config)
         .with_database(pool)
+        .with_guardrail_hooks(crate::services::guardrail::shared_guardrail_registry())
         .with_permission_gate(permission_state.gate.clone())
         .with_file_change_source_mode(crate::services::file_change_tracker::FileChangeSourceMode::Chat)
         .with_file_change_actor_metadata(

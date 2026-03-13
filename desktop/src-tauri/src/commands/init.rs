@@ -12,6 +12,7 @@ use crate::commands::mcp::reconcile_and_connect_enabled_servers;
 use crate::commands::mcp::McpRuntimeState;
 use crate::commands::plugins::PluginState;
 use crate::commands::remote::RemoteState;
+use crate::commands::guardrails::GuardrailState;
 use crate::commands::spec_interview::SpecInterviewState;
 use crate::commands::standalone::StandaloneState;
 use crate::commands::webhook::WebhookState;
@@ -79,6 +80,7 @@ fn emit_init_progress(app: &AppHandle, stage: InitStage, step_index: u8) {
 #[tauri::command]
 pub async fn init_app(
     state: State<'_, AppState>,
+    guardrail_state: State<'_, GuardrailState>,
     standalone_state: State<'_, StandaloneState>,
     remote_state: State<'_, RemoteState>,
     webhook_state: State<'_, WebhookState>,
@@ -92,6 +94,12 @@ pub async fn init_app(
     // Initialize all services
     match state.initialize().await {
         Ok(_) => {
+            if let Ok(database) = state.with_database(|db| Ok(std::sync::Arc::new(db.clone()))).await {
+                if let Err(e) = guardrail_state.initialize(database).await {
+                    tracing::warn!("Guardrail initialization failed: {}", e);
+                }
+            }
+
             if let Err(e) = webhook_state.start_worker_if_needed(state.inner()).await {
                 tracing::warn!("Webhook worker initialization failed: {}", e);
             }

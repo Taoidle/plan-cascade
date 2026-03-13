@@ -1498,7 +1498,8 @@ pub async fn explore_project(
 
                 let (search_provider, search_api_key) = resolve_search_provider_for_tools();
                 let mut coordinator = crate::services::orchestrator::OrchestratorService::new(config)
-                    .with_search_provider(&search_provider, search_api_key);
+                    .with_search_provider(&search_provider, search_api_key)
+                    .with_guardrail_hooks(crate::services::guardrail::shared_guardrail_registry());
                 if let Some((analytics_tx, analytics_cost_calculator)) =
                     get_task_analytics_tracker_components(&app_handle, app_state.inner()).await
                 {

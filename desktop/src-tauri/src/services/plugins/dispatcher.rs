@@ -27,7 +27,9 @@ use tokio::sync::mpsc;
 
 use crate::services::llm::provider::LlmProvider;
 use crate::services::llm::types::{LlmRequestOptions, Message};
-use crate::services::orchestrator::hooks::{AfterToolResult, AgenticHooks, BeforeToolResult};
+use crate::services::orchestrator::hooks::{
+    AfterLlmResult, AfterToolResult, AgenticHooks, BeforeToolResult, UserMessageHookResult,
+};
 use crate::services::plugins::models::*;
 use crate::services::plugins::runtime;
 use crate::services::streaming::UnifiedStreamEvent;
@@ -542,7 +544,10 @@ fn register_user_message_hook(
             )
             .await;
             if result.is_success() && !result.stdout.trim().is_empty() {
-                Ok(Some(result.stdout.trim().to_string()))
+                Ok(UserMessageHookResult {
+                    modified_message: Some(result.stdout.trim().to_string()),
+                    stop_reason: None,
+                })
             } else {
                 if !result.is_success() {
                     eprintln!(
@@ -551,7 +556,7 @@ fn register_user_message_hook(
                     );
                     send_hook_error(&etx, &name, "UserPromptSubmit", &result.stderr);
                 }
-                Ok(None)
+                Ok(UserMessageHookResult::default())
             }
         })
     }));
@@ -1035,7 +1040,7 @@ fn register_after_llm_hook(
                 send_hook_error(&etx, &name, "PostLlmCall", &result.stderr);
             }
 
-            Ok(())
+            Ok(AfterLlmResult::default())
         })
     }));
 }

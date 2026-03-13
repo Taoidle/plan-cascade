@@ -1,193 +1,182 @@
-/**
- * Guardrails Store
- *
- * Zustand store for guardrail security configuration. Manages built-in
- * guardrail toggles, custom rules, and trigger log display state.
- */
-
 import { create } from 'zustand';
-import type { GuardrailInfo, TriggerLogEntry } from '../lib/guardrailsApi';
+import type {
+  CustomGuardrailInput,
+  GuardrailEventEntry,
+  GuardrailInfo,
+  GuardrailRuntimeStatus,
+} from '../lib/guardrailsApi';
 import {
+  clearGuardrailEvents,
+  createCustomGuardrail,
+  deleteGuardrail,
+  listGuardrailEvents,
   listGuardrails,
   toggleGuardrailEnabled,
-  addCustomRule as addCustomRuleApi,
-  removeCustomRule as removeCustomRuleApi,
-  getTriggerLog,
-  clearTriggerLog as clearTriggerLogApi,
+  updateGuardrail as updateGuardrailApi,
 } from '../lib/guardrailsApi';
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
 export interface GuardrailsState {
-  /** All guardrails (built-in + custom) */
   guardrails: GuardrailInfo[];
-
-  /** Recent trigger log entries */
-  triggerLog: TriggerLogEntry[];
-
-  /** Loading states */
+  runtime: GuardrailRuntimeStatus | null;
+  events: GuardrailEventEntry[];
+  triggerLog: GuardrailEventEntry[];
   isLoading: boolean;
-  isTogglingGuardrail: boolean;
-  isAddingRule: boolean;
+  isMutating: boolean;
+  isLoadingEvents: boolean;
   isLoadingLog: boolean;
-
-  /** Error message */
   error: string | null;
-
-  /** Actions */
   fetchGuardrails: () => Promise<void>;
-  toggleGuardrail: (name: string, enabled: boolean) => Promise<void>;
+  toggleGuardrail: (id: string, enabled: boolean) => Promise<void>;
+  createRule: (rule: CustomGuardrailInput) => Promise<boolean>;
+  updateRule: (rule: CustomGuardrailInput) => Promise<boolean>;
+  deleteRule: (id: string) => Promise<boolean>;
+  fetchEvents: (limit?: number, offset?: number) => Promise<void>;
+  clearEvents: () => Promise<void>;
   addCustomRule: (name: string, pattern: string, action: string) => Promise<boolean>;
-  removeCustomRule: (name: string) => Promise<boolean>;
+  removeCustomRule: (id: string) => Promise<boolean>;
   fetchTriggerLog: (limit?: number, offset?: number) => Promise<void>;
   clearTriggerLog: () => Promise<void>;
   clearError: () => void;
 }
 
-// ---------------------------------------------------------------------------
-// Defaults
-// ---------------------------------------------------------------------------
-
-const DEFAULT_STATE = {
+export const useGuardrailsStore = create<GuardrailsState>()((set, get) => ({
   guardrails: [],
+  runtime: null,
+  events: [],
   triggerLog: [],
   isLoading: false,
-  isTogglingGuardrail: false,
-  isAddingRule: false,
+  isMutating: false,
+  isLoadingEvents: false,
   isLoadingLog: false,
   error: null,
-};
-
-// ---------------------------------------------------------------------------
-// Store
-// ---------------------------------------------------------------------------
-
-export const useGuardrailsStore = create<GuardrailsState>()((set) => ({
-  ...DEFAULT_STATE,
 
   fetchGuardrails: async () => {
     set({ isLoading: true, error: null });
-    try {
-      const result = await listGuardrails();
-      if (result.success && result.data) {
-        set({ guardrails: result.data, isLoading: false });
-      } else {
-        set({
-          isLoading: false,
-          error: result.error ?? 'Failed to fetch guardrails',
-        });
-      }
-    } catch (err) {
+    const result = await listGuardrails();
+    if (result.success && result.data) {
       set({
+        guardrails: result.data.guardrails,
+        runtime: result.data.runtime,
         isLoading: false,
-        error: err instanceof Error ? err.message : String(err),
       });
+      return;
     }
+    set({
+      isLoading: false,
+      error: result.error ?? 'Failed to fetch guardrails',
+    });
   },
 
-  toggleGuardrail: async (name: string, enabled: boolean) => {
-    set({ isTogglingGuardrail: true, error: null });
-    try {
-      const result = await toggleGuardrailEnabled(name, enabled);
-      if (result.success) {
-        // Optimistically update the local state
-        set((state) => ({
-          guardrails: state.guardrails.map((g) => (g.name === name ? { ...g, enabled } : g)),
-          isTogglingGuardrail: false,
-        }));
-      } else {
-        set({
-          isTogglingGuardrail: false,
-          error: result.error ?? 'Failed to toggle guardrail',
-        });
-      }
-    } catch (err) {
-      set({
-        isTogglingGuardrail: false,
-        error: err instanceof Error ? err.message : String(err),
-      });
+  toggleGuardrail: async (id, enabled) => {
+    set({ isMutating: true, error: null });
+    const result = await toggleGuardrailEnabled(id, enabled);
+    if (result.success && result.data) {
+      set((state) => ({
+        guardrails: state.guardrails.map((guardrail) => (guardrail.id === id ? result.data! : guardrail)),
+        isMutating: false,
+      }));
+      return;
     }
+    set({
+      isMutating: false,
+      error: result.error ?? 'Failed to toggle guardrail',
+    });
   },
 
-  addCustomRule: async (name: string, pattern: string, action: string) => {
-    set({ isAddingRule: true, error: null });
-    try {
-      const result = await addCustomRuleApi(name, pattern, action);
-      if (result.success && result.data) {
-        set((state) => ({
-          guardrails: [...state.guardrails, result.data!],
-          isAddingRule: false,
-        }));
-        return true;
-      } else {
-        set({
-          isAddingRule: false,
-          error: result.error ?? 'Failed to add custom rule',
-        });
-        return false;
-      }
-    } catch (err) {
-      set({
-        isAddingRule: false,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      return false;
+  createRule: async (rule) => {
+    set({ isMutating: true, error: null });
+    const result = await createCustomGuardrail(rule);
+    if (result.success && result.data) {
+      set((state) => ({
+        guardrails: [...state.guardrails, result.data!],
+        isMutating: false,
+      }));
+      return true;
     }
+    set({
+      isMutating: false,
+      error: result.error ?? 'Failed to create rule',
+    });
+    return false;
   },
 
-  removeCustomRule: async (name: string) => {
+  updateRule: async (rule) => {
+    set({ isMutating: true, error: null });
+    const result = await updateGuardrailApi(rule);
+    if (result.success && result.data) {
+      set((state) => ({
+        guardrails: state.guardrails.map((guardrail) => (guardrail.id === result.data!.id ? result.data! : guardrail)),
+        isMutating: false,
+      }));
+      return true;
+    }
+    set({
+      isMutating: false,
+      error: result.error ?? 'Failed to update rule',
+    });
+    return false;
+  },
+
+  deleteRule: async (id) => {
+    set({ isMutating: true, error: null });
+    const result = await deleteGuardrail(id);
+    if (result.success) {
+      set((state) => ({
+        guardrails: state.guardrails.filter((guardrail) => guardrail.id !== id),
+        isMutating: false,
+      }));
+      return true;
+    }
+    set({
+      isMutating: false,
+      error: result.error ?? 'Failed to delete rule',
+    });
+    return false;
+  },
+
+  fetchEvents: async (limit, offset) => {
+    set({ isLoadingEvents: true, isLoadingLog: true, error: null });
+    const result = await listGuardrailEvents(limit, offset);
+    if (result.success && result.data) {
+      set({ events: result.data, triggerLog: result.data, isLoadingEvents: false, isLoadingLog: false });
+      return;
+    }
+    set({
+      isLoadingEvents: false,
+      isLoadingLog: false,
+      error: result.error ?? 'Failed to fetch events',
+    });
+  },
+
+  clearEvents: async () => {
     set({ error: null });
-    try {
-      const result = await removeCustomRuleApi(name);
-      if (result.success) {
-        set((state) => ({
-          guardrails: state.guardrails.filter((g) => g.name !== name),
-        }));
-        return true;
-      } else {
-        set({ error: result.error ?? 'Failed to remove custom rule' });
-        return false;
-      }
-    } catch (err) {
-      set({ error: err instanceof Error ? err.message : String(err) });
-      return false;
+    const result = await clearGuardrailEvents();
+    if (result.success) {
+      set({ events: [], triggerLog: [] });
+      return;
     }
+    set({ error: result.error ?? 'Failed to clear events' });
   },
 
-  fetchTriggerLog: async (limit?: number, offset?: number) => {
-    set({ isLoadingLog: true, error: null });
-    try {
-      const result = await getTriggerLog(limit, offset);
-      if (result.success && result.data) {
-        set({ triggerLog: result.data, isLoadingLog: false });
-      } else {
-        set({
-          isLoadingLog: false,
-          error: result.error ?? 'Failed to fetch trigger log',
-        });
-      }
-    } catch (err) {
-      set({
-        isLoadingLog: false,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+  addCustomRule: async (name, pattern, action) =>
+    get().createRule({
+      name,
+      pattern,
+      action,
+      enabled: true,
+      scope: ['input', 'assistant_output', 'tool_result'],
+      description: '',
+    }),
+
+  removeCustomRule: async (id) => get().deleteRule(id),
+
+  fetchTriggerLog: async (limit, offset) => {
+    set({ isLoadingEvents: true, isLoadingLog: true });
+    await get().fetchEvents(limit, offset);
   },
 
   clearTriggerLog: async () => {
-    set({ error: null });
-    try {
-      const result = await clearTriggerLogApi();
-      if (result.success) {
-        set({ triggerLog: [] });
-      } else {
-        set({ error: result.error ?? 'Failed to clear trigger log' });
-      }
-    } catch (err) {
-      set({ error: err instanceof Error ? err.message : String(err) });
-    }
+    await get().clearEvents();
   },
 
   clearError: () => set({ error: null }),

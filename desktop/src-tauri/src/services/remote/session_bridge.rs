@@ -487,7 +487,8 @@ impl SessionBridge {
             };
 
             let mut orchestrator = OrchestratorService::new(orchestrator_config)
-                .with_search_provider(&search_provider, search_api_key);
+                .with_search_provider(&search_provider, search_api_key)
+                .with_guardrail_hooks(crate::services::guardrail::shared_guardrail_registry());
 
             // Wire database pool for CodebaseSearch/IndexStore
             {
@@ -843,7 +844,8 @@ impl SessionBridge {
         };
 
         let mut orchestrator = OrchestratorService::new(orchestrator_config)
-            .with_search_provider(&search_provider, search_api_key);
+            .with_search_provider(&search_provider, search_api_key)
+            .with_guardrail_hooks(crate::services::guardrail::shared_guardrail_registry());
 
         {
             let pool = self.db.pool().clone();

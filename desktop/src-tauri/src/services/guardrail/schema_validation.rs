@@ -19,7 +19,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::RwLock;
 
-use super::{Direction, Guardrail, GuardrailResult};
+use super::{Direction, Guardrail, GuardrailResult, GuardrailRuntimeContext};
 
 // ---------------------------------------------------------------------------
 // SchemaRegistry
@@ -307,6 +307,10 @@ impl Default for SchemaValidationGuardrail {
 
 #[async_trait]
 impl Guardrail for SchemaValidationGuardrail {
+    fn id(&self) -> &str {
+        "builtin-schema-validation"
+    }
+
     fn name(&self) -> &str {
         "SchemaValidation"
     }
@@ -315,19 +319,37 @@ impl Guardrail for SchemaValidationGuardrail {
         "Validates agent JSON output against registered JSON Schemas"
     }
 
-    async fn validate(&self, content: &str, direction: Direction) -> GuardrailResult {
-        // Only validate Output direction
-        if direction != Direction::Output {
+    fn builtin_key(&self) -> Option<&str> {
+        Some("schema_validation")
+    }
+
+    fn default_scopes(&self) -> Vec<Direction> {
+        vec![Direction::Output, Direction::Artifact]
+    }
+
+    fn default_action_label(&self) -> &'static str {
+        "block"
+    }
+
+    async fn validate(
+        &self,
+        content: &str,
+        direction: Direction,
+        runtime: &GuardrailRuntimeContext,
+    ) -> GuardrailResult {
+        if direction != Direction::Output && direction != Direction::Artifact {
             return GuardrailResult::Pass;
         }
 
-        // Check if there's an active schema
-        let active_task_type = match self.active_schema.read().ok().and_then(|g| g.clone()) {
-            Some(task_type) => task_type,
-            None => return GuardrailResult::Pass,
+        let active_task_type = runtime
+            .content_kind
+            .clone()
+            .or_else(|| self.active_schema.read().ok().and_then(|g| g.clone()))
+            .or_else(|| detect_content_kind(content));
+        let Some(active_task_type) = active_task_type else {
+            return GuardrailResult::Pass;
         };
 
-        // Get the schema
         let schema = match self
             .registry
             .read()
@@ -338,7 +360,6 @@ impl Guardrail for SchemaValidationGuardrail {
             None => return GuardrailResult::Pass,
         };
 
-        // Parse JSON
         let json_value: Value = match serde_json::from_str(content) {
             Ok(v) => v,
             Err(e) => {
@@ -348,7 +369,6 @@ impl Guardrail for SchemaValidationGuardrail {
             }
         };
 
-        // Validate against schema
         let errors = self.validate_json_against_schema(&json_value, &schema);
 
         if errors.is_empty() {
@@ -374,6 +394,18 @@ impl Guardrail for SchemaValidationGuardrail {
 // ---------------------------------------------------------------------------
 // Helper functions
 // ---------------------------------------------------------------------------
+
+fn detect_content_kind(content: &str) -> Option<String> {
+    let json_value: Value = serde_json::from_str(content).ok()?;
+    let object = json_value.as_object()?;
+    if object.contains_key("goal") && object.contains_key("stories") {
+        return Some("prd".to_string());
+    }
+    if object.contains_key("summary") && object.contains_key("recommendations") {
+        return Some("analysis_report".to_string());
+    }
+    None
+}
 
 /// Get the JSON Schema type name for a serde_json::Value.
 fn json_type_name(value: &Value) -> &'static str {

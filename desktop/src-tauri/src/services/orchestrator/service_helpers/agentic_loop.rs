@@ -3,6 +3,7 @@ use crate::services::orchestrator::{
     assess_progress, build_iteration_budget, IterationBudgetHints,
     IterationProgressAssessment, IterationProgressSnapshot,
 };
+use crate::services::tools::executor::ToolResult;
 
 #[derive(Debug, Clone, Copy, Default)]
 struct CodebaseIndexStatus {
@@ -2401,7 +2402,7 @@ impl OrchestratorService {
         let use_prompt_fallback = matches!(reliability, ToolCallReliability::None);
         // Clone user_message before moving it into messages, so we can use it
         // later for knowledge context population.
-        let user_message_for_knowledge = user_message.clone();
+        let mut user_message_for_knowledge = user_message.clone();
         let mut messages = vec![Message::user(user_message)];
         let mut total_usage = UsageStats::default();
         let mut iterations = 0;
@@ -2498,6 +2499,8 @@ impl OrchestratorService {
             project_path: self.config.project_root.clone(),
             provider_name: self.provider.name().to_string(),
             model_name: self.config.provider.model.clone(),
+            execution_id: self.config.analysis_session_id.clone(),
+            task_type: self.config.task_type.clone(),
         };
 
         // Hook: on_session_start
@@ -2507,12 +2510,30 @@ impl OrchestratorService {
         if let Some(first_msg) = messages.first_mut() {
             for content in first_msg.content.iter_mut() {
                 if let MessageContent::Text { text } = content {
-                    let modified = self
+                    let hook_result = self
                         .hooks
                         .fire_on_user_message(&hook_ctx, text.clone())
                         .await;
-                    if modified != *text {
-                        *text = modified;
+                    if let Some(reason) = hook_result.stop_reason {
+                        let _ = tx
+                            .send(UnifiedStreamEvent::Error {
+                                message: reason.clone(),
+                                code: Some("guardrail_input_blocked".to_string()),
+                            })
+                            .await;
+                        return ExecutionResult {
+                            response: None,
+                            usage: total_usage,
+                            iterations,
+                            success: false,
+                            error: Some(reason),
+                        };
+                    }
+                    if let Some(modified) = hook_result.modified_message {
+                        if modified != *text {
+                            *text = modified.clone();
+                        }
+                        user_message_for_knowledge = modified;
                     }
                     break;
                 }
@@ -2686,7 +2707,7 @@ impl OrchestratorService {
                     .await
             };
 
-            let response = match response {
+            let mut response = match response {
                 Ok(r) => r,
                 Err(e) => {
                     // Emit error event
@@ -2723,9 +2744,29 @@ impl OrchestratorService {
             );
 
             // Hook: on_after_llm
-            self.hooks
+            let after_llm = self
+                .hooks
                 .fire_on_after_llm(&hook_ctx, response.content.clone())
                 .await;
+            if let Some(reason) = after_llm.block_reason {
+                let _ = tx
+                    .send(UnifiedStreamEvent::Error {
+                        message: reason.clone(),
+                        code: Some("guardrail_output_blocked".to_string()),
+                    })
+                    .await;
+                emit_usage(&tx, &total_usage).await;
+                return ExecutionResult {
+                    response: None,
+                    usage: total_usage,
+                    iterations,
+                    success: false,
+                    error: Some(reason),
+                };
+            }
+            if let Some(replacement) = after_llm.replacement_text {
+                response.content = Some(replacement);
+            }
 
             // Check for context compaction before processing tool calls (ADR-F006).
             // Delegates to pluggable compactor selected at construction time.
@@ -2923,11 +2964,8 @@ impl OrchestratorService {
 
                     // Process results in original order (events, messages, loop detection)
                     for (tc_id, effective_tool_name, mut result) in results {
-                        // Emit tool result event
-                        emit_tool_result_event(&tx, tc_id.clone(), &result).await;
-
                         // Hook: on_after_tool — capture injected context
-                        let after_tool_ctx = self
+                        let after_tool = self
                             .hooks
                             .fire_on_after_tool(
                                 &hook_ctx,
@@ -2937,11 +2975,18 @@ impl OrchestratorService {
                             )
                             .await;
 
-                        // Append plugin-injected context to tool output
-                        if let Some(ref injected) = after_tool_ctx {
+                        if let Some(reason) = after_tool.block_reason {
+                            result = ToolResult::err(reason);
+                        } else if let Some(replacement) = after_tool.replacement_output {
+                            result.set_message(replacement);
+                        }
+                        if let Some(ref injected) = after_tool.injected_context {
                             let existing = result.take_message().unwrap_or_default();
                             result.set_message(format!("{}\n\n{}", existing, injected));
                         }
+
+                        // Emit tool result event after guardrail mutations
+                        emit_tool_result_event(&tx, tc_id.clone(), &result).await;
 
                         // Add to messages
                         if result.is_dedup {
@@ -3139,11 +3184,8 @@ impl OrchestratorService {
                         merge_usage(&mut total_usage, &nested_usage);
                         iterations += nested_iterations;
 
-                        // Emit tool result event (always for frontend display)
-                        emit_tool_result_event(&tx, tc_id.clone(), &result).await;
-
                         // Hook: on_after_tool — capture injected context
-                        let after_tool_ctx = self
+                        let after_tool = self
                             .hooks
                             .fire_on_after_tool(
                                 &hook_ctx,
@@ -3153,11 +3195,18 @@ impl OrchestratorService {
                             )
                             .await;
 
-                        // Append plugin-injected context to tool output
-                        if let Some(ref injected) = after_tool_ctx {
+                        if let Some(reason) = after_tool.block_reason {
+                            result = ToolResult::err(reason);
+                        } else if let Some(replacement) = after_tool.replacement_output {
+                            result.set_message(replacement);
+                        }
+                        if let Some(ref injected) = after_tool.injected_context {
                             let existing = result.take_message().unwrap_or_default();
                             result.set_message(format!("{}\n\n{}", existing, injected));
                         }
+
+                        // Emit tool result event (always for frontend display)
+                        emit_tool_result_event(&tx, tc_id.clone(), &result).await;
 
                         // Apply EventActions if the tool declared any side effects.
                         if let Some(ref actions) = result.event_actions {
@@ -3437,10 +3486,8 @@ impl OrchestratorService {
                     };
 
                     for (tool_id, effective_tool_name, mut result) in results {
-                        emit_tool_result_event(&tx, tool_id.clone(), &result).await;
-
                         // Hook: on_after_tool — capture injected context
-                        let after_tool_ctx = self
+                        let after_tool = self
                             .hooks
                             .fire_on_after_tool(
                                 &hook_ctx,
@@ -3450,11 +3497,17 @@ impl OrchestratorService {
                             )
                             .await;
 
-                        // Append plugin-injected context to tool output
-                        if let Some(ref injected) = after_tool_ctx {
+                        if let Some(reason) = after_tool.block_reason {
+                            result = ToolResult::err(reason);
+                        } else if let Some(replacement) = after_tool.replacement_output {
+                            result.set_message(replacement);
+                        }
+                        if let Some(ref injected) = after_tool.injected_context {
                             let existing = result.take_message().unwrap_or_default();
                             result.set_message(format!("{}\n\n{}", existing, injected));
                         }
+
+                        emit_tool_result_event(&tx, tool_id.clone(), &result).await;
 
                         if result.is_dedup {
                             let dedup_msg = result.success_message().unwrap_or(
@@ -3605,10 +3658,8 @@ impl OrchestratorService {
                         merge_usage(&mut total_usage, &nested_usage);
                         iterations += nested_iterations;
 
-                        emit_tool_result_event(&tx, tool_id.clone(), &result).await;
-
                         // Hook: on_after_tool — capture injected context
-                        let after_tool_ctx = self
+                        let after_tool = self
                             .hooks
                             .fire_on_after_tool(
                                 &hook_ctx,
@@ -3618,11 +3669,17 @@ impl OrchestratorService {
                             )
                             .await;
 
-                        // Append plugin-injected context to tool output
-                        if let Some(ref injected) = after_tool_ctx {
+                        if let Some(reason) = after_tool.block_reason {
+                            result = ToolResult::err(reason);
+                        } else if let Some(replacement) = after_tool.replacement_output {
+                            result.set_message(replacement);
+                        }
+                        if let Some(ref injected) = after_tool.injected_context {
                             let existing = result.take_message().unwrap_or_default();
                             result.set_message(format!("{}\n\n{}", existing, injected));
                         }
+
+                        emit_tool_result_event(&tx, tool_id.clone(), &result).await;
 
                         // Apply EventActions if the tool declared any side effects
                         if let Some(ref actions) = result.event_actions {

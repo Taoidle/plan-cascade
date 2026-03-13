@@ -973,6 +973,38 @@
     "dismiss": "閉じる",
     "loading": "ガードレールを読み込み中...",
     "removeRule": "ルールを削除",
+    "types": {
+      "builtin": "組み込み",
+      "custom": "カスタム"
+    },
+    "actions": {
+      "warn": "警告",
+      "block": "ブロック",
+      "redact": "マスク"
+    },
+    "scope": {
+      "input": "入力",
+      "tool_call": "ツール呼び出し",
+      "tool_result": "ツール結果",
+      "assistant_output": "アシスタント出力",
+      "artifact": "成果物"
+    },
+    "runtime": {
+      "native": {
+        "title": "ネイティブ実行",
+        "managed": "本番用ガードレールで保護されています。",
+        "unmanaged": "ガードレールの初期化が完了していません。"
+      },
+      "claudeCode": {
+        "title": "Claude Code",
+        "managed": "Claude Code は同じガードレールで保護されています。",
+        "unmanaged": "Claude Code は現在管理対象外で、本番用ガードレール保証の対象外です。"
+      },
+      "strictMode": "厳格モード: {{status}}",
+      "enabled": "有効",
+      "disabled": "無効",
+      "networkHint": "ネットワーク許可リストと承認プロンプトは引き続き「ネットワーク設定」で管理されます。コンテンツガードレールとツール実行ポリシーは補完関係にあり、置き換え可能ではありません。"
+    },
 
     "builtin": {
       "title": "組み込みガードレール",
@@ -983,32 +1015,44 @@
       "title": "カスタムルール",
       "empty": "カスタムルールが定義されていません。",
       "addTitle": "カスタムルールを追加",
+      "editTitle": "カスタムルールを編集",
       "ruleName": "ルール名",
       "ruleNamePlaceholder": "例：TODO禁止",
       "regexPattern": "正規表現パターン",
       "regexPatternPlaceholder": "例：TODO|FIXME",
+      "description": "説明",
+      "scope": "適用範囲",
       "action": "アクション",
       "actionWarn": "警告",
       "actionBlock": "ブロック",
       "actionRedact": "マスク",
       "addButton": "ルールを追加",
       "adding": "追加中...",
+      "create": "ルールを作成",
+      "save": "ルールを保存",
+      "saving": "保存中...",
+      "edit": "編集",
+      "delete": "削除",
+      "cancel": "キャンセル",
       "nameRequired": "名前とパターンは必須です",
       "addFailed": "ルールの追加に失敗しました。正規表現パターンを確認してください。"
     },
 
-    "triggerLog": {
-      "title": "トリガーログ",
-      "loading": "トリガーログを読み込み中...",
+    "events": {
+      "title": "監査イベント",
+      "loading": "ガードレールイベントを読み込み中...",
       "empty": "トリガーイベントはまだ記録されていません。",
-      "eventCount": "{{count}} 件のイベント",
-      "eventCount_plural": "{{count}} 件のイベント",
-      "clearLog": "ログをクリア",
-      "colTime": "時間",
-      "colGuardrail": "ガードレール",
-      "colDirection": "方向",
-      "colResult": "結果",
-      "colContent": "内容"
+      "recentCount": "最近 {{count}} 件のイベント",
+      "recentCount_plural": "最近 {{count}} 件のイベント",
+      "clear": "クリア",
+      "noPreview": "プレビューなし",
+      "columns": {
+        "time": "時間",
+        "rule": "ルール",
+        "surface": "対象面",
+        "decision": "判定",
+        "preview": "プレビュー"
+      }
     }
   },
 

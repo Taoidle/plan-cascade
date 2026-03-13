@@ -6,7 +6,9 @@
 use async_trait::async_trait;
 use regex::Regex;
 
-use super::{Direction, Guardrail, GuardrailAction, GuardrailResult};
+use super::{
+    Direction, Guardrail, GuardrailAction, GuardrailResult, GuardrailRuntimeContext,
+};
 
 /// A user-defined guardrail rule.
 pub struct CustomGuardrail {
@@ -18,17 +20,30 @@ pub struct CustomGuardrail {
     regex: Regex,
     /// Action to take on match
     action: GuardrailAction,
+    /// Optional user-facing description.
+    description: String,
 }
 
 impl CustomGuardrail {
     /// Create a new custom guardrail from a regex pattern string.
     /// Returns None if the pattern fails to compile.
     pub fn new(id: String, name: String, pattern: &str, action: GuardrailAction) -> Option<Self> {
+        Self::new_with_description(id, name, pattern, action, "User-defined guardrail rule")
+    }
+
+    pub fn new_with_description(
+        id: String,
+        name: String,
+        pattern: &str,
+        action: GuardrailAction,
+        description: impl Into<String>,
+    ) -> Option<Self> {
         Regex::new(pattern).ok().map(|regex| Self {
             id,
             rule_name: name,
             regex,
             action,
+            description: description.into(),
         })
     }
 
@@ -46,19 +61,60 @@ impl CustomGuardrail {
     pub fn action(&self) -> GuardrailAction {
         self.action
     }
+
+    pub fn redact_matches(&self, content: &str) -> Option<String> {
+        if self.regex.is_match(content) {
+            Some(
+                self.regex
+                    .replace_all(content, format!("[REDACTED:{}]", self.rule_name))
+                    .to_string(),
+            )
+        } else {
+            None
+        }
+    }
 }
 
 #[async_trait]
 impl Guardrail for CustomGuardrail {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
     fn name(&self) -> &str {
         &self.rule_name
     }
 
     fn description(&self) -> &str {
-        "User-defined guardrail rule"
+        &self.description
     }
 
-    async fn validate(&self, content: &str, _direction: Direction) -> GuardrailResult {
+    fn default_scopes(&self) -> Vec<Direction> {
+        vec![Direction::Input, Direction::Output, Direction::Tool]
+    }
+
+    fn default_action_label(&self) -> &'static str {
+        match self.action {
+            GuardrailAction::Warn => "warn",
+            GuardrailAction::Block => "block",
+            GuardrailAction::Redact => "redact",
+        }
+    }
+
+    fn editable(&self) -> bool {
+        true
+    }
+
+    fn redact_preview(&self, content: &str) -> Option<String> {
+        self.redact_matches(content)
+    }
+
+    async fn validate(
+        &self,
+        content: &str,
+        _direction: Direction,
+        _runtime: &GuardrailRuntimeContext,
+    ) -> GuardrailResult {
         if !self.regex.is_match(content) {
             return GuardrailResult::Pass;
         }

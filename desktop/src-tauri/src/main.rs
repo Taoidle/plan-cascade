@@ -448,6 +448,11 @@ fn main() {
             // Guardrail commands
             plan_cascade_desktop::commands::guardrails::list_guardrails,
             plan_cascade_desktop::commands::guardrails::toggle_guardrail,
+            plan_cascade_desktop::commands::guardrails::create_custom_guardrail,
+            plan_cascade_desktop::commands::guardrails::update_guardrail,
+            plan_cascade_desktop::commands::guardrails::delete_guardrail,
+            plan_cascade_desktop::commands::guardrails::list_guardrail_events,
+            plan_cascade_desktop::commands::guardrails::clear_guardrail_events,
             plan_cascade_desktop::commands::guardrails::add_custom_rule,
             plan_cascade_desktop::commands::guardrails::remove_custom_rule,
             plan_cascade_desktop::commands::guardrails::get_trigger_log,

@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use regex::Regex;
 use std::sync::OnceLock;
 
-use super::{Direction, Guardrail, GuardrailResult, SecurityRule};
+use super::{Direction, Guardrail, GuardrailResult, GuardrailRuntimeContext, SecurityRule};
 
 /// Compiled security rule with pre-compiled regex.
 struct CompiledRule {
@@ -129,6 +129,10 @@ impl Default for CodeSecurityGuardrail {
 
 #[async_trait]
 impl Guardrail for CodeSecurityGuardrail {
+    fn id(&self) -> &str {
+        "builtin-code-security"
+    }
+
     fn name(&self) -> &str {
         "CodeSecurity"
     }
@@ -137,14 +141,29 @@ impl Guardrail for CodeSecurityGuardrail {
         "Detects SQL injection, command injection, eval/exec usage, and unsafe blocks"
     }
 
-    async fn validate(&self, content: &str, direction: Direction) -> GuardrailResult {
+    fn builtin_key(&self) -> Option<&str> {
+        Some("code_security")
+    }
+
+    fn default_scopes(&self) -> Vec<Direction> {
+        vec![Direction::Output, Direction::Tool, Direction::Artifact]
+    }
+
+    fn default_action_label(&self) -> &'static str {
+        "warn"
+    }
+
+    async fn validate(
+        &self,
+        content: &str,
+        direction: Direction,
+        _runtime: &GuardrailRuntimeContext,
+    ) -> GuardrailResult {
         match direction {
-            Direction::Input => {
-                // User input: pass through (don't block user from discussing code)
+            Direction::Input | Direction::ToolCall => {
                 GuardrailResult::Pass
             }
-            Direction::Output | Direction::Tool => {
-                // LLM output / tool results: detect and warn
+            Direction::Output | Direction::Tool | Direction::Artifact => {
                 let violations = self.detect(content);
                 if violations.is_empty() {
                     GuardrailResult::Pass
