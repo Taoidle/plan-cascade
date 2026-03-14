@@ -132,13 +132,13 @@ export function TabbedRightPanel({
       >
         {effectiveActiveTab === 'output' ? (
           <div className="min-h-0 flex flex-col h-full">
-            <div className="shrink-0 space-y-2 p-2 max-h-[42%] overflow-y-auto border-b border-gray-200 dark:border-gray-700">
+            <div className="shrink-0 space-y-2 p-2 overflow-y-auto border-b border-gray-200 dark:border-gray-700 max-h-[60%]">
               <WorkflowKernelProgressPanel workflowMode={workflowMode} workflowPhase={workflowPhase} />
               {showAnalysisCoverage && analysisCoverage && <AnalysisCoveragePanel coverage={analysisCoverage} />}
               {showWorkflowReliability && <WorkflowFailureSummaryPanel snapshot={observabilitySnapshot} />}
               <ErrorState maxErrors={8} />
             </div>
-            <div className="min-h-0 flex-1 flex flex-col">
+            <div className="min-h-0 flex-1 flex flex-col overflow-hidden">
               {showExecutionLogs && <ExecutionLogsCard logs={logs} />}
               {showStreamingOutput && (
                 <StreamingOutput
