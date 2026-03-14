@@ -206,7 +206,9 @@ fn track_analytics(
         event.request_sequence = Some(iteration as i64);
     }
 
-    let _ = atx.try_send(crate::services::analytics::TrackerMessage::TrackEvent(event));
+    let _ = atx.try_send(crate::services::analytics::TrackerMessage::TrackEvent(
+        event,
+    ));
 }
 
 fn merge_usage(total: &mut UsageStats, delta: &UsageStats) {

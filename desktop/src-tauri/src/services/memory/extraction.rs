@@ -468,8 +468,11 @@ pub async fn run_session_extraction(
     const LLM_TIMEOUT_SECS: u64 = 30;
 
     let effective_summary = if conversation_content.len() > MemoryExtractor::SUMMARIZE_THRESHOLD {
-        let summarize_prompt =
-            MemoryExtractor::build_summarization_prompt(task_description, conversation_content, locale);
+        let summarize_prompt = MemoryExtractor::build_summarization_prompt(
+            task_description,
+            conversation_content,
+            locale,
+        );
         let summarize_call = provider.send_message(
             vec![Message::user(summarize_prompt)],
             None,
@@ -543,8 +546,11 @@ pub async fn run_session_extraction_candidates(
     const LLM_TIMEOUT_SECS: u64 = 30;
 
     let effective_summary = if conversation_content.len() > MemoryExtractor::SUMMARIZE_THRESHOLD {
-        let summarize_prompt =
-            MemoryExtractor::build_summarization_prompt(task_description, conversation_content, locale);
+        let summarize_prompt = MemoryExtractor::build_summarization_prompt(
+            task_description,
+            conversation_content,
+            locale,
+        );
         let summarize_call = provider.send_message(
             vec![Message::user(summarize_prompt)],
             None,

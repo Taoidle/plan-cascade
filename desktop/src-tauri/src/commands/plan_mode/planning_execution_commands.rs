@@ -96,11 +96,11 @@ fn build_plan_completion_transcript_line(session: &PlanModeSession) -> Option<Va
                         output.summary.clone()
                     }
                 })
-                        .unwrap_or_else(|| {
-                            session
-                                .step_states
-                                .get(&step.id)
-                                .map(|state| match state {
+                .unwrap_or_else(|| {
+                    session
+                        .step_states
+                        .get(&step.id)
+                        .map(|state| match state {
                             StepExecutionState::Completed { .. } => "Completed".to_string(),
                             StepExecutionState::SoftFailed { reason, .. } => {
                                 format!("Completed with warnings: {reason}")
@@ -112,9 +112,9 @@ fn build_plan_completion_transcript_line(session: &PlanModeSession) -> Option<Va
                             StepExecutionState::Cancelled => "Cancelled".to_string(),
                             StepExecutionState::Running => "Running".to_string(),
                             StepExecutionState::Pending => "Pending".to_string(),
-                                })
-                                .unwrap_or_else(|| "No summary available".to_string())
-                        });
+                        })
+                        .unwrap_or_else(|| "No summary available".to_string())
+                });
             (step.id.clone(), summary)
         })
         .collect();
@@ -349,7 +349,8 @@ pub async fn generate_plan(
         false,
     )
     .await?;
-    let analytics_components = get_analytics_tracker_components(&app_handle, app_state.inner()).await;
+    let analytics_components =
+        get_analytics_tracker_components(&app_handle, app_state.inner()).await;
     let (operation_id, operation_token) = register_plan_operation_token(&state, &session_id).await;
     let result = tokio::select! {
         _ = operation_token.cancelled() => Ok(CommandResponse::err(PLAN_OPERATION_CANCELLED_ERROR)),
@@ -577,8 +578,10 @@ pub async fn approve_plan(
     let provider_config =
         build_llm_provider_from_plan_phase_agent(&resolved_execution_agent, app_state.inner())
             .await?;
-    let llm_provider = crate::services::task_mode::prd_generator::create_provider(provider_config.clone());
-    let analytics_components = get_analytics_tracker_components(&app_handle, app_state.inner()).await;
+    let llm_provider =
+        crate::services::task_mode::prd_generator::create_provider(provider_config.clone());
+    let analytics_components =
+        get_analytics_tracker_components(&app_handle, app_state.inner()).await;
 
     let registry = state.adapter_registry.read().await;
     let adapter = registry
@@ -806,7 +809,9 @@ pub async fn approve_plan(
         if let Some(session) = sessions.get_mut(&sid) {
             match result {
                 Ok((outputs, states, step_attempts)) => {
-                    let failed = states.values().any(|s| matches!(s, StepExecutionState::HardFailed { .. }));
+                    let failed = states
+                        .values()
+                        .any(|s| matches!(s, StepExecutionState::HardFailed { .. }));
                     let cancelled = states
                         .values()
                         .any(|s| matches!(s, StepExecutionState::Cancelled));
@@ -828,12 +833,12 @@ pub async fn approve_plan(
                     session.phase = PlanModePhase::Failed;
                     session.step_attempts.clear();
                     // Store error in a synthetic step state
-                        session.step_states.insert(
-                            "_error".to_string(),
+                    session.step_states.insert(
+                        "_error".to_string(),
                         StepExecutionState::HardFailed {
-                                reason: format!("{e}"),
-                            },
-                        );
+                            reason: format!("{e}"),
+                        },
+                    );
                 }
             }
             updated_session_snapshot = Some(session.clone());
@@ -998,8 +1003,10 @@ pub async fn retry_plan_step(
     }
     let provider_config =
         build_llm_provider_from_plan_phase_agent(&resolved_retry_agent, app_state.inner()).await?;
-    let llm_provider = crate::services::task_mode::prd_generator::create_provider(provider_config.clone());
-    let analytics_components = get_analytics_tracker_components(&app_handle, app_state.inner()).await;
+    let llm_provider =
+        crate::services::task_mode::prd_generator::create_provider(provider_config.clone());
+    let analytics_components =
+        get_analytics_tracker_components(&app_handle, app_state.inner()).await;
 
     let registry = state.adapter_registry.read().await;
     let adapter = registry

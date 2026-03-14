@@ -69,8 +69,12 @@ pub struct GuardrailRuntimeContext {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum GuardrailResult {
     Pass,
-    Warn { message: String },
-    Block { reason: String },
+    Warn {
+        message: String,
+    },
+    Block {
+        reason: String,
+    },
     Redact {
         redacted_content: String,
         redacted_items: Vec<String>,
@@ -330,8 +334,14 @@ mod tests {
 
     #[test]
     fn guardrail_action_parse_is_case_insensitive() {
-        assert_eq!(GuardrailAction::parse("BLOCK"), Some(GuardrailAction::Block));
-        assert_eq!(GuardrailAction::parse(" redact "), Some(GuardrailAction::Redact));
+        assert_eq!(
+            GuardrailAction::parse("BLOCK"),
+            Some(GuardrailAction::Block)
+        );
+        assert_eq!(
+            GuardrailAction::parse(" redact "),
+            Some(GuardrailAction::Redact)
+        );
         assert_eq!(GuardrailAction::parse("unknown"), None);
     }
 
@@ -346,7 +356,10 @@ mod tests {
             GuardrailMode::parse("monitor-only"),
             Some(GuardrailMode::MonitorOnly)
         );
-        assert_eq!(GuardrailMode::parse("balanced"), Some(GuardrailMode::Balanced));
+        assert_eq!(
+            GuardrailMode::parse("balanced"),
+            Some(GuardrailMode::Balanced)
+        );
         assert_eq!(GuardrailMode::parse("strict"), Some(GuardrailMode::Strict));
         assert_eq!(GuardrailMode::parse("unknown"), None);
     }

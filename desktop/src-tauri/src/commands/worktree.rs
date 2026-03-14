@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+use crate::commands::workflow::{emit_kernel_update_for_session, emit_session_catalog_update};
 use crate::models::response::CommandResponse;
 use crate::models::worktree::{
     CompleteWorktreeResult, CreateManagedWorktreeRequest, CreatePullRequestRequest,
@@ -19,9 +20,6 @@ use crate::services::workflow_kernel::{
 };
 use crate::services::worktree::WorktreeManager;
 use crate::state::AppState;
-use crate::commands::workflow::{
-    emit_kernel_update_for_session, emit_session_catalog_update,
-};
 
 /// State for the worktree service
 pub struct WorktreeState {
@@ -73,10 +71,26 @@ fn active_phase_for_session(
     session: &crate::services::workflow_kernel::WorkflowSession,
 ) -> Option<&str> {
     match session.active_mode {
-        WorkflowMode::Chat => session.mode_snapshots.chat.as_ref().map(|state| state.phase.as_str()),
-        WorkflowMode::Plan => session.mode_snapshots.plan.as_ref().map(|state| state.phase.as_str()),
-        WorkflowMode::Task => session.mode_snapshots.task.as_ref().map(|state| state.phase.as_str()),
-        WorkflowMode::Debug => session.mode_snapshots.debug.as_ref().map(|state| state.phase.as_str()),
+        WorkflowMode::Chat => session
+            .mode_snapshots
+            .chat
+            .as_ref()
+            .map(|state| state.phase.as_str()),
+        WorkflowMode::Plan => session
+            .mode_snapshots
+            .plan
+            .as_ref()
+            .map(|state| state.phase.as_str()),
+        WorkflowMode::Task => session
+            .mode_snapshots
+            .task
+            .as_ref()
+            .map(|state| state.phase.as_str()),
+        WorkflowMode::Debug => session
+            .mode_snapshots
+            .debug
+            .as_ref()
+            .map(|state| state.phase.as_str()),
     }
 }
 
@@ -282,13 +296,22 @@ pub async fn workflow_create_isolated_session(
 ) -> Result<CommandResponse<crate::services::workflow_kernel::WorkflowSession>, String> {
     let root_path = PathBuf::from(&repo_path);
     let mut metadata = serde_json::Map::new();
-    metadata.insert("workspacePath".to_string(), serde_json::Value::String(repo_path.clone()));
+    metadata.insert(
+        "workspacePath".to_string(),
+        serde_json::Value::String(repo_path.clone()),
+    );
     metadata.insert(
         "workspaceRootPath".to_string(),
         serde_json::Value::String(repo_path.clone()),
     );
-    if let Some(title) = display_title.as_ref().filter(|value| !value.trim().is_empty()) {
-        metadata.insert("displayTitle".to_string(), serde_json::Value::String(title.clone()));
+    if let Some(title) = display_title
+        .as_ref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        metadata.insert(
+            "displayTitle".to_string(),
+            serde_json::Value::String(title.clone()),
+        );
     }
     let initial_context = Some(HandoffContextBundle {
         conversation_context: Vec::new(),
@@ -315,7 +338,10 @@ pub async fn workflow_create_isolated_session(
     };
 
     let manager = worktree_state.manager.read().await;
-    let runtime_binding = match manager.create_managed_worktree_for_session(&root_path, request).await {
+    let runtime_binding = match manager
+        .create_managed_worktree_for_session(&root_path, request)
+        .await
+    {
         Ok(binding) => binding,
         Err(error) => {
             let _ = state.delete_session(&opened.session_id).await;
@@ -331,8 +357,15 @@ pub async fn workflow_create_isolated_session(
         Ok(session) => session,
         Err(error) => return Ok(CommandResponse::err(error)),
     };
-    let _ = emit_kernel_update_for_session(&app, state.inner(), &updated.session_id, "workflow_create_isolated_session").await;
-    let _ = emit_session_catalog_update(&app, state.inner(), "workflow_create_isolated_session").await;
+    let _ = emit_kernel_update_for_session(
+        &app,
+        state.inner(),
+        &updated.session_id,
+        "workflow_create_isolated_session",
+    )
+    .await;
+    let _ =
+        emit_session_catalog_update(&app, state.inner(), "workflow_create_isolated_session").await;
     Ok(CommandResponse::ok(updated))
 }
 
@@ -405,8 +438,15 @@ pub async fn workflow_move_session_to_worktree(
         Ok(session) => session,
         Err(error) => return Ok(CommandResponse::err(error)),
     };
-    let _ = emit_kernel_update_for_session(&app, state.inner(), &updated.session_id, "workflow_move_session_to_worktree").await;
-    let _ = emit_session_catalog_update(&app, state.inner(), "workflow_move_session_to_worktree").await;
+    let _ = emit_kernel_update_for_session(
+        &app,
+        state.inner(),
+        &updated.session_id,
+        "workflow_move_session_to_worktree",
+    )
+    .await;
+    let _ =
+        emit_session_catalog_update(&app, state.inner(), "workflow_move_session_to_worktree").await;
     Ok(CommandResponse::ok(updated))
 }
 
@@ -468,8 +508,15 @@ pub async fn workflow_attach_session_worktree(
         Ok(session) => session,
         Err(error) => return Ok(CommandResponse::err(error)),
     };
-    let _ = emit_kernel_update_for_session(&app, state.inner(), &updated.session_id, "workflow_attach_session_worktree").await;
-    let _ = emit_session_catalog_update(&app, state.inner(), "workflow_attach_session_worktree").await;
+    let _ = emit_kernel_update_for_session(
+        &app,
+        state.inner(),
+        &updated.session_id,
+        "workflow_attach_session_worktree",
+    )
+    .await;
+    let _ =
+        emit_session_catalog_update(&app, state.inner(), "workflow_attach_session_worktree").await;
     Ok(CommandResponse::ok(updated))
 }
 
@@ -499,8 +546,16 @@ pub async fn workflow_detach_session_worktree(
         .update_session_runtime(
             &session_id,
             SessionRuntimeInfo {
-                root_path: session.runtime.root_path.clone().or_else(|| session.workspace_path.clone()),
-                runtime_path: session.runtime.root_path.clone().or_else(|| session.workspace_path.clone()),
+                root_path: session
+                    .runtime
+                    .root_path
+                    .clone()
+                    .or_else(|| session.workspace_path.clone()),
+                runtime_path: session
+                    .runtime
+                    .root_path
+                    .clone()
+                    .or_else(|| session.workspace_path.clone()),
                 runtime_kind: WorkflowRuntimeKind::Main,
                 display_label: None,
                 branch: None,
@@ -516,8 +571,15 @@ pub async fn workflow_detach_session_worktree(
         Ok(session) => session,
         Err(error) => return Ok(CommandResponse::err(error)),
     };
-    let _ = emit_kernel_update_for_session(&app, state.inner(), &updated.session_id, "workflow_detach_session_worktree").await;
-    let _ = emit_session_catalog_update(&app, state.inner(), "workflow_detach_session_worktree").await;
+    let _ = emit_kernel_update_for_session(
+        &app,
+        state.inner(),
+        &updated.session_id,
+        "workflow_detach_session_worktree",
+    )
+    .await;
+    let _ =
+        emit_session_catalog_update(&app, state.inner(), "workflow_detach_session_worktree").await;
     Ok(CommandResponse::ok(updated))
 }
 
@@ -537,14 +599,22 @@ pub async fn workflow_cleanup_session_worktree(
         return Ok(CommandResponse::err(error));
     }
     let Some(worktree_id) = session.runtime.managed_worktree_id.as_deref() else {
-        return Ok(CommandResponse::err("Session is not bound to a managed worktree"));
+        return Ok(CommandResponse::err(
+            "Session is not bound to a managed worktree",
+        ));
     };
     let Some(root_path) = session.runtime.root_path.as_deref() else {
-        return Ok(CommandResponse::err("Session is missing root workspace path"));
+        return Ok(CommandResponse::err(
+            "Session is missing root workspace path",
+        ));
     };
     let manager = worktree_state.manager.read().await;
     if let Err(error) = manager
-        .cleanup_managed_worktree(&PathBuf::from(root_path), worktree_id, force.unwrap_or(true))
+        .cleanup_managed_worktree(
+            &PathBuf::from(root_path),
+            worktree_id,
+            force.unwrap_or(true),
+        )
         .await
     {
         return Ok(CommandResponse::err(error.to_string()));
@@ -572,8 +642,15 @@ pub async fn workflow_cleanup_session_worktree(
         Ok(session) => session,
         Err(error) => return Ok(CommandResponse::err(error)),
     };
-    let _ = emit_kernel_update_for_session(&app, state.inner(), &updated.session_id, "workflow_cleanup_session_worktree").await;
-    let _ = emit_session_catalog_update(&app, state.inner(), "workflow_cleanup_session_worktree").await;
+    let _ = emit_kernel_update_for_session(
+        &app,
+        state.inner(),
+        &updated.session_id,
+        "workflow_cleanup_session_worktree",
+    )
+    .await;
+    let _ =
+        emit_session_catalog_update(&app, state.inner(), "workflow_cleanup_session_worktree").await;
     Ok(CommandResponse::ok(updated))
 }
 
@@ -600,10 +677,14 @@ pub async fn workflow_prepare_session_pr(
         Err(error) => return Ok(CommandResponse::err(error)),
     };
     let Some(worktree_id) = session.runtime.managed_worktree_id.as_deref() else {
-        return Ok(CommandResponse::err("Session is not bound to a managed worktree"));
+        return Ok(CommandResponse::err(
+            "Session is not bound to a managed worktree",
+        ));
     };
     let Some(root_path) = session.runtime.root_path.as_deref() else {
-        return Ok(CommandResponse::err("Session is missing root workspace path"));
+        return Ok(CommandResponse::err(
+            "Session is missing root workspace path",
+        ));
     };
     let manager = worktree_state.manager.read().await;
     match manager
@@ -633,10 +714,14 @@ pub async fn workflow_create_session_pr(
         Err(error) => return Ok(CommandResponse::err(error)),
     };
     let Some(worktree_id) = session.runtime.managed_worktree_id.as_deref() else {
-        return Ok(CommandResponse::err("Session is not bound to a managed worktree"));
+        return Ok(CommandResponse::err(
+            "Session is not bound to a managed worktree",
+        ));
     };
     let Some(root_path) = session.runtime.root_path.as_deref() else {
-        return Ok(CommandResponse::err("Session is missing root workspace path"));
+        return Ok(CommandResponse::err(
+            "Session is missing root workspace path",
+        ));
     };
     let token_key = forge_token_key(&provider);
     let token = match app_state.get_api_key(token_key).await {
@@ -665,7 +750,10 @@ pub async fn workflow_create_session_pr(
         .await
     {
         Ok(result) => {
-            if let Ok(worktree) = manager.get_worktree(&PathBuf::from(root_path), worktree_id).await {
+            if let Ok(worktree) = manager
+                .get_worktree(&PathBuf::from(root_path), worktree_id)
+                .await
+            {
                 let mut runtime = session.runtime.clone();
                 runtime.branch = Some(worktree.branch.clone());
                 runtime.target_branch = Some(worktree.target_branch.clone());

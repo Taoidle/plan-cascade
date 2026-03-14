@@ -1,6 +1,8 @@
 use tauri::{AppHandle, State};
 
-use crate::app_shell::{hide_main_window_to_background, quit_application, show_main_window, AppShellState};
+use crate::app_shell::{
+    hide_main_window_to_background, quit_application, show_main_window, AppShellState,
+};
 
 #[tauri::command]
 pub async fn app_quit(app: AppHandle, shell_state: State<'_, AppShellState>) -> Result<(), String> {

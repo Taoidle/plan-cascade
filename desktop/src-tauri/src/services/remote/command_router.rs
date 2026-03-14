@@ -98,7 +98,10 @@ impl CommandRouter {
                 always_allow: false,
             });
         }
-        if let Some(request_id) = callback.trim().strip_prefix("remote:approval:always-allow:") {
+        if let Some(request_id) = callback
+            .trim()
+            .strip_prefix("remote:approval:always-allow:")
+        {
             return Some(RemoteCommand::RespondPermission {
                 request_id: request_id.to_string(),
                 allowed: true,

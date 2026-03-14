@@ -14,12 +14,12 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::services::llm::types::ProviderConfig;
 use crate::commands::knowledge::KnowledgeState;
 use crate::services::knowledge::context_provider::{
     KnowledgeContextConfig, KnowledgeContextProvider,
 };
 use crate::services::knowledge::pipeline::ScopedDocumentRef;
+use crate::services::llm::types::ProviderConfig;
 use crate::services::memory::query_policy_v2::tuning_for_task_context_v2;
 use crate::services::memory::query_v2::{
     query_memory_entries_v2 as query_memory_entries_unified_v2, MemoryScopeV2, MemoryStatusV2,
@@ -35,8 +35,8 @@ use crate::services::skills::model::{
     GeneratedSkillRecord, InjectionPhase, SelectionPolicy, SkillDocument, SkillIndex, SkillMatch,
     SkillReviewStatus, SkillSource, SkillToolPolicyMode,
 };
-use crate::services::skills::router::SkillRerankDiagnostics;
 use crate::services::skills::router::rerank_skill_matches;
+use crate::services::skills::router::SkillRerankDiagnostics;
 use crate::services::skills::select::{
     select_skill_candidates_for_session, select_skills_for_session,
 };
@@ -841,11 +841,19 @@ fn merge_skill_matches(primary: Vec<SkillMatch>, supplemental: Vec<SkillMatch>) 
     merged
 }
 
-fn filter_skill_matches_by_review(matches: Vec<SkillMatch>, index: &SkillIndex, include_pending_review: bool) -> Vec<SkillMatch> {
+fn filter_skill_matches_by_review(
+    matches: Vec<SkillMatch>,
+    index: &SkillIndex,
+    include_pending_review: bool,
+) -> Vec<SkillMatch> {
     matches
         .into_iter()
         .filter(|skill_match| {
-            let Some(doc) = index.skills().iter().find(|doc| doc.id == skill_match.skill.id) else {
+            let Some(doc) = index
+                .skills()
+                .iter()
+                .find(|doc| doc.id == skill_match.skill.id)
+            else {
                 return false;
             };
             match doc.review_status {
@@ -914,11 +922,19 @@ fn skill_source_label(source: &SkillSource) -> String {
     }
 }
 
-fn collect_hierarchy_matches(project_root: &Path, index: &SkillIndex, matches: &[SkillMatch]) -> Vec<String> {
+fn collect_hierarchy_matches(
+    project_root: &Path,
+    index: &SkillIndex,
+    matches: &[SkillMatch],
+) -> Vec<String> {
     let mut hierarchy = BTreeSet::new();
 
     for skill_match in matches {
-        let Some(doc) = index.skills().iter().find(|doc| doc.id == skill_match.skill.id) else {
+        let Some(doc) = index
+            .skills()
+            .iter()
+            .find(|doc| doc.id == skill_match.skill.id)
+        else {
             continue;
         };
 
@@ -970,7 +986,9 @@ fn collect_why_not_selected(
                 "phase_mismatch"
             } else {
                 match doc.review_status {
-                    Some(SkillReviewStatus::PendingReview) if !include_pending_review => "pending_review",
+                    Some(SkillReviewStatus::PendingReview) if !include_pending_review => {
+                        "pending_review"
+                    }
                     Some(SkillReviewStatus::Rejected) => "rejected",
                     Some(SkillReviewStatus::Archived) => "archived",
                     _ if force_user_selected
@@ -1063,23 +1081,15 @@ pub async fn resolve_effective_skills(
     } else {
         let policy = SelectionPolicy::default();
         let recalled_candidates = filter_skill_matches_by_review(
-            select_skill_candidates_for_session(
-                &index,
-                project_root,
-                query,
-                &phase,
-                &policy,
-                10,
-            ),
+            select_skill_candidates_for_session(&index, project_root, query, &phase, &policy, 10),
             &index,
             include_pending_review,
         );
-        let deterministic_auto =
-            filter_skill_matches_by_review(
-                select_skills_for_session(&index, project_root, query, &phase, &policy),
-                &index,
-                include_pending_review,
-            );
+        let deterministic_auto = filter_skill_matches_by_review(
+            select_skills_for_session(&index, project_root, query, &phase, &policy),
+            &index,
+            include_pending_review,
+        );
         let deterministic_auto_empty = deterministic_auto.is_empty();
         let rerank_result = rerank_skill_matches(
             project_root,
@@ -1095,10 +1105,7 @@ pub async fn resolve_effective_skills(
             None => deterministic_auto,
         };
         if auto_matches.is_empty() && !recalled_candidates.is_empty() && deterministic_auto_empty {
-            auto_matches = recalled_candidates
-                .into_iter()
-                .take(policy.top_k)
-                .collect();
+            auto_matches = recalled_candidates.into_iter().take(policy.top_k).collect();
         }
         let pre_review_matches = merge_skill_matches(command_invoked_matches.clone(), auto_matches);
         let rerank_succeeded = router_diagnostics.skill_router_used
@@ -1129,7 +1136,8 @@ pub async fn resolve_effective_skills(
         };
         (pre_review_matches, selection_reason, selection_origin)
     };
-    let matches = filter_skill_matches_by_review(pre_review_matches.clone(), &index, include_pending_review);
+    let matches =
+        filter_skill_matches_by_review(pre_review_matches.clone(), &index, include_pending_review);
     let selection_reason = if !force_user_selected
         && matches.is_empty()
         && !invoked_skill_ids.is_empty()
@@ -1144,14 +1152,12 @@ pub async fn resolve_effective_skills(
     } else {
         selection_reason
     };
-    let selection_origin = if !force_user_selected
-        && matches.is_empty()
-        && selection_origin == "auto"
-    {
-        "none".to_string()
-    } else {
-        selection_origin
-    };
+    let selection_origin =
+        if !force_user_selected && matches.is_empty() && selection_origin == "auto" {
+            "none".to_string()
+        } else {
+            selection_origin
+        };
 
     let policy = SelectionPolicy::default();
     let skills_block = build_skill_block_from_matches(&index, &matches, &policy);

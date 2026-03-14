@@ -73,7 +73,11 @@ pub trait RemoteAdapter: Send + Sync {
         Ok(0)
     }
 
-    async fn send_action_card(&self, chat_id: i64, card: &RemoteActionCard) -> Result<(), RemoteError> {
+    async fn send_action_card(
+        &self,
+        chat_id: i64,
+        card: &RemoteActionCard,
+    ) -> Result<(), RemoteError> {
         let mut body = format!("{}\n\n{}", card.title, card.body);
         if !card.actions.is_empty() {
             body.push_str("\n\nActions:");
@@ -84,7 +88,11 @@ pub trait RemoteAdapter: Send + Sync {
         self.send_message(chat_id, &body).await
     }
 
-    async fn send_ui_message(&self, chat_id: i64, message: &RemoteUiMessage) -> Result<(), RemoteError> {
+    async fn send_ui_message(
+        &self,
+        chat_id: i64,
+        message: &RemoteUiMessage,
+    ) -> Result<(), RemoteError> {
         match message {
             RemoteUiMessage::PlainText(text) => self.send_message(chat_id, text).await,
             RemoteUiMessage::ActionCard(card) => self.send_action_card(chat_id, card).await,
@@ -110,11 +118,9 @@ impl RemoteAdapterFactory {
         proxy: Option<&ProxyConfig>,
     ) -> Result<Arc<dyn RemoteAdapter>, RemoteError> {
         match adapter_type {
-            RemoteAdapterType::Telegram => {
-                Ok(Arc::new(
-                    telegram::TelegramAdapter::new(telegram_config, proxy).await?,
-                ))
-            }
+            RemoteAdapterType::Telegram => Ok(Arc::new(
+                telegram::TelegramAdapter::new(telegram_config, proxy).await?,
+            )),
         }
     }
 }

@@ -535,7 +535,9 @@ pub fn build_system_prompt_with_memories(
     let operating_contract = build_operating_contract(language);
     let memory_policy = build_memory_policy_addendum(
         language,
-        project_memories.map(|mems| !mems.is_empty()).unwrap_or(false),
+        project_memories
+            .map(|mems| !mems.is_empty())
+            .unwrap_or(false),
     );
 
     let identity_line = format!(
@@ -923,7 +925,7 @@ pub fn build_tool_priority_section(
                     section.push_str(
                         "### 代码索引状态\n\
                          - Codebase index: **ready**\n\
-                         - Semantic search: "
+                         - Semantic search: ",
                     );
                     section.push_str(if semantic_search_ready {
                         "**available**\n\n"
@@ -1056,7 +1058,7 @@ pub fn build_tool_priority_section(
                          Grep, Read, or Glob.\n\
                          - `scope=\"hybrid\"` — comprehensive search (default)\n\
                          - `scope=\"symbol\"` — find function/class/struct definitions by name\n\
-                         - `scope=\"path\"` — find files by path/name patterns\n"
+                         - `scope=\"path\"` — find files by path/name patterns\n",
                     );
                     if semantic_search_ready {
                         section.push_str(
@@ -1201,7 +1203,9 @@ pub fn build_sub_agent_tool_guidance(
         "A pre-built codebase index is available. For code understanding tasks, use CodebaseSearch before Grep/Read."
             .to_string(),
     );
-    lines.push("已有预构建的代码索引。涉及代码理解时，先用 CodebaseSearch，再用 Grep/Read。".to_string());
+    lines.push(
+        "已有预构建的代码索引。涉及代码理解时，先用 CodebaseSearch，再用 Grep/Read。".to_string(),
+    );
     lines.push(String::new());
 
     match task_type {
@@ -1244,7 +1248,8 @@ pub fn build_sub_agent_tool_guidance(
                     .to_string(),
             );
             lines.push(
-                "分析任务优先顺序：先用 CodebaseSearch。Read 用于缩小范围后读取，Grep 仅作回退。".to_string(),
+                "分析任务优先顺序：先用 CodebaseSearch。Read 用于缩小范围后读取，Grep 仅作回退。"
+                    .to_string(),
             );
             lines.push(String::new());
             lines.push(

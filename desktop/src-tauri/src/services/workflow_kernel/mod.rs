@@ -1537,12 +1537,16 @@ impl WorkflowKernelState {
     pub async fn sync_chat_runtime_event(
         &self,
         binding_session_id: &str,
+        event_run_id: Option<&str>,
         event: &UnifiedStreamEvent,
     ) -> Result<Option<WorkflowSessionMutation>, String> {
         let normalized_binding_session_id = binding_session_id.trim();
         if normalized_binding_session_id.is_empty() {
             return Ok(None);
         }
+        let normalized_event_run_id = event_run_id
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
 
         let route = {
             let sync = self.chat_runtime_sync.read().await;
@@ -1573,6 +1577,19 @@ impl WorkflowKernelState {
             sync.insert(normalized_binding_session_id.to_string(), fallback.clone());
             fallback
         };
+
+        if let (Some(expected_run_id), Some(incoming_run_id)) = (
+            route
+                .run_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty()),
+            normalized_event_run_id,
+        ) {
+            if expected_run_id != incoming_run_id {
+                return Ok(None);
+            }
+        }
 
         let session_id = route.root_session_id.clone();
         let chat_turn = {
@@ -1960,6 +1977,14 @@ impl WorkflowKernelState {
             }
             source_mode
         };
+        if source_mode == target_mode {
+            let updated_session = self.get_session(session_id).await?;
+            self.persist_session_record(session_id).await?;
+            return Ok(WorkflowSessionMutation {
+                session: updated_session,
+                transcript_mutations: Vec::new(),
+            });
+        }
         let root_handoff = self
             .handoff_context_for_kernel_session(session_id)
             .await
@@ -1970,7 +1995,10 @@ impl WorkflowKernelState {
         let handoff_line_id = if is_handoff_context_empty(&entry_handoff) {
             None
         } else {
-            Some(self.next_mode_transcript_line_id(session_id, target_mode).await?)
+            Some(
+                self.next_mode_transcript_line_id(session_id, target_mode)
+                    .await?,
+            )
         };
         let updated_session = {
             let mut sessions = self.sessions.write().await;
@@ -2122,15 +2150,6 @@ impl WorkflowKernelState {
             return Err("Input content cannot be empty".to_string());
         }
 
-        let next_chat_line_id = if target_mode == WorkflowMode::Chat {
-            Some(
-                self.next_mode_transcript_line_id(session_id, WorkflowMode::Chat)
-                    .await?,
-            )
-        } else {
-            None
-        };
-
         let source_mode = {
             let mut sessions = self.sessions.write().await;
             let mut ledger_map = self.context_ledger_entries.write().await;
@@ -2148,6 +2167,17 @@ impl WorkflowKernelState {
             }
             source_mode
         };
+        if source_mode == target_mode {
+            return self.submit_input(session_id, intent).await;
+        }
+        let next_chat_line_id = if target_mode == WorkflowMode::Chat {
+            Some(
+                self.next_mode_transcript_line_id(session_id, WorkflowMode::Chat)
+                    .await?,
+            )
+        } else {
+            None
+        };
         let root_handoff = self
             .handoff_context_for_kernel_session(session_id)
             .await
@@ -2158,7 +2188,10 @@ impl WorkflowKernelState {
         let handoff_line_id = if is_handoff_context_empty(&entry_handoff) {
             None
         } else {
-            Some(self.next_mode_transcript_line_id(session_id, target_mode).await?)
+            Some(
+                self.next_mode_transcript_line_id(session_id, target_mode)
+                    .await?,
+            )
         };
         {
             let mut sessions = self.sessions.write().await;
@@ -2467,7 +2500,8 @@ impl WorkflowKernelState {
                     revision: 0,
                     lines: Vec::new(),
                 });
-            let conversation_context = derive_conversation_turns_from_transcript_lines(&transcript.lines);
+            let conversation_context =
+                derive_conversation_turns_from_transcript_lines(&transcript.lines);
             return Ok(HandoffContextBundle {
                 conversation_context,
                 artifact_refs: root_handoff.artifact_refs.clone(),
@@ -2486,10 +2520,7 @@ impl WorkflowKernelState {
                         "strategy".to_string(),
                         Value::String("chat_full_transcript".to_string()),
                     );
-                    metadata.insert(
-                        "resolvedAt".to_string(),
-                        Value::String(now_rfc3339()),
-                    );
+                    metadata.insert("resolvedAt".to_string(), Value::String(now_rfc3339()));
                     metadata
                 },
                 summary_items: Vec::new(),
@@ -2505,7 +2536,10 @@ impl WorkflowKernelState {
         let mut artifact_refs = root_handoff.artifact_refs.clone();
         for item in &summary_items {
             for artifact_ref in &item.artifact_refs {
-                if !artifact_refs.iter().any(|existing| existing == artifact_ref) {
+                if !artifact_refs
+                    .iter()
+                    .any(|existing| existing == artifact_ref)
+                {
                     artifact_refs.push(artifact_ref.clone());
                 }
             }
@@ -2529,10 +2563,7 @@ impl WorkflowKernelState {
                     "strategy".to_string(),
                     Value::String("structured_summary".to_string()),
                 );
-                metadata.insert(
-                    "resolvedAt".to_string(),
-                    Value::String(now_rfc3339()),
-                );
+                metadata.insert("resolvedAt".to_string(), Value::String(now_rfc3339()));
                 metadata
             },
         })
@@ -2663,11 +2694,7 @@ impl WorkflowKernelState {
             for kernel_session_id in &linked_kernel_sessions {
                 if let Some(session) = sessions.get_mut(kernel_session_id) {
                     session.mode_snapshots.ensure_mode(WorkflowMode::Task);
-                    let (
-                        run_id,
-                        task_phase,
-                        background_status,
-                    ) = {
+                    let (run_id, task_phase, background_status) = {
                         let task = session.mode_snapshots.task_mut();
                         if let Some(next_phase) = phase
                             .as_ref()
@@ -2850,10 +2877,7 @@ impl WorkflowKernelState {
                         session.status = next_status;
                     }
                     session.updated_at = now_rfc3339();
-                    self.refresh_session_derived_fields(
-                        session,
-                        active_session_id.as_deref(),
-                    );
+                    self.refresh_session_derived_fields(session, active_session_id.as_deref());
                 }
             }
         }
@@ -3864,8 +3888,11 @@ impl WorkflowKernelState {
                             mode_storage_name(mode)
                         )
                     })?;
-                let preserved_cards =
-                    preserved_card_lines_for_partial_replace(&record.lines, replace_index, &appended_lines);
+                let preserved_cards = preserved_card_lines_for_partial_replace(
+                    &record.lines,
+                    replace_index,
+                    &appended_lines,
+                );
                 record.lines.truncate(replace_index);
                 record.lines.extend(appended_lines);
                 record.lines.extend(preserved_cards);
@@ -3998,7 +4025,9 @@ fn derive_conversation_turns_from_transcript_lines(lines: &[Value]) -> Vec<Conve
     let mut assistant_segments: Vec<String> = Vec::new();
 
     for line in lines {
-        let content = transcript_line_content(line).unwrap_or_default().to_string();
+        let content = transcript_line_content(line)
+            .unwrap_or_default()
+            .to_string();
         match transcript_line_turn_boundary(line) {
             Some("user") => {
                 if let Some(user) = current_user.take() {
@@ -4547,10 +4576,15 @@ fn derive_workspace_path(initial_context: Option<&HandoffContextBundle>) -> Opti
         .filter(|value| !value.is_empty())
 }
 
-fn derive_session_runtime_info(initial_context: Option<&HandoffContextBundle>) -> SessionRuntimeInfo {
+fn derive_session_runtime_info(
+    initial_context: Option<&HandoffContextBundle>,
+) -> SessionRuntimeInfo {
     let metadata = initial_context.map(|context| &context.metadata);
     let root_path = metadata
-        .and_then(|map| map.get("workspaceRootPath").or_else(|| map.get("workspacePath")))
+        .and_then(|map| {
+            map.get("workspaceRootPath")
+                .or_else(|| map.get("workspacePath"))
+        })
         .and_then(|value| value.as_str())
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -4608,24 +4642,37 @@ fn repair_session_runtime(session: &mut WorkflowSession) {
         session.runtime.runtime_path = session.runtime.root_path.clone();
     }
     if session.workspace_path.is_none() {
-        session.workspace_path = session.runtime.runtime_path.clone().or_else(|| session.runtime.root_path.clone());
+        session.workspace_path = session
+            .runtime
+            .runtime_path
+            .clone()
+            .or_else(|| session.runtime.root_path.clone());
     } else {
-        session.workspace_path = session.runtime.runtime_path.clone().or_else(|| session.workspace_path.clone());
+        session.workspace_path = session
+            .runtime
+            .runtime_path
+            .clone()
+            .or_else(|| session.workspace_path.clone());
     }
     if session.runtime.root_path.is_none() {
         session.runtime.root_path = session.workspace_path.clone();
     }
-    session.runtime.legacy = matches!(session.runtime.runtime_kind, WorkflowRuntimeKind::LegacyWorktree);
+    session.runtime.legacy = matches!(
+        session.runtime.runtime_kind,
+        WorkflowRuntimeKind::LegacyWorktree
+    );
     if matches!(
         session.runtime.runtime_kind,
         WorkflowRuntimeKind::ManagedWorktree | WorkflowRuntimeKind::LegacyWorktree
     ) && session.runtime.managed_worktree_id.is_none()
     {
-        session.runtime.managed_worktree_id = session
-            .runtime
-            .runtime_path
-            .as_ref()
-            .and_then(|value| PathBuf::from(value).file_name().and_then(|name| name.to_str()).map(ToOwned::to_owned));
+        session.runtime.managed_worktree_id =
+            session.runtime.runtime_path.as_ref().and_then(|value| {
+                PathBuf::from(value)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .map(ToOwned::to_owned)
+            });
     }
 }
 
@@ -4801,7 +4848,8 @@ fn build_handoff_context_from_ledger(
                 }
             }
             WorkflowContextLedgerEntryKind::SummaryItem => {
-                if let Ok(item) = serde_json::from_value::<HandoffSummaryItem>(entry.value.clone()) {
+                if let Ok(item) = serde_json::from_value::<HandoffSummaryItem>(entry.value.clone())
+                {
                     summary_items.push(item);
                 }
             }
@@ -4912,97 +4960,97 @@ fn build_mode_runtime_meta_map(
         WorkflowMode::Task,
         WorkflowMode::Debug,
     ]
-        .into_iter()
-        .map(|mode| {
-            let existing = session.mode_runtime_meta.get(&mode);
-            let phase = phase_for_mode(session, mode).unwrap_or(match mode {
-                WorkflowMode::Chat => "ready",
-                WorkflowMode::Plan | WorkflowMode::Task => "idle",
-                WorkflowMode::Debug => "intaking",
-            });
-            let binding_session_id = session.linked_mode_sessions.get(&mode).cloned();
-            let run_id = match mode {
-                WorkflowMode::Chat => existing.and_then(|meta| meta.run_id.clone()),
-                WorkflowMode::Plan => session
-                    .mode_snapshots
-                    .plan
-                    .as_ref()
-                    .and_then(|state| state.run_id.clone())
-                    .or_else(|| existing.and_then(|meta| meta.run_id.clone())),
-                WorkflowMode::Task => session
-                    .mode_snapshots
-                    .task
-                    .as_ref()
-                    .and_then(|state| state.run_id.clone())
-                    .or_else(|| existing.and_then(|meta| meta.run_id.clone())),
-                WorkflowMode::Debug => None,
-            };
-            let backend_kind = existing.and_then(|meta| meta.backend_kind.clone());
-            let block_reason = match mode {
-                WorkflowMode::Debug => session
-                    .mode_snapshots
-                    .debug
-                    .as_ref()
-                    .and_then(|state| state.tool_block_reason.clone())
-                    .or_else(|| existing.and_then(|meta| meta.block_reason.clone())),
-                _ => existing.and_then(|meta| meta.block_reason.clone()),
-            };
-            let control_capabilities = if mode == WorkflowMode::Chat {
-                Some(chat_control_capabilities(
-                    backend_kind.as_deref(),
-                    phase,
-                    block_reason.as_deref(),
-                ))
-            } else {
-                existing.and_then(|meta| meta.control_capabilities.clone())
-            };
-            let debug_capability_profile = if mode == WorkflowMode::Debug {
-                session
-                    .mode_snapshots
-                    .debug
-                    .as_ref()
-                    .map(|state| state.capability_profile)
-                    .or_else(|| existing.and_then(|meta| meta.debug_capability_profile))
-            } else {
-                None
-            };
-            let debug_runtime_capabilities = debug_capability_profile
-                .map(runtime_capabilities_for_profile)
-                .or_else(|| existing.and_then(|meta| meta.debug_runtime_capabilities.clone()));
-            let pending_approval = if mode == WorkflowMode::Debug {
-                session
-                    .mode_snapshots
-                    .debug
-                    .as_ref()
-                    .and_then(|state| state.pending_approval.clone())
-                    .or_else(|| existing.and_then(|meta| meta.pending_approval.clone()))
-            } else {
-                None
-            };
-            (
+    .into_iter()
+    .map(|mode| {
+        let existing = session.mode_runtime_meta.get(&mode);
+        let phase = phase_for_mode(session, mode).unwrap_or(match mode {
+            WorkflowMode::Chat => "ready",
+            WorkflowMode::Plan | WorkflowMode::Task => "idle",
+            WorkflowMode::Debug => "intaking",
+        });
+        let binding_session_id = session.linked_mode_sessions.get(&mode).cloned();
+        let run_id = match mode {
+            WorkflowMode::Chat => existing.and_then(|meta| meta.run_id.clone()),
+            WorkflowMode::Plan => session
+                .mode_snapshots
+                .plan
+                .as_ref()
+                .and_then(|state| state.run_id.clone())
+                .or_else(|| existing.and_then(|meta| meta.run_id.clone())),
+            WorkflowMode::Task => session
+                .mode_snapshots
+                .task
+                .as_ref()
+                .and_then(|state| state.run_id.clone())
+                .or_else(|| existing.and_then(|meta| meta.run_id.clone())),
+            WorkflowMode::Debug => None,
+        };
+        let backend_kind = existing.and_then(|meta| meta.backend_kind.clone());
+        let block_reason = match mode {
+            WorkflowMode::Debug => session
+                .mode_snapshots
+                .debug
+                .as_ref()
+                .and_then(|state| state.tool_block_reason.clone())
+                .or_else(|| existing.and_then(|meta| meta.block_reason.clone())),
+            _ => existing.and_then(|meta| meta.block_reason.clone()),
+        };
+        let control_capabilities = if mode == WorkflowMode::Chat {
+            Some(chat_control_capabilities(
+                backend_kind.as_deref(),
+                phase,
+                block_reason.as_deref(),
+            ))
+        } else {
+            existing.and_then(|meta| meta.control_capabilities.clone())
+        };
+        let debug_capability_profile = if mode == WorkflowMode::Debug {
+            session
+                .mode_snapshots
+                .debug
+                .as_ref()
+                .map(|state| state.capability_profile)
+                .or_else(|| existing.and_then(|meta| meta.debug_capability_profile))
+        } else {
+            None
+        };
+        let debug_runtime_capabilities = debug_capability_profile
+            .map(runtime_capabilities_for_profile)
+            .or_else(|| existing.and_then(|meta| meta.debug_runtime_capabilities.clone()));
+        let pending_approval = if mode == WorkflowMode::Debug {
+            session
+                .mode_snapshots
+                .debug
+                .as_ref()
+                .and_then(|state| state.pending_approval.clone())
+                .or_else(|| existing.and_then(|meta| meta.pending_approval.clone()))
+        } else {
+            None
+        };
+        (
+            mode,
+            ModeRuntimeMeta {
                 mode,
-                ModeRuntimeMeta {
-                    mode,
-                    run_id,
-                    binding_session_id,
-                    is_foreground: is_foreground_session && session.active_mode == mode,
-                    is_background_running: !is_foreground_session
-                        && is_background_resume_candidate_for_mode(mode, phase),
-                    is_interrupted: is_interrupted_phase(mode, phase),
-                    resume_policy: resume_policy_for_mode(mode).to_string(),
-                    last_heartbeat_at: Some(session.updated_at.clone()),
-                    last_checkpoint_id: session_last_checkpoint_id.clone(),
-                    last_error: session.last_error.clone(),
-                    backend_kind,
-                    control_capabilities,
-                    block_reason,
-                    debug_capability_profile,
-                    debug_runtime_capabilities,
-                    pending_approval,
-                },
-            )
-        })
-        .collect()
+                run_id,
+                binding_session_id,
+                is_foreground: is_foreground_session && session.active_mode == mode,
+                is_background_running: !is_foreground_session
+                    && is_background_resume_candidate_for_mode(mode, phase),
+                is_interrupted: is_interrupted_phase(mode, phase),
+                resume_policy: resume_policy_for_mode(mode).to_string(),
+                last_heartbeat_at: Some(session.updated_at.clone()),
+                last_checkpoint_id: session_last_checkpoint_id.clone(),
+                last_error: session.last_error.clone(),
+                backend_kind,
+                control_capabilities,
+                block_reason,
+                debug_capability_profile,
+                debug_runtime_capabilities,
+                pending_approval,
+            },
+        )
+    })
+    .collect()
 }
 
 fn derive_background_state(
@@ -5018,12 +5066,12 @@ fn derive_background_state(
         WorkflowMode::Task,
         WorkflowMode::Debug,
     ]
-        .into_iter()
-        .any(|mode| {
-            phase_for_mode(session, mode)
-                .map(|phase| is_interrupted_phase(mode, phase))
-                .unwrap_or(false)
-        });
+    .into_iter()
+    .any(|mode| {
+        phase_for_mode(session, mode)
+            .map(|phase| is_interrupted_phase(mode, phase))
+            .unwrap_or(false)
+    });
     if has_interrupted_mode {
         return WorkflowBackgroundState::Interrupted;
     }
@@ -5033,12 +5081,12 @@ fn derive_background_state(
         WorkflowMode::Task,
         WorkflowMode::Debug,
     ]
-        .into_iter()
-        .any(|mode| {
-            phase_for_mode(session, mode)
-                .map(|phase| is_background_resume_candidate_for_mode(mode, phase))
-                .unwrap_or(false)
-        });
+    .into_iter()
+    .any(|mode| {
+        phase_for_mode(session, mode)
+            .map(|phase| is_background_resume_candidate_for_mode(mode, phase))
+            .unwrap_or(false)
+    });
     if is_running {
         WorkflowBackgroundState::BackgroundRunning
     } else {
@@ -5421,6 +5469,237 @@ mod tests {
             .rposition(|event| event.kind == WorkflowEventKind::InputSubmitted)
             .expect("input submitted event");
         assert!(transition_index < input_index);
+    }
+
+    #[tokio::test]
+    async fn transition_mode_same_mode_skips_transition_artifacts() {
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let kernel = WorkflowKernelState::new_with_storage_dir(temp_dir.path().to_path_buf());
+
+        let session = kernel
+            .open_session(Some(WorkflowMode::Chat), None)
+            .await
+            .expect("open session");
+        let session_id = session.session_id.clone();
+
+        let updated = kernel
+            .transition_mode(
+                &session_id,
+                WorkflowMode::Chat,
+                Some(HandoffContextBundle {
+                    conversation_context: vec![ConversationTurn {
+                        user: "hello".to_string(),
+                        assistant: "hi".to_string(),
+                    }],
+                    summary_items: Vec::new(),
+                    artifact_refs: vec!["artifact.md".to_string()],
+                    context_sources: vec!["simple_mode".to_string()],
+                    metadata: serde_json::Map::new(),
+                }),
+            )
+            .await
+            .expect("same-mode transition");
+
+        assert!(updated.transcript_mutations.is_empty());
+        assert_eq!(updated.session.active_mode, WorkflowMode::Chat);
+        assert_eq!(
+            updated.session.handoff_context.context_sources,
+            vec!["simple_mode"]
+        );
+
+        let state = kernel
+            .get_session_state(&session_id)
+            .await
+            .expect("session state");
+        assert_eq!(
+            state
+                .events
+                .iter()
+                .filter(|event| event.kind == WorkflowEventKind::ModeTransitioned)
+                .count(),
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn transition_and_submit_input_same_mode_chat_skips_handoff_card() {
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let kernel = WorkflowKernelState::new_with_storage_dir(temp_dir.path().to_path_buf());
+
+        let session = kernel
+            .open_session(Some(WorkflowMode::Chat), None)
+            .await
+            .expect("open session");
+        let session_id = session.session_id.clone();
+
+        let updated = kernel
+            .transition_and_submit_input(
+                &session_id,
+                WorkflowMode::Chat,
+                Some(HandoffContextBundle {
+                    conversation_context: vec![ConversationTurn {
+                        user: "hello".to_string(),
+                        assistant: "hi".to_string(),
+                    }],
+                    summary_items: Vec::new(),
+                    artifact_refs: vec!["artifact.md".to_string()],
+                    context_sources: vec!["simple_mode".to_string()],
+                    metadata: serde_json::Map::new(),
+                }),
+                UserInputIntent {
+                    intent_type: UserInputIntentType::ChatMessage,
+                    content: "follow-up".to_string(),
+                    metadata: Value::Null,
+                },
+            )
+            .await
+            .expect("same-mode transition+submit");
+
+        assert_eq!(updated.transcript_mutations.len(), 1);
+        assert_eq!(updated.transcript_mutations[0].appended_lines.len(), 1);
+        assert_eq!(
+            transcript_line_type(&updated.transcript_mutations[0].appended_lines[0]),
+            Some("info")
+        );
+        assert_eq!(
+            updated.session.handoff_context.context_sources,
+            vec!["simple_mode"]
+        );
+
+        let transcript = kernel
+            .get_mode_transcript(&session_id, WorkflowMode::Chat)
+            .await
+            .expect("chat transcript");
+        assert_eq!(transcript.lines.len(), 1);
+        assert_eq!(transcript_line_type(&transcript.lines[0]), Some("info"));
+        assert_eq!(
+            transcript_line_content(&transcript.lines[0]),
+            Some("follow-up")
+        );
+
+        let state = kernel
+            .get_session_state(&session_id)
+            .await
+            .expect("session state");
+        assert_eq!(
+            state
+                .events
+                .iter()
+                .filter(|event| event.kind == WorkflowEventKind::ModeTransitioned)
+                .count(),
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn sync_chat_runtime_event_ignores_stale_run_id() {
+        let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
+        let kernel = WorkflowKernelState::new_with_storage_dir(temp_dir.path().to_path_buf());
+
+        let session = kernel
+            .open_session(Some(WorkflowMode::Chat), None)
+            .await
+            .expect("open session");
+        let session_id = session.session_id.clone();
+
+        kernel
+            .submit_input(
+                &session_id,
+                UserInputIntent {
+                    intent_type: UserInputIntentType::ChatMessage,
+                    content: "first".to_string(),
+                    metadata: Value::Null,
+                },
+            )
+            .await
+            .expect("submit first input");
+
+        kernel
+            .register_chat_runtime_dispatch(ChatRuntimeDispatch {
+                session_id: session_id.clone(),
+                backend_kind: "standalone".to_string(),
+                binding_session_id: "standalone:test".to_string(),
+                run_id: Some("run-1".to_string()),
+            })
+            .await
+            .expect("register first run");
+
+        assert!(kernel
+            .sync_chat_runtime_event(
+                "standalone:test",
+                Some("run-1"),
+                &UnifiedStreamEvent::TextDelta {
+                    content: "old".to_string(),
+                },
+            )
+            .await
+            .expect("sync first run")
+            .is_some());
+
+        kernel
+            .submit_input(
+                &session_id,
+                UserInputIntent {
+                    intent_type: UserInputIntentType::ChatMessage,
+                    content: "second".to_string(),
+                    metadata: Value::Null,
+                },
+            )
+            .await
+            .expect("submit second input");
+
+        kernel
+            .register_chat_runtime_dispatch(ChatRuntimeDispatch {
+                session_id: session_id.clone(),
+                backend_kind: "standalone".to_string(),
+                binding_session_id: "standalone:test".to_string(),
+                run_id: Some("run-2".to_string()),
+            })
+            .await
+            .expect("register second run");
+
+        assert!(kernel
+            .sync_chat_runtime_event(
+                "standalone:test",
+                Some("run-1"),
+                &UnifiedStreamEvent::TextDelta {
+                    content: "stale".to_string(),
+                },
+            )
+            .await
+            .expect("sync stale run")
+            .is_none());
+
+        assert!(kernel
+            .sync_chat_runtime_event(
+                "standalone:test",
+                Some("run-2"),
+                &UnifiedStreamEvent::TextDelta {
+                    content: "fresh".to_string(),
+                },
+            )
+            .await
+            .expect("sync fresh run")
+            .is_some());
+
+        let transcript = kernel
+            .get_mode_transcript(&session_id, WorkflowMode::Chat)
+            .await
+            .expect("chat transcript");
+        assert_eq!(transcript.lines.len(), 4);
+        assert_eq!(transcript_line_type(&transcript.lines[0]), Some("info"));
+        assert_eq!(transcript_line_content(&transcript.lines[0]), Some("first"));
+        assert_eq!(transcript_line_type(&transcript.lines[1]), Some("text"));
+        assert_eq!(transcript_line_content(&transcript.lines[1]), Some("old"));
+        assert_eq!(transcript_line_turn_id(&transcript.lines[1]), Some(1));
+        assert_eq!(transcript_line_type(&transcript.lines[2]), Some("info"));
+        assert_eq!(
+            transcript_line_content(&transcript.lines[2]),
+            Some("second")
+        );
+        assert_eq!(transcript_line_type(&transcript.lines[3]), Some("text"));
+        assert_eq!(transcript_line_content(&transcript.lines[3]), Some("fresh"));
+        assert_eq!(transcript_line_turn_id(&transcript.lines[3]), Some(2));
     }
 
     #[test]

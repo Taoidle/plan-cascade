@@ -14,9 +14,9 @@ use crate::services::llm::provider::LlmProvider;
 use crate::services::llm::types::{LlmRequestOptions, Message};
 
 use super::analyzer::{
-    build_deterministic_recommendation, Benefit, DimensionScores, ExecutionMode,
-    ExecutionStrategy, RecommendedWorkflowConfig, RiskLevel, StrategyAnalysis,
-    StrategyDecision, StrategyRecommendationSource, TaskStrategyRecommendation,
+    build_deterministic_recommendation, Benefit, DimensionScores, ExecutionMode, ExecutionStrategy,
+    RecommendedWorkflowConfig, RiskLevel, StrategyAnalysis, StrategyDecision,
+    StrategyRecommendationSource, TaskStrategyRecommendation,
 };
 
 // ============================================================================
@@ -162,8 +162,8 @@ pub async fn enhance_strategy_analysis(
         vec![],
         options.clone(),
     )
-        .await
-        .map_err(|e| format!("LLM strategy analysis request failed: {}", e))?;
+    .await
+    .map_err(|e| format!("LLM strategy analysis request failed: {}", e))?;
 
     let response_text = extract_response_text(&response)?;
 
@@ -175,7 +175,10 @@ pub async fn enhance_strategy_analysis(
 
     match parse_strategy_response(&response_text) {
         Ok(llm_response) => {
-            return Ok(build_enhanced_recommendation(llm_response, keyword_analysis));
+            return Ok(build_enhanced_recommendation(
+                llm_response,
+                keyword_analysis,
+            ));
         }
         Err(first_error) => {
             debug!(error = %first_error, "llm_analyzer: first attempt parse failed, retrying with repair prompt");
@@ -193,13 +196,16 @@ pub async fn enhance_strategy_analysis(
                 vec![],
                 options,
             )
-                .await
-                .map_err(|e| format!("LLM strategy analysis retry failed: {}", e))?;
+            .await
+            .map_err(|e| format!("LLM strategy analysis retry failed: {}", e))?;
 
             let retry_text = extract_response_text(&retry_response)?;
 
             match parse_strategy_response(&retry_text) {
-                Ok(llm_response) => Ok(build_enhanced_recommendation(llm_response, keyword_analysis)),
+                Ok(llm_response) => Ok(build_enhanced_recommendation(
+                    llm_response,
+                    keyword_analysis,
+                )),
                 Err(second_error) => Err(format!(
                     "Failed to parse LLM strategy response after retry. \
                      First error: {}. Retry error: {}",
@@ -382,11 +388,14 @@ fn merge_recommended_config(
             .quality_gates_enabled
             .unwrap_or(baseline.quality_gates_enabled);
         merged.max_parallel = clamp_max_parallel(config.max_parallel, baseline);
-        merged.skip_verification = config.skip_verification.unwrap_or(baseline.skip_verification);
+        merged.skip_verification = config
+            .skip_verification
+            .unwrap_or(baseline.skip_verification);
         merged.skip_review = config.skip_review.unwrap_or(baseline.skip_review);
         merged.global_agent_override =
             normalize_agent_override(config.global_agent_override.as_deref());
-        merged.impl_agent_override = normalize_agent_override(config.impl_agent_override.as_deref());
+        merged.impl_agent_override =
+            normalize_agent_override(config.impl_agent_override.as_deref());
     }
 
     if merged.flow_level == "quick" {
@@ -502,8 +511,10 @@ fn build_enhanced_recommendation(
         strategy_decision,
     };
 
-    let merged_config =
-        merge_recommended_config(llm.recommended_config.as_ref(), &baseline.recommended_config);
+    let merged_config = merge_recommended_config(
+        llm.recommended_config.as_ref(),
+        &baseline.recommended_config,
+    );
 
     TaskStrategyRecommendation {
         reasoning: analysis.reasoning.clone(),
@@ -634,7 +645,10 @@ mod tests {
         );
         assert_eq!(result.analysis.recommended_mode, ExecutionMode::Task);
         assert_eq!(result.analysis.risk_level, RiskLevel::High);
-        assert_eq!(result.analysis.parallelization_benefit, Benefit::Significant);
+        assert_eq!(
+            result.analysis.parallelization_benefit,
+            Benefit::Significant
+        );
         assert_eq!(result.analysis.estimated_stories, 12);
         assert!(result.analysis.has_dependencies);
         assert_eq!(result.analysis.functional_areas.len(), 2);

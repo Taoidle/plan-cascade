@@ -1271,11 +1271,14 @@ async fn prepare_turn_context_v2_internal(
         &turn_id,
         &trace_id,
     );
-    let compaction_policy = request.compaction_policy.clone().unwrap_or(CompactionPolicy {
-        soft_threshold_ratio: context_policy.soft_threshold_ratio,
-        hard_threshold_ratio: context_policy.hard_threshold_ratio,
-        preserve_anchors: true,
-    });
+    let compaction_policy = request
+        .compaction_policy
+        .clone()
+        .unwrap_or(CompactionPolicy {
+            soft_threshold_ratio: context_policy.soft_threshold_ratio,
+            hard_threshold_ratio: context_policy.hard_threshold_ratio,
+            preserve_anchors: true,
+        });
     let fault_injection = request.fault_injection.clone().unwrap_or_default();
     let mut diagnostics = ContextDiagnostics::default();
     diagnostics.plan_phase_id = request.plan_phase_id.clone();

@@ -29,9 +29,8 @@ use crate::models::response::CommandResponse;
 use crate::services::remote::gateway::RemoteGatewayService;
 use crate::services::remote::session_bridge::{BridgeRuntimeConfig, BridgeServices, SessionBridge};
 use crate::services::remote::types::{
-    ConfigUpdateResult, GatewayStatus, RemoteAuditEntry, RemoteGatewayConfig,
-    RemoteSessionMapping, TelegramAdapterConfig, UpdateRemoteConfigRequest,
-    UpdateTelegramConfigRequest,
+    ConfigUpdateResult, GatewayStatus, RemoteAuditEntry, RemoteGatewayConfig, RemoteSessionMapping,
+    TelegramAdapterConfig, UpdateRemoteConfigRequest, UpdateTelegramConfigRequest,
 };
 use crate::state::AppState;
 use crate::storage::KeyringService;
@@ -129,10 +128,8 @@ pub async fn start_remote_gateway(
             // Hydrate secrets from keyring
             let keyring = KeyringService::new();
             telegram_config.bot_token = keyring.get_api_key(KEYRING_BOT_TOKEN).ok().flatten();
-            telegram_config.access_password = keyring
-                .get_api_key(KEYRING_ACCESS_PASSWORD)
-                .ok()
-                .flatten();
+            telegram_config.access_password =
+                keyring.get_api_key(KEYRING_ACCESS_PASSWORD).ok().flatten();
 
             // Resolve proxy for remote_telegram provider
             let proxy = resolve_provider_proxy(&keyring, db, "remote_telegram");
@@ -159,7 +156,11 @@ pub async fn start_remote_gateway(
         keyring: Arc::new(KeyringService::new()),
         orchestrators: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
         runtime_config: Arc::new(BridgeRuntimeConfig::new(vec![], 2000)),
-        workflow_kernel: Some(app.state::<crate::services::workflow_kernel::WorkflowKernelState>().inner().clone()),
+        workflow_kernel: Some(
+            app.state::<crate::services::workflow_kernel::WorkflowKernelState>()
+                .inner()
+                .clone(),
+        ),
     };
 
     // Create session bridge with services
@@ -179,7 +180,11 @@ pub async fn start_remote_gateway(
         Some(telegram_config),
         bridge,
         db,
-        Some(app.state::<crate::services::workflow_kernel::WorkflowKernelState>().inner().clone()),
+        Some(
+            app.state::<crate::services::workflow_kernel::WorkflowKernelState>()
+                .inner()
+                .clone(),
+        ),
         Some(app.clone()),
     );
     match webhook_state.get_or_init(app_state.inner()).await {
@@ -444,10 +449,8 @@ pub async fn update_telegram_config(
                     result.restart_required = true;
                 }
                 config.bot_token = keyring.get_api_key(KEYRING_BOT_TOKEN).ok().flatten();
-                config.access_password = keyring
-                    .get_api_key(KEYRING_ACCESS_PASSWORD)
-                    .ok()
-                    .flatten();
+                config.access_password =
+                    keyring.get_api_key(KEYRING_ACCESS_PASSWORD).ok().flatten();
                 let _ = gateway.update_telegram_config(config).await;
             }
             Ok(CommandResponse::ok(result))
@@ -614,10 +617,8 @@ pub async fn try_auto_start_gateway(
 
             let keyring = KeyringService::new();
             telegram_config.bot_token = keyring.get_api_key(KEYRING_BOT_TOKEN).ok().flatten();
-            telegram_config.access_password = keyring
-                .get_api_key(KEYRING_ACCESS_PASSWORD)
-                .ok()
-                .flatten();
+            telegram_config.access_password =
+                keyring.get_api_key(KEYRING_ACCESS_PASSWORD).ok().flatten();
 
             let proxy = resolve_provider_proxy(&keyring, db, "remote_telegram");
 
@@ -649,7 +650,11 @@ pub async fn try_auto_start_gateway(
         keyring: Arc::new(KeyringService::new()),
         orchestrators: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
         runtime_config: Arc::new(BridgeRuntimeConfig::new(vec![], 2000)),
-        workflow_kernel: Some(app.state::<crate::services::workflow_kernel::WorkflowKernelState>().inner().clone()),
+        workflow_kernel: Some(
+            app.state::<crate::services::workflow_kernel::WorkflowKernelState>()
+                .inner()
+                .clone(),
+        ),
     };
 
     // Create session bridge with services and load existing mappings
@@ -665,7 +670,11 @@ pub async fn try_auto_start_gateway(
         Some(telegram_config),
         bridge,
         db,
-        Some(app.state::<crate::services::workflow_kernel::WorkflowKernelState>().inner().clone()),
+        Some(
+            app.state::<crate::services::workflow_kernel::WorkflowKernelState>()
+                .inner()
+                .clone(),
+        ),
         Some(app.clone()),
     );
     match webhook_state.get_or_init(app_state).await {

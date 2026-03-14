@@ -1054,7 +1054,13 @@ pub(crate) fn render_task_entry_handoff_context(handoff: &HandoffContextBundle) 
     let conversation = handoff
         .conversation_context
         .iter()
-        .map(|turn| format!("user: {}\nassistant: {}", turn.user.trim(), turn.assistant.trim()))
+        .map(|turn| {
+            format!(
+                "user: {}\nassistant: {}",
+                turn.user.trim(),
+                turn.assistant.trim()
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n\n");
     if !conversation.trim().is_empty() {
@@ -1115,7 +1121,10 @@ pub(crate) fn build_task_prd_summary_item(
         .join("\n");
     let localized_stage = localized_task_prd_stage(locale_tag, stage);
     let mut metadata = serde_json::Map::new();
-    metadata.insert("stage".to_string(), serde_json::Value::String(stage.to_string()));
+    metadata.insert(
+        "stage".to_string(),
+        serde_json::Value::String(stage.to_string()),
+    );
     metadata.insert(
         "storyCount".to_string(),
         serde_json::Value::Number((prd.stories.len() as u64).into()),
@@ -1186,8 +1195,12 @@ pub(crate) fn build_task_execution_summary_item(
                 .unwrap_or_default();
             let progress = session.progress.as_ref();
             (
-                progress.map(|value| value.stories_completed).unwrap_or_default(),
-                progress.map(|value| value.stories_failed).unwrap_or_default(),
+                progress
+                    .map(|value| value.stories_completed)
+                    .unwrap_or_default(),
+                progress
+                    .map(|value| value.stories_failed)
+                    .unwrap_or_default(),
                 total,
                 matches!(session.status, TaskModeStatus::Completed),
                 matches!(session.status, TaskModeStatus::Cancelled),
@@ -1412,9 +1425,7 @@ pub use execution_commands::{
     get_task_execution_status,
 };
 pub use generation_commands::{apply_task_prd_feedback, explore_project, generate_task_prd};
-pub use session_lifecycle_commands::{
-    confirm_task_configuration, enter_task_mode, exit_task_mode,
-};
+pub use session_lifecycle_commands::{confirm_task_configuration, enter_task_mode, exit_task_mode};
 
 /// Resolve an LLM provider from frontend parameters and OS keyring.
 ///
@@ -1742,7 +1753,9 @@ fn localized_task_terminal_state(locale_tag: &str, terminal_state: &str) -> Stri
     match terminal_state {
         "completed" => localized_task_copy(locale_tag, "completed", "已完成", "完了").to_string(),
         "failed" => localized_task_copy(locale_tag, "failed", "失败", "失敗").to_string(),
-        "cancelled" => localized_task_copy(locale_tag, "cancelled", "已取消", "キャンセル済み").to_string(),
+        "cancelled" => {
+            localized_task_copy(locale_tag, "cancelled", "已取消", "キャンセル済み").to_string()
+        }
         "partial" => localized_task_copy(locale_tag, "partial", "部分完成", "部分完了").to_string(),
         _ => terminal_state.to_string(),
     }
@@ -2497,15 +2510,19 @@ async fn execute_story_via_agent(
         if let Ok(mut tracker_guard) = tracker.lock() {
             if let Ok(after_snapshot) = tracker_guard.capture_workspace_snapshot() {
                 let metadata = crate::services::file_change_tracker::FileChangeMetadata {
-                    source_mode: Some(crate::services::file_change_tracker::FileChangeSourceMode::Task),
-                    actor_kind: Some(crate::services::file_change_tracker::FileChangeActorKind::SubAgent),
+                    source_mode: Some(
+                        crate::services::file_change_tracker::FileChangeSourceMode::Task,
+                    ),
+                    actor_kind: Some(
+                        crate::services::file_change_tracker::FileChangeActorKind::SubAgent,
+                    ),
                     actor_id: Some(format!("story-agent:{agent_name}")),
                     actor_label: Some(agent_name.to_string()),
                     sub_agent_depth: Some(1),
                     origin_session_id: None,
                 };
-                let turn_index = file_change_turn_index
-                    .unwrap_or_else(|| tracker_guard.turn_index());
+                let turn_index =
+                    file_change_turn_index.unwrap_or_else(|| tracker_guard.turn_index());
                 tracker_guard.record_workspace_delta_between_at_with_metadata(
                     turn_index,
                     &format!("agent-{}", uuid::Uuid::new_v4()),
@@ -2647,7 +2664,9 @@ async fn execute_story_via_llm(
         orchestrator = orchestrator.with_file_change_turn_index(turn_index);
     }
     orchestrator = orchestrator
-        .with_file_change_source_mode(crate::services::file_change_tracker::FileChangeSourceMode::Task)
+        .with_file_change_source_mode(
+            crate::services::file_change_tracker::FileChangeSourceMode::Task,
+        )
         .with_file_change_actor_metadata(
             crate::services::file_change_tracker::FileChangeActorKind::RootAgent,
             Some(format!("task-story:{story_id}")),
@@ -3670,8 +3689,15 @@ mod tests {
         });
 
         let agent_cmd = agent_path.to_string_lossy().into_owned();
-        let outcome =
-            execute_story_via_agent(&agent_cmd, "test prompt", temp_dir.path(), token, None, None).await;
+        let outcome = execute_story_via_agent(
+            &agent_cmd,
+            "test prompt",
+            temp_dir.path(),
+            token,
+            None,
+            None,
+        )
+        .await;
 
         let _ = cancel_handle.await;
 

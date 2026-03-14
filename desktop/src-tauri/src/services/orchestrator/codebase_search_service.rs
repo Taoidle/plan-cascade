@@ -200,10 +200,10 @@ impl CodebaseSearchService {
             .filter(|v| !v.is_empty());
 
         let allowed_language_paths: Option<HashSet<String>> = if let Some(lang) = filters
-                .language
-                .as_ref()
-                .map(|v| v.trim())
-                .filter(|v| !v.is_empty())
+            .language
+            .as_ref()
+            .map(|v| v.trim())
+            .filter(|v| !v.is_empty())
         {
             match self.index_store.list_project_files(
                 &resolved_project_path,

@@ -8,11 +8,11 @@
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
+use crate::commands::guardrails::GuardrailState;
 use crate::commands::mcp::reconcile_and_connect_enabled_servers;
 use crate::commands::mcp::McpRuntimeState;
 use crate::commands::plugins::PluginState;
 use crate::commands::remote::RemoteState;
-use crate::commands::guardrails::GuardrailState;
 use crate::commands::spec_interview::SpecInterviewState;
 use crate::commands::standalone::StandaloneState;
 use crate::commands::webhook::WebhookState;
@@ -94,7 +94,10 @@ pub async fn init_app(
     // Initialize all services
     match state.initialize().await {
         Ok(_) => {
-            if let Ok(database) = state.with_database(|db| Ok(std::sync::Arc::new(db.clone()))).await {
+            if let Ok(database) = state
+                .with_database(|db| Ok(std::sync::Arc::new(db.clone())))
+                .await
+            {
                 if let Err(e) = guardrail_state.initialize(database).await {
                     tracing::warn!("Guardrail initialization failed: {}", e);
                 }

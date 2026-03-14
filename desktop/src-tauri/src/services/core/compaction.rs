@@ -952,7 +952,11 @@ mod tests {
         let summary_index = result
             .messages
             .iter()
-            .position(|message| extract_text(message).unwrap_or_default().contains("[Summary of"))
+            .position(|message| {
+                extract_text(message)
+                    .unwrap_or_default()
+                    .contains("[Summary of")
+            })
             .expect("summary marker should exist");
         let tool_call_index = result
             .messages

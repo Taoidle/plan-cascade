@@ -273,8 +273,11 @@ impl GuardrailRegistry {
             .map_err(|e| e.to_string())?;
         }
         if !table_has_column(&conn, "guardrail_rules", "builtin_key") {
-            conn.execute("ALTER TABLE guardrail_rules ADD COLUMN builtin_key TEXT", [])
-                .map_err(|e| e.to_string())?;
+            conn.execute(
+                "ALTER TABLE guardrail_rules ADD COLUMN builtin_key TEXT",
+                [],
+            )
+            .map_err(|e| e.to_string())?;
         }
         if !table_has_column(&conn, "guardrail_rules", "scope") {
             conn.execute(
@@ -355,7 +358,8 @@ impl GuardrailRegistry {
             }
         }
 
-        self.entries.retain(|entry| entry.guardrail_type == "builtin");
+        self.entries
+            .retain(|entry| entry.guardrail_type == "builtin");
 
         let Some(db) = &self.database else {
             return Ok(());
@@ -369,8 +373,19 @@ impl GuardrailRegistry {
             )
             .map_err(|e| e.to_string())?;
 
-        let rows: Vec<(String, String, String, Option<String>, Option<String>, String, Option<String>, bool, bool, String)> =
-            stmt.query_map([], |row| {
+        let rows: Vec<(
+            String,
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            String,
+            Option<String>,
+            bool,
+            bool,
+            String,
+        )> = stmt
+            .query_map([], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
@@ -388,7 +403,19 @@ impl GuardrailRegistry {
             .filter_map(Result::ok)
             .collect();
 
-        for (id, name, kind, builtin_key, pattern, action, scope_json, enabled, editable, description) in rows {
+        for (
+            id,
+            name,
+            kind,
+            builtin_key,
+            pattern,
+            action,
+            scope_json,
+            enabled,
+            editable,
+            description,
+        ) in rows
+        {
             if kind == "builtin" {
                 if let Some(entry) = self.entries.iter_mut().find(|entry| {
                     entry.guardrail_type == "builtin"
@@ -426,7 +453,10 @@ impl GuardrailRegistry {
         self.entries.iter().map(GuardrailEntry::info).collect()
     }
 
-    pub fn create_custom_rule(&mut self, config: CustomRuleConfig) -> Result<GuardrailInfo, String> {
+    pub fn create_custom_rule(
+        &mut self,
+        config: CustomRuleConfig,
+    ) -> Result<GuardrailInfo, String> {
         let guardrail = CustomGuardrail::new_with_description(
             config.id.clone(),
             config.name.clone(),
@@ -480,12 +510,13 @@ impl GuardrailRegistry {
             .ok_or_else(|| "Created custom rule but failed to read it back".to_string())
     }
 
-    pub fn update_custom_rule(&mut self, config: CustomRuleConfig) -> Result<GuardrailInfo, String> {
-        let Some(index) = self
-            .entries
-            .iter()
-            .position(|entry| entry.guardrail.id() == config.id && entry.guardrail_type == "custom")
-        else {
+    pub fn update_custom_rule(
+        &mut self,
+        config: CustomRuleConfig,
+    ) -> Result<GuardrailInfo, String> {
+        let Some(index) = self.entries.iter().position(|entry| {
+            entry.guardrail.id() == config.id && entry.guardrail_type == "custom"
+        }) else {
             return Err(format!("Guardrail '{}' not found", config.id));
         };
 
@@ -551,7 +582,11 @@ impl GuardrailRegistry {
     }
 
     pub fn set_enabled(&mut self, id: &str, enabled: bool) -> Result<GuardrailInfo, String> {
-        let Some(entry) = self.entries.iter_mut().find(|entry| entry.guardrail.id() == id) else {
+        let Some(entry) = self
+            .entries
+            .iter_mut()
+            .find(|entry| entry.guardrail.id() == id)
+        else {
             return Err(format!("Guardrail '{}' not found", id));
         };
         entry.enabled = enabled;

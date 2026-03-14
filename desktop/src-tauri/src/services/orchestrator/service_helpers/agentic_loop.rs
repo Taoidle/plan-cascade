@@ -1,7 +1,7 @@
 use super::*;
 use crate::services::orchestrator::{
-    assess_progress, build_iteration_budget, IterationBudgetHints,
-    IterationProgressAssessment, IterationProgressSnapshot,
+    assess_progress, build_iteration_budget, IterationBudgetHints, IterationProgressAssessment,
+    IterationProgressSnapshot,
 };
 use crate::services::tools::executor::ToolResult;
 
@@ -35,11 +35,7 @@ impl LoopProgressState {
         if result.is_success() && !result.is_dedup {
             self.successful_tool_results = self.successful_tool_results.saturating_add(1);
         }
-        let fingerprint = format!(
-            "{}::{}",
-            tool_name,
-            hash_text_fragment(args)
-        );
+        let fingerprint = format!("{}::{}", tool_name, hash_text_fragment(args));
         self.unique_tool_fingerprints.insert(fingerprint);
 
         if matches!(tool_name, "Read" | "Grep" | "Glob" | "LS") {
@@ -55,7 +51,8 @@ impl LoopProgressState {
             if lower.contains("file:") || lower.contains("path:") || lower.contains("src/") {
                 self.tool_evidence_count = self.tool_evidence_count.saturating_add(1);
             }
-            if lower.contains("created") || lower.contains("updated") || lower.contains("artifact") {
+            if lower.contains("created") || lower.contains("updated") || lower.contains("artifact")
+            {
                 self.artifact_count = self.artifact_count.saturating_add(1);
             }
         }
@@ -95,7 +92,10 @@ fn candidate_looks_structured(content: &str) -> bool {
     if content.is_empty() {
         return false;
     }
-    let line_count = content.lines().filter(|line| !line.trim().is_empty()).count();
+    let line_count = content
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .count();
     line_count >= 3
         || content.contains("```")
         || content.contains("## ")
@@ -133,8 +133,7 @@ fn should_inject_codebase_search_first_hint(
         return false;
     }
 
-    *consecutive_rounds_without_codebase =
-        consecutive_rounds_without_codebase.saturating_add(1);
+    *consecutive_rounds_without_codebase = consecutive_rounds_without_codebase.saturating_add(1);
     if *consecutive_rounds_without_codebase >= 2 {
         *consecutive_rounds_without_codebase = 0;
         return true;
@@ -819,7 +818,10 @@ impl OrchestratorService {
                         .unwrap_or(0),
                 complexity_score: tools.len(),
                 has_specialized_tools: tools.iter().any(|tool| {
-                    matches!(tool.name.as_str(), "Task" | "SearchKnowledge" | "Browser" | "Bash")
+                    matches!(
+                        tool.name.as_str(),
+                        "Task" | "SearchKnowledge" | "Browser" | "Bash"
+                    )
                 }),
                 analysis_profile: Some(self.config.analysis_profile),
                 soft_limit_override: self.config.soft_limit_override,
@@ -1042,7 +1044,9 @@ impl OrchestratorService {
             }
 
             if iterations >= iteration_budget.hard_limit {
-                let recovered = last_assistant_text.as_ref().filter(|text| !text.trim().is_empty());
+                let recovered = last_assistant_text
+                    .as_ref()
+                    .filter(|text| !text.trim().is_empty());
                 if let Some(text) = recovered {
                     let message = format!(
                         "Iteration hard limit ({}) reached; recovered final response.",
@@ -2158,7 +2162,11 @@ impl OrchestratorService {
             }
 
             let tool_names: Vec<&str> = if has_native_tool_calls {
-                response.tool_calls.iter().map(|tc| tc.name.as_str()).collect()
+                response
+                    .tool_calls
+                    .iter()
+                    .map(|tc| tc.name.as_str())
+                    .collect()
             } else if !parsed_fallback.calls.is_empty() {
                 parsed_fallback
                     .calls
@@ -2223,7 +2231,9 @@ impl OrchestratorService {
                             .insert(tc.arguments.to_string());
                     }
                     if tc.name == "Read" {
-                        progress_state.sampled_reads.insert(tc.arguments.to_string());
+                        progress_state
+                            .sampled_reads
+                            .insert(tc.arguments.to_string());
                     }
                     if tc.name == "Task" {
                         progress_state.subagent_completion_count =
@@ -2246,7 +2256,9 @@ impl OrchestratorService {
                             .insert(call.arguments.to_string());
                     }
                     if call.tool_name == "Read" {
-                        progress_state.sampled_reads.insert(call.arguments.to_string());
+                        progress_state
+                            .sampled_reads
+                            .insert(call.arguments.to_string());
                     }
                     if call.tool_name == "Task" {
                         progress_state.subagent_completion_count =
@@ -2268,10 +2280,13 @@ impl OrchestratorService {
                 progress_snapshots.pop_front();
             }
             if iterations >= iteration_budget.soft_limit
-                && (iterations - iteration_budget.soft_limit) % iteration_budget.review_interval == 0
+                && (iterations - iteration_budget.soft_limit) % iteration_budget.review_interval
+                    == 0
                 && progress_snapshots.len() >= 2
             {
-                let previous = progress_snapshots.front().expect("progress snapshot present");
+                let previous = progress_snapshots
+                    .front()
+                    .expect("progress snapshot present");
                 if matches!(
                     assess_progress(previous, &snapshot),
                     IterationProgressAssessment::Stalled
@@ -2365,7 +2380,9 @@ impl OrchestratorService {
             shared_file_change_tracker: self.tool_executor.get_file_change_tracker(),
             shared_file_change_turn_index: self.tool_executor.get_file_change_turn_index(),
             shared_file_change_source_mode: self.tool_executor.get_file_change_source_mode(),
-            shared_file_change_origin_session_id: self.tool_executor.get_file_change_origin_session_id(),
+            shared_file_change_origin_session_id: self
+                .tool_executor
+                .get_file_change_origin_session_id(),
             shared_paused: Arc::clone(&self.paused),
             plugin_instructions_snapshot,
             plugin_skills_snapshot,
@@ -2440,7 +2457,10 @@ impl OrchestratorService {
                         .unwrap_or(0),
                 complexity_score: tools.len(),
                 has_specialized_tools: tools.iter().any(|tool| {
-                    matches!(tool.name.as_str(), "Task" | "SearchKnowledge" | "Browser" | "Bash")
+                    matches!(
+                        tool.name.as_str(),
+                        "Task" | "SearchKnowledge" | "Browser" | "Bash"
+                    )
                 }),
                 analysis_profile: Some(self.config.analysis_profile),
                 soft_limit_override: self.config.soft_limit_override,
@@ -2573,7 +2593,9 @@ impl OrchestratorService {
             }
 
             if iterations >= iteration_budget.hard_limit {
-                let recovered = last_assistant_text.as_ref().filter(|text| !text.trim().is_empty());
+                let recovered = last_assistant_text
+                    .as_ref()
+                    .filter(|text| !text.trim().is_empty());
                 if let Some(text) = recovered {
                     let message = format!(
                         "Iteration hard limit ({}) reached; recovered final response.",
@@ -4099,7 +4121,9 @@ impl OrchestratorService {
                             .insert(tc.arguments.to_string());
                     }
                     if tc.name == "Read" {
-                        progress_state.sampled_reads.insert(tc.arguments.to_string());
+                        progress_state
+                            .sampled_reads
+                            .insert(tc.arguments.to_string());
                     }
                     if tc.name == "Task" {
                         progress_state.subagent_completion_count =
@@ -4122,7 +4146,9 @@ impl OrchestratorService {
                             .insert(call.arguments.to_string());
                     }
                     if call.tool_name == "Read" {
-                        progress_state.sampled_reads.insert(call.arguments.to_string());
+                        progress_state
+                            .sampled_reads
+                            .insert(call.arguments.to_string());
                     }
                     if call.tool_name == "Task" {
                         progress_state.subagent_completion_count =
@@ -4144,10 +4170,13 @@ impl OrchestratorService {
                 progress_snapshots.pop_front();
             }
             if iterations >= iteration_budget.soft_limit
-                && (iterations - iteration_budget.soft_limit) % iteration_budget.review_interval == 0
+                && (iterations - iteration_budget.soft_limit) % iteration_budget.review_interval
+                    == 0
                 && progress_snapshots.len() >= 2
             {
-                let previous = progress_snapshots.front().expect("progress snapshot present");
+                let previous = progress_snapshots
+                    .front()
+                    .expect("progress snapshot present");
                 if matches!(
                     assess_progress(previous, &snapshot),
                     IterationProgressAssessment::Stalled
@@ -4666,7 +4695,9 @@ impl OrchestratorService {
         //   codebase only:       CodebaseSearch → others
         {
             let has_knowledge = self.knowledge_awareness_section.is_some();
-            let has_codebase_search = prompt_tools.iter().any(|tool| tool.name == "CodebaseSearch");
+            let has_codebase_search = prompt_tools
+                .iter()
+                .any(|tool| tool.name == "CodebaseSearch");
             let priority_section = build_tool_priority_section(
                 has_knowledge,
                 has_codebase_search,
@@ -5315,8 +5346,7 @@ mod skill_tool_policy_tests {
         advisory.skill.tool_policy_mode =
             crate::services::skills::model::SkillToolPolicyMode::Advisory;
 
-        let allowed =
-            OrchestratorService::normalized_allowed_tools_from_skill_matches(&[advisory]);
+        let allowed = OrchestratorService::normalized_allowed_tools_from_skill_matches(&[advisory]);
         assert!(allowed.is_none());
     }
 

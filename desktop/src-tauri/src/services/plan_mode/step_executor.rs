@@ -19,11 +19,11 @@ use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 
 use crate::services::analytics::send_message_tracked;
+use crate::services::file_change_tracker::FileChangeTracker;
 use crate::services::llm::provider::LlmProvider;
 use crate::services::llm::types::{
     LlmRequestOptions, Message, MessageRole, ProviderConfig, ToolDefinition,
 };
-use crate::services::file_change_tracker::FileChangeTracker;
 use crate::services::orchestrator::embedding_manager::EmbeddingManager;
 use crate::services::orchestrator::embedding_service::EmbeddingService;
 use crate::services::orchestrator::hnsw_index::HnswIndex;
@@ -682,9 +682,7 @@ async fn execute_batch_round(request: BatchRoundRequest<'_>) {
                 match snapshot.get(step.id.as_str()) {
                     Some(StepExecutionState::HardFailed { reason })
                     | Some(StepExecutionState::SoftFailed { reason, .. })
-                    | Some(StepExecutionState::NeedsReview { reason, .. }) => {
-                        Some(reason.clone())
-                    }
+                    | Some(StepExecutionState::NeedsReview { reason, .. }) => Some(reason.clone()),
                     _ => None,
                 }
             };
@@ -885,7 +883,10 @@ async fn execute_batch_round(request: BatchRoundRequest<'_>) {
 
                     {
                         let mut s = states.write().await;
-                        s.insert(step.id.clone(), state_from_validation(&validation_result, duration_ms));
+                        s.insert(
+                            step.id.clone(),
+                            state_from_validation(&validation_result, duration_ms),
+                        );
                     }
                     {
                         let mut outs = outputs.write().await;
@@ -1185,8 +1186,7 @@ pub async fn retry_single_step(
             output.attempt_count = 1;
             let validation_result =
                 validate_step_output(step, &mut output, adapter.clone(), provider.clone()).await;
-            if let Some(reason) =
-                detect_incomplete_output_reason(step, &output, &validation_result)
+            if let Some(reason) = detect_incomplete_output_reason(step, &output, &validation_result)
             {
                 let category =
                     classify_failure_reason(&format!("Step output incomplete: {reason}"));
@@ -1437,13 +1437,19 @@ fn build_terminal_report(
                 steps_completed += 1;
                 total_duration_ms = total_duration_ms.saturating_add(*duration_ms);
             }
-            StepExecutionState::SoftFailed { reason, duration_ms } => {
+            StepExecutionState::SoftFailed {
+                reason,
+                duration_ms,
+            } => {
                 steps_completed += 1;
                 steps_soft_failed += 1;
                 total_duration_ms = total_duration_ms.saturating_add(*duration_ms);
                 failure_reasons.insert(step_id.clone(), reason.clone());
             }
-            StepExecutionState::NeedsReview { reason, duration_ms } => {
+            StepExecutionState::NeedsReview {
+                reason,
+                duration_ms,
+            } => {
                 steps_completed += 1;
                 steps_needs_review += 1;
                 total_duration_ms = total_duration_ms.saturating_add(*duration_ms);
@@ -2022,14 +2028,20 @@ fn detect_incomplete_output_reason(
         ));
     }
 
-    if matches!(validation_result.outcome_status, StepOutcomeStatus::HardFailed) {
+    if matches!(
+        validation_result.outcome_status,
+        StepOutcomeStatus::HardFailed
+    ) {
         return Some(validation_summary(validation_result));
     }
 
     None
 }
 
-fn apply_validation_outcome_to_output(output: &mut StepOutput, validation_result: &StepValidationResult) {
+fn apply_validation_outcome_to_output(
+    output: &mut StepOutput,
+    validation_result: &StepValidationResult,
+) {
     output.validation_result = validation_result.clone();
     output.outcome_status = validation_result.outcome_status.clone();
     output.review_reason = validation_result.review_reason.clone();
@@ -2597,14 +2609,8 @@ fn build_step_output(
     let summary = summarize_output(&content);
     let artifacts = extract_artifacts(&content);
     let tool_evidence = extract_tool_evidence(&content, &artifacts);
-    let evidence_bundle = evidence_bundle.unwrap_or_else(|| build_step_evidence_bundle(
-        &[],
-        Vec::new(),
-        &[],
-        0,
-        None,
-        1,
-    ));
+    let evidence_bundle = evidence_bundle
+        .unwrap_or_else(|| build_step_evidence_bundle(&[], Vec::new(), &[], 0, None, 1));
     StepOutput {
         step_id,
         summary,
@@ -2983,7 +2989,12 @@ mod tests {
     #[test]
     fn test_resolve_step_tools_maps_plan_tool_whitelist() {
         let adapter = GeneralAdapter;
-        let step = sample_step("s1", "Inspect codebase", "Read relevant code", StepPriority::Medium);
+        let step = sample_step(
+            "s1",
+            "Inspect codebase",
+            "Read relevant code",
+            StepPriority::Medium,
+        );
 
         let tools = resolve_step_tools(&adapter, &step);
         let names: HashSet<String> = tools.into_iter().map(|tool| tool.name).collect();
@@ -3260,6 +3271,8 @@ mod tests {
             OutputFormat::Markdown,
         );
         output.artifacts = vec!["src/app.tsx".to_string()];
-        assert!(detect_incomplete_output_reason(&step, &output, &output.validation_result).is_none());
+        assert!(
+            detect_incomplete_output_reason(&step, &output, &output.validation_result).is_none()
+        );
     }
 }

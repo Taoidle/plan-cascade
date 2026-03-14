@@ -190,7 +190,10 @@ impl McpManager {
             qualified_names.push(qualified_name);
             metadata.insert(
                 adapter.qualified_name().to_string(),
-                runtime_metadata_from_debug_metadata(&server_name, tool_info.debug_metadata.as_ref()),
+                runtime_metadata_from_debug_metadata(
+                    &server_name,
+                    tool_info.debug_metadata.as_ref(),
+                ),
             );
             adapters.push(adapter);
         }
@@ -432,7 +435,11 @@ impl McpManager {
             .read()
             .await
             .values()
-            .flat_map(|items| items.iter().map(|(name, metadata)| (name.clone(), metadata.clone())))
+            .flat_map(|items| {
+                items
+                    .iter()
+                    .map(|(name, metadata)| (name.clone(), metadata.clone()))
+            })
             .collect()
     }
 

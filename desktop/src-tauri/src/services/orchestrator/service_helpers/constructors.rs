@@ -245,29 +245,37 @@ impl TaskSpawner for OrchestratorTaskSpawner {
         // Propagate analytics tracking to sub-agent
         sub_agent.analytics_tx = self.shared_analytics_tx.clone();
         sub_agent.analytics_cost_calculator = self.shared_analytics_cost_calculator.clone();
-        sub_agent.analytics_attribution = self.shared_analytics_attribution.clone().map(|mut attribution| {
-            attribution.execution_scope = Some(crate::models::analytics::AnalyticsExecutionScope::SubAgent);
-            attribution.parent_execution_id = attribution.execution_id.clone();
-            attribution.execution_id = Some(format!(
-                "{}::sub_agent::{}",
-                attribution
-                    .parent_execution_id
-                    .clone()
-                    .unwrap_or_else(|| "execution".to_string()),
-                uuid::Uuid::new_v4()
-            ));
-            attribution
-        });
+        sub_agent.analytics_attribution =
+            self.shared_analytics_attribution
+                .clone()
+                .map(|mut attribution| {
+                    attribution.execution_scope =
+                        Some(crate::models::analytics::AnalyticsExecutionScope::SubAgent);
+                    attribution.parent_execution_id = attribution.execution_id.clone();
+                    attribution.execution_id = Some(format!(
+                        "{}::sub_agent::{}",
+                        attribution
+                            .parent_execution_id
+                            .clone()
+                            .unwrap_or_else(|| "execution".to_string()),
+                        uuid::Uuid::new_v4()
+                    ));
+                    attribution
+                });
         if let Some(ref tracker) = self.shared_file_change_tracker {
             sub_agent
                 .tool_executor
                 .set_file_change_tracker(Arc::clone(tracker));
         }
         if let Some(turn_index) = self.shared_file_change_turn_index {
-            sub_agent.tool_executor.set_file_change_turn_index(turn_index);
+            sub_agent
+                .tool_executor
+                .set_file_change_turn_index(turn_index);
         }
         if let Some(source_mode) = self.shared_file_change_source_mode {
-            sub_agent.tool_executor.set_file_change_source_mode(source_mode);
+            sub_agent
+                .tool_executor
+                .set_file_change_source_mode(source_mode);
         }
         sub_agent.tool_executor.set_file_change_actor_metadata(
             crate::services::file_change_tracker::FileChangeActorKind::SubAgent,
@@ -2157,7 +2165,8 @@ mod escalation_tests {
             "Explore prompt should not include invalid scope=all"
         );
         assert!(
-            explore_prompt.contains("scope='hybrid'") || explore_prompt.contains("scope=\"hybrid\""),
+            explore_prompt.contains("scope='hybrid'")
+                || explore_prompt.contains("scope=\"hybrid\""),
             "Explore prompt should use hybrid scope for code discovery"
         );
 
@@ -2169,7 +2178,8 @@ mod escalation_tests {
             &provider,
         );
         assert!(
-            !general_prompt.contains("scope='files'") && !general_prompt.contains("scope=\"files\""),
+            !general_prompt.contains("scope='files'")
+                && !general_prompt.contains("scope=\"files\""),
             "General-purpose prompt should not include invalid scope=files"
         );
         assert!(

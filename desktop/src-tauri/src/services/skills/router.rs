@@ -312,8 +312,8 @@ async fn rerank_with_provider(
     .map_err(|_| "timeout".to_string())?
     .map_err(|error| error.to_string())?;
 
-    let response_text = extract_response_text(&response)
-        .ok_or_else(|| "empty_response".to_string())?;
+    let response_text =
+        extract_response_text(&response).ok_or_else(|| "empty_response".to_string())?;
     let json_text = extract_json_from_response(&response_text);
     serde_json::from_str::<SkillRerankResult>(&json_text)
         .map_err(|error| format!("parse_error:{error}"))
@@ -456,12 +456,12 @@ pub async fn rerank_skill_matches(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_trait::async_trait;
     use crate::services::llm::types::{
         LlmResponse, LlmResult, ProviderConfig, StopReason, ToolDefinition, UsageStats,
     };
-    use tokio::sync::mpsc;
+    use async_trait::async_trait;
     use plan_cascade_core::streaming::UnifiedStreamEvent;
+    use tokio::sync::mpsc;
 
     #[derive(Clone)]
     struct MockProvider {
@@ -471,10 +471,18 @@ mod tests {
 
     #[async_trait]
     impl LlmProvider for MockProvider {
-        fn name(&self) -> &'static str { "mock" }
-        fn model(&self) -> &str { &self.config.model }
-        fn supports_thinking(&self) -> bool { false }
-        fn supports_tools(&self) -> bool { false }
+        fn name(&self) -> &'static str {
+            "mock"
+        }
+        fn model(&self) -> &str {
+            &self.config.model
+        }
+        fn supports_thinking(&self) -> bool {
+            false
+        }
+        fn supports_tools(&self) -> bool {
+            false
+        }
         async fn send_message(
             &self,
             _messages: Vec<Message>,
@@ -508,8 +516,12 @@ mod tests {
         ) -> LlmResult<LlmResponse> {
             unimplemented!()
         }
-        async fn health_check(&self) -> LlmResult<()> { Ok(()) }
-        fn config(&self) -> &ProviderConfig { &self.config }
+        async fn health_check(&self) -> LlmResult<()> {
+            Ok(())
+        }
+        fn config(&self) -> &ProviderConfig {
+            &self.config
+        }
     }
 
     fn make_match(id: &str, name: &str) -> SkillMatch {
@@ -550,7 +562,10 @@ mod tests {
                 ..Default::default()
             },
         });
-        let matches = vec![make_match("skill-a", "Skill A"), make_match("skill-b", "Skill B")];
+        let matches = vec![
+            make_match("skill-a", "Skill A"),
+            make_match("skill-b", "Skill B"),
+        ];
         let result = rerank_with_provider(
             provider,
             Path::new("/tmp/project"),

@@ -824,7 +824,8 @@ mod tests {
 
         let counter = Arc::new(AtomicUsize::new(0));
         let condition_counter = counter.clone();
-        let condition: LoopConditionFn = Box::new(move |_| condition_counter.fetch_add(1, Ordering::SeqCst) < 2);
+        let condition: LoopConditionFn =
+            Box::new(move |_| condition_counter.fetch_add(1, Ordering::SeqCst) < 2);
 
         let loop_agent =
             LoopAgent::new("prefix-loop", sub_agent, condition).with_soft_limit_override(Some(10));
@@ -938,7 +939,8 @@ mod tests {
 
         let counter = Arc::new(AtomicUsize::new(0));
         let condition_counter = counter.clone();
-        let condition: LoopConditionFn = Box::new(move |_| condition_counter.fetch_add(1, Ordering::SeqCst) < 1);
+        let condition: LoopConditionFn =
+            Box::new(move |_| condition_counter.fetch_add(1, Ordering::SeqCst) < 1);
 
         let loop_agent =
             LoopAgent::new("fwd-loop", sub_agent, condition).with_soft_limit_override(Some(10));
@@ -967,7 +969,8 @@ mod tests {
 
         let counter = Arc::new(AtomicUsize::new(0));
         let condition_counter = counter.clone();
-        let condition: LoopConditionFn = Box::new(move |_| condition_counter.fetch_add(1, Ordering::SeqCst) < 1);
+        let condition: LoopConditionFn =
+            Box::new(move |_| condition_counter.fetch_add(1, Ordering::SeqCst) < 1);
 
         let loop_agent =
             LoopAgent::new("single-loop", sub_agent, condition).with_soft_limit_override(Some(10));

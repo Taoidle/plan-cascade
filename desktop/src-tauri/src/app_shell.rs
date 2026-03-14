@@ -2,8 +2,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::channel;
 use std::sync::Mutex;
 
-use tauri::menu::MenuEvent;
 use tauri::menu::MenuBuilder;
+use tauri::menu::MenuEvent;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, RunEvent, Runtime, State, WindowEvent};
 
@@ -138,19 +138,21 @@ fn create_tray<R: Runtime>(app: &AppHandle<R>, locale: &str) -> tauri::Result<()
         .menu(&menu)
         .tooltip(labels.tooltip)
         .show_menu_on_left_click(false)
-        .on_menu_event(|app: &AppHandle<R>, event: MenuEvent| match event.id().as_ref() {
-            TRAY_SHOW_ID => {
-                let _ = show_main_window(app);
-            }
-            TRAY_HIDE_ID => {
-                let _ = hide_main_window_to_background(app);
-            }
-            TRAY_QUIT_ID => {
-                let shell_state: State<'_, AppShellState> = app.state();
-                quit_application(app, shell_state.inner());
-            }
-            _ => {}
-        })
+        .on_menu_event(
+            |app: &AppHandle<R>, event: MenuEvent| match event.id().as_ref() {
+                TRAY_SHOW_ID => {
+                    let _ = show_main_window(app);
+                }
+                TRAY_HIDE_ID => {
+                    let _ = hide_main_window_to_background(app);
+                }
+                TRAY_QUIT_ID => {
+                    let shell_state: State<'_, AppShellState> = app.state();
+                    quit_application(app, shell_state.inner());
+                }
+                _ => {}
+            },
+        )
         .on_tray_icon_event(|tray: &TrayIcon<R>, event: TrayIconEvent| {
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
@@ -192,7 +194,8 @@ fn refresh_tray_on_main_thread<R: Runtime>(app: &AppHandle<R>, locale: &str) -> 
         let _ = tx.send(refresh_tray(&app_handle, &locale));
     })?;
 
-    rx.recv().map_err(|_| tauri::Error::FailedToReceiveMessage)?
+    rx.recv()
+        .map_err(|_| tauri::Error::FailedToReceiveMessage)?
 }
 
 fn should_refresh_tray(current_locale: &str, next_locale: &str, tray_exists: bool) -> bool {
@@ -302,10 +305,7 @@ mod tests {
 
     #[test]
     fn background_action_allows_close_when_disabled() {
-        assert_eq!(
-            background_action(false),
-            BackgroundAction::AllowClose
-        );
+        assert_eq!(background_action(false), BackgroundAction::AllowClose);
     }
 
     #[test]

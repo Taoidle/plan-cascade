@@ -195,14 +195,20 @@ pub async fn send_message(
             let session_id = request.session_id.clone();
             let response_execution_id = execution_id.clone();
             let workflow_kernel = workflow_state.inner().clone();
-            let tracker_for_events = tracker_bundle.as_ref().map(|(tracker, _, _)| Arc::clone(tracker));
+            let tracker_for_events = tracker_bundle
+                .as_ref()
+                .map(|(tracker, _, _)| Arc::clone(tracker));
             let tracker_project_root = tracker_bundle
                 .as_ref()
                 .map(|(_, project_root, _)| project_root.clone());
-            let tracker_turn_index = tracker_bundle.as_ref().map(|(_, _, turn_index)| *turn_index);
+            let tracker_turn_index = tracker_bundle
+                .as_ref()
+                .map(|(_, _, turn_index)| *turn_index);
             let tracker_metadata = crate::services::file_change_tracker::FileChangeMetadata {
                 source_mode: Some(crate::services::file_change_tracker::FileChangeSourceMode::Chat),
-                actor_kind: Some(crate::services::file_change_tracker::FileChangeActorKind::RootAgent),
+                actor_kind: Some(
+                    crate::services::file_change_tracker::FileChangeActorKind::RootAgent,
+                ),
                 actor_id: Some("claude-chat".to_string()),
                 actor_label: Some("Main Agent".to_string()),
                 sub_agent_depth: None,
@@ -252,7 +258,8 @@ pub async fn send_message(
                                 {
                                     if tool_name.eq_ignore_ascii_case("bash") {
                                         if let Ok(guard) = tracker.lock() {
-                                            if let Ok(snapshot) = guard.capture_workspace_snapshot() {
+                                            if let Ok(snapshot) = guard.capture_workspace_snapshot()
+                                            {
                                                 tool_workspace_snapshots
                                                     .insert(tool_id.clone(), snapshot);
                                             }
@@ -261,19 +268,26 @@ pub async fn send_message(
                                         || tool_name.eq_ignore_ascii_case("edit")
                                     {
                                         if let Ok(guard) = tracker.lock() {
-                                            let snapshots = extract_tool_file_paths(tool_name, &arguments)
-                                                .into_iter()
-                                                .map(|raw_path| {
-                                                    let absolute_path =
-                                                        resolve_tool_file_path(project_root, &raw_path);
-                                                    let relative_path =
-                                                        tracker_relative_path(project_root, &absolute_path);
-                                                    let before_hash = guard.capture_before(&absolute_path);
-                                                    (relative_path, before_hash)
-                                                })
-                                                .collect::<Vec<_>>();
+                                            let snapshots =
+                                                extract_tool_file_paths(tool_name, &arguments)
+                                                    .into_iter()
+                                                    .map(|raw_path| {
+                                                        let absolute_path = resolve_tool_file_path(
+                                                            project_root,
+                                                            &raw_path,
+                                                        );
+                                                        let relative_path = tracker_relative_path(
+                                                            project_root,
+                                                            &absolute_path,
+                                                        );
+                                                        let before_hash =
+                                                            guard.capture_before(&absolute_path);
+                                                        (relative_path, before_hash)
+                                                    })
+                                                    .collect::<Vec<_>>();
                                             if !snapshots.is_empty() {
-                                                tool_file_snapshots.insert(tool_id.clone(), snapshots);
+                                                tool_file_snapshots
+                                                    .insert(tool_id.clone(), snapshots);
                                             }
                                         }
                                     }
@@ -306,17 +320,23 @@ pub async fn send_message(
                                     && !tool_file_snapshots.contains_key(tool_id)
                                 {
                                     if let Ok(guard) = tracker.lock() {
-                                        let snapshots = extract_tool_file_paths(tool_name, arguments)
-                                            .into_iter()
-                                            .map(|raw_path| {
-                                                let absolute_path =
-                                                    resolve_tool_file_path(project_root, &raw_path);
-                                                let relative_path =
-                                                    tracker_relative_path(project_root, &absolute_path);
-                                                let before_hash = guard.capture_before(&absolute_path);
-                                                (relative_path, before_hash)
-                                            })
-                                            .collect::<Vec<_>>();
+                                        let snapshots =
+                                            extract_tool_file_paths(tool_name, arguments)
+                                                .into_iter()
+                                                .map(|raw_path| {
+                                                    let absolute_path = resolve_tool_file_path(
+                                                        project_root,
+                                                        &raw_path,
+                                                    );
+                                                    let relative_path = tracker_relative_path(
+                                                        project_root,
+                                                        &absolute_path,
+                                                    );
+                                                    let before_hash =
+                                                        guard.capture_before(&absolute_path);
+                                                    (relative_path, before_hash)
+                                                })
+                                                .collect::<Vec<_>>();
                                         if !snapshots.is_empty() {
                                             tool_file_snapshots.insert(tool_id.clone(), snapshots);
                                         }
@@ -357,7 +377,8 @@ pub async fn send_message(
                                         || tool_name.eq_ignore_ascii_case("edit"))
                                         && arguments.is_some()
                                     {
-                                        if let Some(before_files) = tool_file_snapshots.remove(tool_id)
+                                        if let Some(before_files) =
+                                            tool_file_snapshots.remove(tool_id)
                                         {
                                             if let Ok(mut guard) = tracker.lock() {
                                                 for (idx, (relative_path, before_hash)) in
@@ -366,11 +387,11 @@ pub async fn send_message(
                                                     let absolute_path =
                                                         project_root.join(&relative_path);
                                                     let after_hash = if absolute_path.exists() {
-                                                        std::fs::read(&absolute_path)
-                                                            .ok()
-                                                            .and_then(|bytes| {
+                                                        std::fs::read(&absolute_path).ok().and_then(
+                                                            |bytes| {
                                                                 guard.store_content(&bytes).ok()
-                                                            })
+                                                            },
+                                                        )
                                                     } else {
                                                         None
                                                     };
@@ -379,13 +400,22 @@ pub async fn send_message(
                                                         after_hash.as_ref(),
                                                     ) {
                                                         (None, Some(_)) => {
-                                                            format!("Claude Code {} created file", tool_name)
+                                                            format!(
+                                                                "Claude Code {} created file",
+                                                                tool_name
+                                                            )
                                                         }
                                                         (Some(_), None) => {
-                                                            format!("Claude Code {} deleted file", tool_name)
+                                                            format!(
+                                                                "Claude Code {} deleted file",
+                                                                tool_name
+                                                            )
                                                         }
                                                         _ => {
-                                                            format!("Claude Code {} modified file", tool_name)
+                                                            format!(
+                                                                "Claude Code {} modified file",
+                                                                tool_name
+                                                            )
                                                         }
                                                     };
                                                     guard.record_change_at_with_metadata(
@@ -417,7 +447,11 @@ pub async fn send_message(
                     }
                     let binding_session_id = format!("claude:{}", session_id);
                     match workflow_kernel
-                        .sync_chat_runtime_event(&binding_session_id, &payload.event)
+                        .sync_chat_runtime_event(
+                            &binding_session_id,
+                            Some(execution_id.as_str()),
+                            &payload.event,
+                        )
                         .await
                     {
                         Ok(Some(mutation)) => {
@@ -495,6 +529,7 @@ pub async fn cancel_execution(
             if let Ok(Some(mutation)) = workflow_state
                 .sync_chat_runtime_event(
                     &binding_session_id,
+                    Some(execution_id.as_str()),
                     &UnifiedStreamEvent::Error {
                         message: "Execution cancelled".to_string(),
                         code: Some("cancelled".to_string()),

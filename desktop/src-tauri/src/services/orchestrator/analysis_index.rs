@@ -771,7 +771,8 @@ fn normalize_rel_path(path: &str) -> String {
 }
 
 fn is_excluded(path: &str, excluded_roots: &HashSet<String>) -> bool {
-    path.split('/').any(|segment| excluded_roots.contains(segment))
+    path.split('/')
+        .any(|segment| excluded_roots.contains(segment))
 }
 
 pub fn detect_language(ext: Option<&str>) -> String {
@@ -992,13 +993,18 @@ mod tests {
         )
         .expect("write main");
         fs::write(
-            dir.path().join("desktop/src-tauri/target/debug/generated.rs"),
+            dir.path()
+                .join("desktop/src-tauri/target/debug/generated.rs"),
             "pub fn generated() {}\n",
         )
         .expect("write generated");
 
         let inventory = build_file_inventory(dir.path(), &[]).expect("inventory");
-        let paths: Vec<&str> = inventory.items.iter().map(|item| item.path.as_str()).collect();
+        let paths: Vec<&str> = inventory
+            .items
+            .iter()
+            .map(|item| item.path.as_str())
+            .collect();
 
         assert!(paths.contains(&"desktop/src-tauri/src/main.rs"));
         assert!(!paths.contains(&"desktop/src-tauri/target/debug/generated.rs"));

@@ -116,10 +116,9 @@ async fn resolve_indexed_project_path(mgr: &IndexManager, project_path: &str) ->
     }
 
     if let Ok(projects) = mgr.index_store().list_indexed_projects() {
-        if let Some(project) = projects
-            .into_iter()
-            .find(|project| normalize_index_project_path_key(&project.project_path) == normalized_target)
-        {
+        if let Some(project) = projects.into_iter().find(|project| {
+            normalize_index_project_path_key(&project.project_path) == normalized_target
+        }) {
             return project.project_path;
         }
     }
@@ -1582,7 +1581,9 @@ pub async fn execute_standalone(
         .with_search_provider(&search_provider, search_api_key)
         .with_guardrail_hooks(crate::services::guardrail::shared_guardrail_registry())
         .with_permission_gate(permission_state.gate.clone())
-        .with_file_change_source_mode(crate::services::file_change_tracker::FileChangeSourceMode::Chat)
+        .with_file_change_source_mode(
+            crate::services::file_change_tracker::FileChangeSourceMode::Chat,
+        )
         .with_file_change_actor_metadata(
             crate::services::file_change_tracker::FileChangeActorKind::RootAgent,
             Some("chat-root".to_string()),
@@ -1852,7 +1853,11 @@ pub async fn execute_standalone(
             let _ = app_clone.emit("standalone-event", &payload);
             if let Some(binding_session_id) = workflow_binding_session_id.as_ref() {
                 match workflow_kernel
-                    .sync_chat_runtime_event(binding_session_id, &event)
+                    .sync_chat_runtime_event(
+                        binding_session_id,
+                        Some(execution_id.as_str()),
+                        &event,
+                    )
                     .await
                 {
                     Ok(Some(mutation)) => {
@@ -2206,7 +2211,9 @@ pub async fn execute_standalone_with_session(
         .with_database(pool)
         .with_guardrail_hooks(crate::services::guardrail::shared_guardrail_registry())
         .with_permission_gate(permission_state.gate.clone())
-        .with_file_change_source_mode(crate::services::file_change_tracker::FileChangeSourceMode::Chat)
+        .with_file_change_source_mode(
+            crate::services::file_change_tracker::FileChangeSourceMode::Chat,
+        )
         .with_file_change_actor_metadata(
             crate::services::file_change_tracker::FileChangeActorKind::RootAgent,
             Some("chat-root".to_string()),
@@ -2422,6 +2429,7 @@ pub async fn cancel_standalone_execution(
                 if let Ok(Some(mutation)) = workflow_state
                     .sync_chat_runtime_event(
                         &format!("standalone:{}", session_id),
+                        None,
                         &UnifiedStreamEvent::Error {
                             message: "Execution cancelled".to_string(),
                             code: Some("cancelled".to_string()),
@@ -2861,7 +2869,9 @@ pub async fn resume_standalone_execution(
         .with_database(pool)
         .with_guardrail_hooks(crate::services::guardrail::shared_guardrail_registry())
         .with_permission_gate(permission_state.gate.clone())
-        .with_file_change_source_mode(crate::services::file_change_tracker::FileChangeSourceMode::Chat)
+        .with_file_change_source_mode(
+            crate::services::file_change_tracker::FileChangeSourceMode::Chat,
+        )
         .with_file_change_actor_metadata(
             crate::services::file_change_tracker::FileChangeActorKind::RootAgent,
             Some("chat-root".to_string()),

@@ -905,9 +905,7 @@ async fn build_plan_conversation_context(
     bundle
 }
 
-fn render_plan_handoff_context(
-    handoff: &HandoffContextBundle,
-) -> String {
+fn render_plan_handoff_context(handoff: &HandoffContextBundle) -> String {
     let mut sections = Vec::new();
 
     let conversation_section = handoff
@@ -1020,7 +1018,9 @@ pub(crate) async fn publish_plan_handoff_summary(
         .await;
 }
 
-pub(crate) fn build_plan_analysis_summary_item(session: &PlanModeSession) -> Option<HandoffSummaryItem> {
+pub(crate) fn build_plan_analysis_summary_item(
+    session: &PlanModeSession,
+) -> Option<HandoffSummaryItem> {
     let analysis = session.analysis.as_ref()?;
     let locale_tag = normalize_locale(session.locale.as_deref());
     let mut metadata = serde_json::Map::new();
@@ -1120,7 +1120,9 @@ pub(crate) fn build_plan_clarification_summary_item(
     })
 }
 
-pub(crate) fn build_plan_output_summary_item(session: &PlanModeSession) -> Option<HandoffSummaryItem> {
+pub(crate) fn build_plan_output_summary_item(
+    session: &PlanModeSession,
+) -> Option<HandoffSummaryItem> {
     let plan = session.plan.as_ref()?;
     let locale_tag = normalize_locale(session.locale.as_deref());
     let step_lines = plan
@@ -1176,27 +1178,31 @@ pub(crate) fn build_plan_output_summary_item(session: &PlanModeSession) -> Optio
     })
 }
 
-pub(crate) fn build_plan_execution_summary_item(session: &PlanModeSession) -> Option<HandoffSummaryItem> {
+pub(crate) fn build_plan_execution_summary_item(
+    session: &PlanModeSession,
+) -> Option<HandoffSummaryItem> {
     let locale_tag = normalize_locale(session.locale.as_deref());
     let progress = session.progress.as_ref();
     let total_steps = progress
         .map(|value| value.total_steps)
         .or_else(|| session.plan.as_ref().map(|plan| plan.steps.len()))
         .unwrap_or_default();
-    let steps_completed = progress.map(|value| value.steps_completed).unwrap_or_else(|| {
-        session
-            .step_states
-            .values()
-            .filter(|state| {
-                matches!(
-                    state,
-                    StepExecutionState::Completed { .. }
-                        | StepExecutionState::SoftFailed { .. }
-                        | StepExecutionState::NeedsReview { .. }
-                )
-            })
-            .count()
-    });
+    let steps_completed = progress
+        .map(|value| value.steps_completed)
+        .unwrap_or_else(|| {
+            session
+                .step_states
+                .values()
+                .filter(|state| {
+                    matches!(
+                        state,
+                        StepExecutionState::Completed { .. }
+                            | StepExecutionState::SoftFailed { .. }
+                            | StepExecutionState::NeedsReview { .. }
+                    )
+                })
+                .count()
+        });
     let steps_failed = progress.map(|value| value.steps_failed).unwrap_or_else(|| {
         session
             .step_states
@@ -1233,9 +1239,18 @@ pub(crate) fn build_plan_execution_summary_item(session: &PlanModeSession) -> Op
         source_mode: WorkflowMode::Plan,
         kind: "plan_execution".to_string(),
         title: match locale_tag {
-            "zh" => format!("{} 的计划执行：{}", session.description, localized_terminal_state),
-            "ja" => format!("{} のプラン実行: {}", session.description, localized_terminal_state),
-            _ => format!("Plan execution {} for {}", localized_terminal_state, session.description),
+            "zh" => format!(
+                "{} 的计划执行：{}",
+                session.description, localized_terminal_state
+            ),
+            "ja" => format!(
+                "{} のプラン実行: {}",
+                session.description, localized_terminal_state
+            ),
+            _ => format!(
+                "Plan execution {} for {}",
+                localized_terminal_state, session.description
+            ),
         },
         body: match locale_tag {
             "zh" => format!(
@@ -1325,7 +1340,9 @@ fn localized_plan_copy(
 fn localized_plan_terminal_state(locale_tag: &str, terminal_state: &str) -> String {
     match terminal_state {
         "completed" => localized_plan_copy(locale_tag, "completed", "已完成", "完了").to_string(),
-        "cancelled" => localized_plan_copy(locale_tag, "cancelled", "已取消", "キャンセル済み").to_string(),
+        "cancelled" => {
+            localized_plan_copy(locale_tag, "cancelled", "已取消", "キャンセル済み").to_string()
+        }
         "failed" => localized_plan_copy(locale_tag, "failed", "失败", "失敗").to_string(),
         "partial" => localized_plan_copy(locale_tag, "partial", "部分完成", "部分完了").to_string(),
         _ => terminal_state.to_string(),

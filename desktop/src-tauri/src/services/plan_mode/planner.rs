@@ -14,9 +14,9 @@ use super::adapter::DomainAdapter;
 use super::types::{
     calculate_plan_batches_with_parallel, ArtifactRequirement, ClarificationAnswer,
     DependencyEvidenceMode, FailureSeverity, Plan, PlanExecutionConfig, PlanStep,
-    StepDeliverableContract, StepDeliverableFormat, StepDeliverableType,
-    StepEvidenceRequirements, StepFailurePolicy, StepPriority, StepQualityRequirements,
-    StepValidationProfile, TaskDomain, ValidationCheck, ValidationSeverity,
+    StepDeliverableContract, StepDeliverableFormat, StepDeliverableType, StepEvidenceRequirements,
+    StepFailurePolicy, StepPriority, StepQualityRequirements, StepValidationProfile, TaskDomain,
+    ValidationCheck, ValidationSeverity,
 };
 
 /// Generate a plan by decomposing the task into steps.
@@ -418,10 +418,7 @@ fn derive_legacy_completion_criteria(
         criteria.push(format!("Read at least {} files", evidence.min_files_read));
     }
     if !evidence.required_tools.is_empty() {
-        criteria.push(format!(
-            "Use tools: {}",
-            evidence.required_tools.join(", ")
-        ));
+        criteria.push(format!("Use tools: {}", evidence.required_tools.join(", ")));
     }
     for topic in &quality.must_cover_topics {
         criteria.push(format!("Cover topic: {topic}"));

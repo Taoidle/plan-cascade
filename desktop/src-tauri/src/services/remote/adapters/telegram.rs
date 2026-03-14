@@ -7,8 +7,8 @@
 use super::RemoteAdapter;
 use crate::services::proxy::ProxyConfig;
 use crate::services::remote::types::{
-    IncomingRemoteEvent, RemoteActionCard, RemoteAdapterType, RemoteError,
-    RemoteIncomingEventType, RemoteUiMessage, TelegramAdapterConfig,
+    IncomingRemoteEvent, RemoteActionCard, RemoteAdapterType, RemoteError, RemoteIncomingEventType,
+    RemoteUiMessage, TelegramAdapterConfig,
 };
 use async_trait::async_trait;
 use regex::{Captures, Regex};
@@ -332,8 +332,8 @@ impl RemoteAdapter for TelegramAdapter {
 
             let callback_tx = command_tx.clone();
             let callback_config = config.clone();
-            let callback_handler =
-                Update::filter_callback_query().endpoint(move |query: CallbackQuery, _bot: teloxide::Bot| {
+            let callback_handler = Update::filter_callback_query().endpoint(
+                move |query: CallbackQuery, _bot: teloxide::Bot| {
                     let tx = callback_tx.clone();
                     let config = callback_config.clone();
                     async move {
@@ -372,7 +372,8 @@ impl RemoteAdapter for TelegramAdapter {
                         let _ = tx.send(incoming).await;
                         Ok(())
                     }
-                });
+                },
+            );
 
             let handler = dptree::entry()
                 .branch(message_handler)
@@ -460,7 +461,11 @@ impl RemoteAdapter for TelegramAdapter {
         Ok(msg.id.0 as i64)
     }
 
-    async fn send_action_card(&self, chat_id: i64, card: &RemoteActionCard) -> Result<(), RemoteError> {
+    async fn send_action_card(
+        &self,
+        chat_id: i64,
+        card: &RemoteActionCard,
+    ) -> Result<(), RemoteError> {
         use teloxide::prelude::*;
         use teloxide::types::{ChatId, InlineKeyboardButton, InlineKeyboardMarkup, ParseMode};
 
@@ -496,7 +501,8 @@ impl RemoteAdapter for TelegramAdapter {
                 if !card.attachment_refs.is_empty() {
                     plain_text.push_str("\n\nArtifacts:");
                     for attachment in &card.attachment_refs {
-                        plain_text.push_str(&format!("\n- {}: {}", attachment.label, attachment.path));
+                        plain_text
+                            .push_str(&format!("\n- {}: {}", attachment.label, attachment.path));
                     }
                 }
 
@@ -504,16 +510,20 @@ impl RemoteAdapter for TelegramAdapter {
                 if let Some(markup) = keyboard {
                     fallback = fallback.reply_markup(markup);
                 }
-                fallback
-                    .await
-                    .map_err(|fallback_error| RemoteError::SendFailed(fallback_error.to_string()))?;
+                fallback.await.map_err(|fallback_error| {
+                    RemoteError::SendFailed(fallback_error.to_string())
+                })?;
                 Ok(())
             }
             Err(error) => Err(RemoteError::SendFailed(error.to_string())),
         }
     }
 
-    async fn send_ui_message(&self, chat_id: i64, message: &RemoteUiMessage) -> Result<(), RemoteError> {
+    async fn send_ui_message(
+        &self,
+        chat_id: i64,
+        message: &RemoteUiMessage,
+    ) -> Result<(), RemoteError> {
         match message {
             RemoteUiMessage::PlainText(text) => self.send_message(chat_id, text).await,
             RemoteUiMessage::ActionCard(card) => self.send_action_card(chat_id, card).await,
@@ -552,7 +562,9 @@ impl RemoteAdapter for TelegramAdapter {
                 self.bot
                     .edit_message_text(ChatId(chat_id), MessageId(message_id as i32), text)
                     .await
-                    .map_err(|fallback_error| RemoteError::SendFailed(fallback_error.to_string()))?;
+                    .map_err(|fallback_error| {
+                        RemoteError::SendFailed(fallback_error.to_string())
+                    })?;
                 Ok(())
             }
             Err(error) => Err(RemoteError::SendFailed(error.to_string())),
@@ -574,8 +586,14 @@ impl RemoteAdapter for TelegramAdapter {
         use teloxide::prelude::*;
 
         let config = self.config.read().await;
-        if config.bot_token.as_ref().is_none_or(|token| token.is_empty()) {
-            return Err(RemoteError::ConfigError("Bot token is required".to_string()));
+        if config
+            .bot_token
+            .as_ref()
+            .is_none_or(|token| token.is_empty())
+        {
+            return Err(RemoteError::ConfigError(
+                "Bot token is required".to_string(),
+            ));
         }
 
         self.bot

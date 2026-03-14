@@ -139,7 +139,15 @@ Git diff:
                     ..Default::default()
                 };
 
-                match send_message_tracked(provider.as_ref(), messages, None, vec![], request_options).await {
+                match send_message_tracked(
+                    provider.as_ref(),
+                    messages,
+                    None,
+                    vec![],
+                    request_options,
+                )
+                .await
+                {
                     Ok(response) => {
                         if let Some(content) = &response.content {
                             let checks = self.parse_criteria_response(content);

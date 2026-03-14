@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use tokio::sync::mpsc;
@@ -38,7 +38,8 @@ fn build_usage_event(
     let cache_read_tokens = response.usage.cache_read_tokens.unwrap_or(0) as i64;
     let cache_write_tokens = response.usage.cache_creation_tokens.unwrap_or(0) as i64;
 
-    let cost_total = cost_calculator.calculate_cost(provider_name, model_name, input_tokens, output_tokens);
+    let cost_total =
+        cost_calculator.calculate_cost(provider_name, model_name, input_tokens, output_tokens);
 
     AnalyticsUsageEvent {
         event_id: uuid::Uuid::new_v4().to_string(),
@@ -138,7 +139,9 @@ impl TrackedLlmProvider {
             response,
             self.cost_calculator.as_ref(),
         );
-        let _ = self.analytics_tx.try_send(TrackerMessage::TrackEvent(event));
+        let _ = self
+            .analytics_tx
+            .try_send(TrackerMessage::TrackEvent(event));
     }
 }
 

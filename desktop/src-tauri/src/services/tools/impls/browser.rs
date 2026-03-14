@@ -134,9 +134,7 @@ pub enum BrowserAction {
         device_scale_factor: f64,
     },
     /// Apply a named viewport preset.
-    EmulateDevice {
-        preset: String,
-    },
+    EmulateDevice { preset: String },
 }
 
 fn default_timeout() -> u64 {
@@ -602,21 +600,17 @@ mod backend {
                 BrowserAction::CaptureConsoleLogs {
                     limit,
                     clear_after_read,
-                } => Self::action_capture_console_logs(
-                    &mut state.page,
-                    *limit,
-                    *clear_after_read,
-                )
-                .await,
+                } => {
+                    Self::action_capture_console_logs(&mut state.page, *limit, *clear_after_read)
+                        .await
+                }
                 BrowserAction::CaptureNetworkLog {
                     limit,
                     clear_after_read,
-                } => Self::action_capture_network_log(
-                    &mut state.page,
-                    *limit,
-                    *clear_after_read,
-                )
-                .await,
+                } => {
+                    Self::action_capture_network_log(&mut state.page, *limit, *clear_after_read)
+                        .await
+                }
                 BrowserAction::ReadStorage { storage, key } => {
                     Self::action_read_storage(&mut state.page, storage, key.as_deref()).await
                 }
@@ -785,9 +779,7 @@ mod backend {
             Ok(())
         }
 
-        async fn page_metadata(
-            page: &chromiumoxide::Page,
-        ) -> (Option<String>, Option<String>) {
+        async fn page_metadata(page: &chromiumoxide::Page) -> (Option<String>, Option<String>) {
             let current_url = page.url().await.ok().flatten();
             let page_title = page
                 .evaluate("document.title")
@@ -963,8 +955,7 @@ mod backend {
             Ok(BrowserActionResult {
                 success: true,
                 output: Some(
-                    serde_json::to_string_pretty(&payload)
-                        .unwrap_or_else(|_| payload.to_string()),
+                    serde_json::to_string_pretty(&payload).unwrap_or_else(|_| payload.to_string()),
                 ),
                 current_url,
                 page_title,
@@ -993,8 +984,7 @@ mod backend {
             Ok(BrowserActionResult {
                 success: true,
                 output: Some(
-                    serde_json::to_string_pretty(&payload)
-                        .unwrap_or_else(|_| payload.to_string()),
+                    serde_json::to_string_pretty(&payload).unwrap_or_else(|_| payload.to_string()),
                 ),
                 current_url,
                 page_title,
@@ -1048,8 +1038,7 @@ mod backend {
             Ok(BrowserActionResult {
                 success: true,
                 output: Some(
-                    serde_json::to_string_pretty(&payload)
-                        .unwrap_or_else(|_| payload.to_string()),
+                    serde_json::to_string_pretty(&payload).unwrap_or_else(|_| payload.to_string()),
                 ),
                 current_url,
                 page_title,
@@ -1063,8 +1052,10 @@ mod backend {
             mobile: bool,
             device_scale_factor: f64,
         ) -> Result<BrowserActionResult, String> {
-            let width_i64 = i64::try_from(width).map_err(|_| "Viewport width is too large".to_string())?;
-            let height_i64 = i64::try_from(height).map_err(|_| "Viewport height is too large".to_string())?;
+            let width_i64 =
+                i64::try_from(width).map_err(|_| "Viewport width is too large".to_string())?;
+            let height_i64 =
+                i64::try_from(height).map_err(|_| "Viewport height is too large".to_string())?;
             page.execute(SetDeviceMetricsOverrideParams::new(
                 width_i64,
                 height_i64,
@@ -1595,7 +1586,9 @@ impl Tool for BrowserTool {
         );
         properties.insert(
             "limit".to_string(),
-            ParameterSchema::integer(Some("Max entries to return (for console/network/performance actions, default: 50)")),
+            ParameterSchema::integer(Some(
+                "Max entries to return (for console/network/performance actions, default: 50)",
+            )),
         );
         properties.insert(
             "clear_after_read".to_string(),
@@ -1603,7 +1596,9 @@ impl Tool for BrowserTool {
         );
         properties.insert(
             "storage".to_string(),
-            ParameterSchema::string(Some("Storage scope for 'read_storage': local, session, or both")),
+            ParameterSchema::string(Some(
+                "Storage scope for 'read_storage': local, session, or both",
+            )),
         );
         properties.insert(
             "key".to_string(),
@@ -1611,7 +1606,9 @@ impl Tool for BrowserTool {
         );
         properties.insert(
             "entry_type".to_string(),
-            ParameterSchema::string(Some("Optional performance entry type filter for 'collect_performance_entries'")),
+            ParameterSchema::string(Some(
+                "Optional performance entry type filter for 'collect_performance_entries'",
+            )),
         );
         properties.insert(
             "width".to_string(),
@@ -1623,15 +1620,21 @@ impl Tool for BrowserTool {
         );
         properties.insert(
             "mobile".to_string(),
-            ParameterSchema::boolean(Some("Whether to emulate a mobile viewport (for 'set_viewport')")),
+            ParameterSchema::boolean(Some(
+                "Whether to emulate a mobile viewport (for 'set_viewport')",
+            )),
         );
         properties.insert(
             "device_scale_factor".to_string(),
-            ParameterSchema::number(Some("Device scale factor override (for 'set_viewport', default: 1.0)")),
+            ParameterSchema::number(Some(
+                "Device scale factor override (for 'set_viewport', default: 1.0)",
+            )),
         );
         properties.insert(
             "preset".to_string(),
-            ParameterSchema::string(Some("Named viewport preset for 'emulate_device': desktop, tablet, mobile")),
+            ParameterSchema::string(Some(
+                "Named viewport preset for 'emulate_device': desktop, tablet, mobile",
+            )),
         );
 
         ParameterSchema::object(

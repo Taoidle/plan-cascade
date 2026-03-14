@@ -336,8 +336,8 @@ impl Tool for BashTool {
 mod tests {
     use super::super::test_helpers::make_test_ctx;
     use super::*;
-    use tempfile::TempDir;
     use std::sync::{Arc, Mutex};
+    use tempfile::TempDir;
 
     use crate::services::file_change_tracker::FileChangeTracker;
 

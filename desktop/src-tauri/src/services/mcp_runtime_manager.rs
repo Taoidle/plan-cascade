@@ -108,7 +108,10 @@ impl McpRuntimeManager {
                     }
                     if let Some(min) = runtime_min_version(&runtime) {
                         if let Some(actual) = version.as_deref() {
-                            last_error = Some(format!("version_too_low: need >= {}, found {}", min, actual));
+                            last_error = Some(format!(
+                                "version_too_low: need >= {}, found {}",
+                                min, actual
+                            ));
                         }
                     }
                 }
@@ -464,7 +467,11 @@ fn runtime_probe_candidates(runtime: &McpRuntimeKind) -> Vec<RuntimeProbeCandida
         }
         McpRuntimeKind::Python => {
             if cfg!(target_os = "windows") {
-                push_binary("py", vec!["-3".to_string(), "--version".to_string()], "python_launcher");
+                push_binary(
+                    "py",
+                    vec!["-3".to_string(), "--version".to_string()],
+                    "python_launcher",
+                );
                 push_binary("python", vec!["--version".to_string()], "system");
                 push_binary("python3", vec!["--version".to_string()], "system");
             } else {
@@ -475,7 +482,11 @@ fn runtime_probe_candidates(runtime: &McpRuntimeKind) -> Vec<RuntimeProbeCandida
         McpRuntimeKind::Docker => {
             push_binary(
                 "docker",
-                vec!["info".to_string(), "--format".to_string(), "{{.ServerVersion}}".to_string()],
+                vec![
+                    "info".to_string(),
+                    "--format".to_string(),
+                    "{{.ServerVersion}}".to_string(),
+                ],
                 "system",
             );
         }
@@ -534,7 +545,8 @@ fn is_windows_store_alias(path: &str) -> bool {
         return false;
     }
     let lower = path.replace('/', "\\").to_lowercase();
-    lower.contains("\\windowsapps\\") && (lower.ends_with("python.exe") || lower.ends_with("python3.exe"))
+    lower.contains("\\windowsapps\\")
+        && (lower.ends_with("python.exe") || lower.ends_with("python3.exe"))
 }
 
 fn extract_version(raw: &str) -> Option<String> {

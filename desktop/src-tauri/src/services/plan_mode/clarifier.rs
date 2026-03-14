@@ -117,7 +117,15 @@ pub async fn generate_clarification_question(
         ..Default::default()
     };
 
-    let response = match send_message_tracked(provider.as_ref(), messages, Some(system), vec![], options).await {
+    let response = match send_message_tracked(
+        provider.as_ref(),
+        messages,
+        Some(system),
+        vec![],
+        options,
+    )
+    .await
+    {
         Ok(r) => r,
         Err(e) => {
             warn!("Clarification question generation failed: {e}");

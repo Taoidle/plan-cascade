@@ -22,7 +22,13 @@ async fn generate_plan_clarification_question(
     context_sources: Option<ContextSourceConfig>,
     conversation_context: Option<String>,
     locale: Option<String>,
-) -> Result<(ResolvedPlanPhaseAgent, Option<crate::services::plan_mode::ClarificationQuestion>), String> {
+) -> Result<
+    (
+        ResolvedPlanPhaseAgent,
+        Option<crate::services::plan_mode::ClarificationQuestion>,
+    ),
+    String,
+> {
     let resolved_agent = resolve_plan_phase_agent(
         "plan_clarification",
         agent_ref.as_deref(),
@@ -34,7 +40,8 @@ async fn generate_plan_clarification_question(
         false,
     )
     .await?;
-    let provider_config = build_llm_provider_from_plan_phase_agent(&resolved_agent, app_state).await?;
+    let provider_config =
+        build_llm_provider_from_plan_phase_agent(&resolved_agent, app_state).await?;
     let base_provider =
         crate::services::task_mode::prd_generator::create_provider(provider_config.clone());
 
@@ -80,9 +87,7 @@ async fn generate_plan_clarification_question(
                 mode_session_id: Some(session_id.to_string()),
                 workflow_mode: Some(crate::models::analytics::AnalyticsWorkflowMode::Plan),
                 phase_id: Some("plan_clarification".to_string()),
-                execution_scope: Some(
-                    crate::models::analytics::AnalyticsExecutionScope::DirectLlm,
-                ),
+                execution_scope: Some(crate::models::analytics::AnalyticsExecutionScope::DirectLlm),
                 execution_id: Some(format!("plan:{}:clarification", session_id)),
                 parent_execution_id: None,
                 agent_role: Some("plan_clarification".to_string()),
@@ -148,7 +153,8 @@ pub async fn enter_plan_mode(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
-    let analytics_components = get_analytics_tracker_components(&app_handle, app_state.inner()).await;
+    let analytics_components =
+        get_analytics_tracker_components(&app_handle, app_state.inner()).await;
 
     // Create initial session
     let mut session = PlanModeSession {

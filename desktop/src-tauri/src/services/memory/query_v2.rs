@@ -1165,7 +1165,8 @@ mod tests {
         assert_eq!(deleted.len(), 1);
         assert_eq!(deleted[0].status.as_deref(), Some("deleted"));
 
-        let restore_summary = restore_deleted_memories_v2(&store, &["memory-a".to_string()]).unwrap();
+        let restore_summary =
+            restore_deleted_memories_v2(&store, &["memory-a".to_string()]).unwrap();
         assert_eq!(restore_summary.updated, 1);
 
         let restored = tokio::runtime::Runtime::new()

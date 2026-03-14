@@ -381,7 +381,10 @@ impl ManagedWorktreeMetadata {
         self.updated_at = now_rfc3339();
     }
 
-    pub fn to_runtime_binding(&self, runtime_kind: WorktreeRuntimeKind) -> SessionWorktreeRuntimeBinding {
+    pub fn to_runtime_binding(
+        &self,
+        runtime_kind: WorktreeRuntimeKind,
+    ) -> SessionWorktreeRuntimeBinding {
         SessionWorktreeRuntimeBinding {
             session_id: self.session_id.clone(),
             repo_id: self.repo_id.clone(),

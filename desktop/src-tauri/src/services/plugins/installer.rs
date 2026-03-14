@@ -52,16 +52,13 @@ pub async fn install_from_git(git_url: &str, app: &AppHandle) -> Result<PluginMa
         clone_path.to_str().unwrap_or("plugin"),
     ]);
     configure_background_process(&mut clone_cmd);
-    let output = clone_cmd
-        .output()
-        .await
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                "git is not installed. Please install git to use this feature.".to_string()
-            } else {
-                format!("Failed to execute git clone: {}", e)
-            }
-        })?;
+    let output = clone_cmd.output().await.map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            "git is not installed. Please install git to use this feature.".to_string()
+        } else {
+            format!("Failed to execute git clone: {}", e)
+        }
+    })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);

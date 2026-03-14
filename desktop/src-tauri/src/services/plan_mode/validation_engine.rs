@@ -27,7 +27,8 @@ pub async fn validate_step_contract(
     checks.extend(validate_evidence(step, &output.evidence_bundle));
     checks.extend(validate_structure(step, content, &output.evidence_bundle));
 
-    let semantic_checks = validate_semantics(step, content, &output.evidence_summary, provider).await;
+    let semantic_checks =
+        validate_semantics(step, content, &output.evidence_summary, provider).await;
     checks.extend(semantic_checks);
 
     finalize_validation(step, checks)
@@ -91,9 +92,18 @@ fn validate_evidence(step: &PlanStep, bundle: &StepEvidenceBundle) -> Vec<Valida
     }
 
     for required_path in &step.evidence_requirements.required_paths {
-        let passed = bundle.files_read.iter().any(|entry| entry.path.contains(required_path))
-            || bundle.files_written.iter().any(|path| path.contains(required_path))
-            || bundle.artifacts.iter().any(|artifact| artifact.value.contains(required_path));
+        let passed = bundle
+            .files_read
+            .iter()
+            .any(|entry| entry.path.contains(required_path))
+            || bundle
+                .files_written
+                .iter()
+                .any(|path| path.contains(required_path))
+            || bundle
+                .artifacts
+                .iter()
+                .any(|artifact| artifact.value.contains(required_path));
         checks.push(ValidationCheckResult {
             name: format!("required path: {required_path}"),
             category: "evidence".to_string(),
@@ -142,7 +152,10 @@ fn validate_evidence(step: &PlanStep, bundle: &StepEvidenceBundle) -> Vec<Valida
     }
 
     for search in &step.evidence_requirements.required_searches {
-        let passed = bundle.search_queries.iter().any(|query| query.contains(search));
+        let passed = bundle
+            .search_queries
+            .iter()
+            .any(|query| query.contains(search));
         checks.push(ValidationCheckResult {
             name: format!("required search: {search}"),
             category: "evidence".to_string(),
@@ -154,7 +167,11 @@ fn validate_evidence(step: &PlanStep, bundle: &StepEvidenceBundle) -> Vec<Valida
                 format!("Did not observe required search marker `{search}`")
             },
             evidence_refs: Vec::new(),
-            missing_items: if passed { Vec::new() } else { vec![search.clone()] },
+            missing_items: if passed {
+                Vec::new()
+            } else {
+                vec![search.clone()]
+            },
             confidence: Some(1.0),
         });
     }
@@ -263,7 +280,9 @@ fn validate_structure(
     }
 
     for section in &step.deliverable.required_sections {
-        let passed = content.to_ascii_lowercase().contains(&section.to_ascii_lowercase());
+        let passed = content
+            .to_ascii_lowercase()
+            .contains(&section.to_ascii_lowercase());
         checks.push(ValidationCheckResult {
             name: format!("required section: {section}"),
             category: "deliverable".to_string(),
@@ -275,7 +294,11 @@ fn validate_structure(
                 format!("Output is missing required section `{section}`")
             },
             evidence_refs: Vec::new(),
-            missing_items: if passed { Vec::new() } else { vec![section.clone()] },
+            missing_items: if passed {
+                Vec::new()
+            } else {
+                vec![section.clone()]
+            },
             confidence: Some(0.95),
         });
     }
@@ -330,7 +353,9 @@ async fn validate_semantics(
     let mut checks = Vec::new();
     let mut missing_topics = Vec::new();
     for topic in &step.quality_requirements.must_cover_topics {
-        let passed = content.to_ascii_lowercase().contains(&topic.to_ascii_lowercase());
+        let passed = content
+            .to_ascii_lowercase()
+            .contains(&topic.to_ascii_lowercase());
         if !passed {
             missing_topics.push(topic.clone());
         }
@@ -345,7 +370,11 @@ async fn validate_semantics(
                 format!("Output does not clearly cover topic `{topic}`")
             },
             evidence_refs: Vec::new(),
-            missing_items: if passed { Vec::new() } else { vec![topic.clone()] },
+            missing_items: if passed {
+                Vec::new()
+            } else {
+                vec![topic.clone()]
+            },
             confidence: Some(if passed { 0.9 } else { 0.45 }),
         });
     }
@@ -368,7 +397,8 @@ async fn validate_semantics(
 
     if step.quality_requirements.must_include_reasoning_links {
         let lower = content.to_ascii_lowercase();
-        let passed = lower.contains("because") || lower.contains("therefore") || lower.contains("因此");
+        let passed =
+            lower.contains("because") || lower.contains("therefore") || lower.contains("因此");
         checks.push(simple_structure_check(
             "reasoning links",
             passed,
@@ -424,14 +454,17 @@ Output summary:\n{}\n",
     let response = send_message_tracked(
         provider.as_ref(),
         vec![Message::text(MessageRole::User, prompt)],
-        Some("Validate semantic quality only. Do not discuss tooling. Output strict JSON.".to_string()),
+        Some(
+            "Validate semantic quality only. Do not discuss tooling. Output strict JSON."
+                .to_string(),
+        ),
         vec![],
         LlmRequestOptions {
             temperature_override: Some(0.1),
             ..Default::default()
         },
     )
-        .await;
+    .await;
 
     let Ok(response) = response else {
         return ValidationCheckResult {
@@ -494,16 +527,24 @@ Output summary:\n{}\n",
     }
 }
 
-fn finalize_validation(step: &PlanStep, checks: Vec<ValidationCheckResult>) -> StepValidationResult {
-    let unmet_checks: Vec<ValidationCheckResult> =
-        checks.iter().filter(|check| !check.passed).cloned().collect();
+fn finalize_validation(
+    step: &PlanStep,
+    checks: Vec<ValidationCheckResult>,
+) -> StepValidationResult {
+    let unmet_checks: Vec<ValidationCheckResult> = checks
+        .iter()
+        .filter(|check| !check.passed)
+        .cloned()
+        .collect();
     let hard_fail = unmet_checks
         .iter()
         .any(|check| check.severity == ValidationSeverity::Hard);
     let review_needed = unmet_checks
         .iter()
         .any(|check| check.severity == ValidationSeverity::Review)
-        || unmet_checks.iter().any(|check| check.confidence.unwrap_or(1.0) < 0.45);
+        || unmet_checks
+            .iter()
+            .any(|check| check.confidence.unwrap_or(1.0) < 0.45);
     let soft_fail = unmet_checks
         .iter()
         .any(|check| check.severity == ValidationSeverity::Soft);
@@ -515,7 +556,11 @@ fn finalize_validation(step: &PlanStep, checks: Vec<ValidationCheckResult>) -> S
             Some(primary_failure_bucket(&unmet_checks)),
             None,
         )
-    } else if review_needed || matches!(step.failure_policy.severity, super::types::FailureSeverity::Review)
+    } else if review_needed
+        || matches!(
+            step.failure_policy.severity,
+            super::types::FailureSeverity::Review
+        )
     {
         (
             StepValidationStatus::NeedsReview,
@@ -523,7 +568,11 @@ fn finalize_validation(step: &PlanStep, checks: Vec<ValidationCheckResult>) -> S
             Some(primary_failure_bucket(&unmet_checks)),
             Some(StepReviewReason::ReviewRequired),
         )
-    } else if soft_fail || matches!(step.failure_policy.severity, super::types::FailureSeverity::Soft)
+    } else if soft_fail
+        || matches!(
+            step.failure_policy.severity,
+            super::types::FailureSeverity::Soft
+        )
     {
         (
             StepValidationStatus::SoftFailed,
@@ -595,7 +644,10 @@ fn primary_failure_bucket(checks: &[ValidationCheckResult]) -> StepFailureBucket
         StepFailureBucket::MissingEvidence
     } else if checks.iter().any(|check| check.category == "deliverable") {
         StepFailureBucket::DeliverableIncomplete
-    } else if checks.iter().any(|check| check.severity == ValidationSeverity::Review) {
+    } else if checks
+        .iter()
+        .any(|check| check.severity == ValidationSeverity::Review)
+    {
         StepFailureBucket::ReviewRequired
     } else {
         StepFailureBucket::SemanticGap

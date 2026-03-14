@@ -207,9 +207,7 @@ impl QualityGateRunner {
         #[cfg(windows)]
         {
             let mut cmd = Command::new("where");
-            cmd.arg(command)
-                .stdout(Stdio::null())
-                .stderr(Stdio::null());
+            cmd.arg(command).stdout(Stdio::null()).stderr(Stdio::null());
             configure_background_process(&mut cmd);
             let check = cmd.status().await;
             check.map(|s| s.success()).unwrap_or(false)

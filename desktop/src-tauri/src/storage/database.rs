@@ -1422,7 +1422,10 @@ impl Database {
             );
         }
         if !Self::table_has_column(&conn, "guardrail_rules", "builtin_key") {
-            let _ = conn.execute("ALTER TABLE guardrail_rules ADD COLUMN builtin_key TEXT", []);
+            let _ = conn.execute(
+                "ALTER TABLE guardrail_rules ADD COLUMN builtin_key TEXT",
+                [],
+            );
         }
         if !Self::table_has_column(&conn, "guardrail_rules", "scope") {
             let _ = conn.execute(
@@ -1687,8 +1690,10 @@ impl Database {
     }
 
     fn ensure_memory_entries_v2_schema(conn: &rusqlite::Connection) -> AppResult<()> {
-        let has_deleted_from_status = Self::table_has_column(conn, "memory_entries_v2", "deleted_from_status");
-        let supports_deleted_status = Self::table_sql_contains(conn, "memory_entries_v2", "'deleted'");
+        let has_deleted_from_status =
+            Self::table_has_column(conn, "memory_entries_v2", "deleted_from_status");
+        let supports_deleted_status =
+            Self::table_sql_contains(conn, "memory_entries_v2", "'deleted'");
         if has_deleted_from_status && supports_deleted_status {
             return Ok(());
         }

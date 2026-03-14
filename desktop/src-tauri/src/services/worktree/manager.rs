@@ -311,7 +311,10 @@ impl WorktreeManager {
                     target_branch: planning_config
                         .as_ref()
                         .map(|config| config.target_branch.clone())
-                        .unwrap_or_else(|| self.default_target_branch(&repo_root).unwrap_or_else(|_| "main".to_string())),
+                        .unwrap_or_else(|| {
+                            self.default_target_branch(&repo_root)
+                                .unwrap_or_else(|_| "main".to_string())
+                        }),
                     status,
                     created_at,
                     updated_at,
@@ -343,7 +346,10 @@ impl WorktreeManager {
         Ok(worktrees)
     }
 
-    pub async fn list_managed_worktrees_for_repo(&self, repo_path: &Path) -> AppResult<Vec<Worktree>> {
+    pub async fn list_managed_worktrees_for_repo(
+        &self,
+        repo_path: &Path,
+    ) -> AppResult<Vec<Worktree>> {
         Ok(self
             .list_worktrees(repo_path)
             .await?
@@ -364,7 +370,10 @@ impl WorktreeManager {
     pub async fn get_worktree(&self, repo_path: &Path, worktree_id: &str) -> AppResult<Worktree> {
         let repo_root = self.canonical_repo_root(repo_path)?;
         let Some(worktree) = self.find_worktree_by_id(&repo_root, worktree_id).await? else {
-            return Err(AppError::not_found(format!("Worktree not found: {}", worktree_id)));
+            return Err(AppError::not_found(format!(
+                "Worktree not found: {}",
+                worktree_id
+            )));
         };
         Ok(worktree)
     }
@@ -388,7 +397,8 @@ impl WorktreeManager {
         let wt_path = PathBuf::from(&worktree.path);
         self.git.remove_worktree(&repo_root, &wt_path, force)?;
         if self.git.branch_exists(&repo_root, &worktree.branch)? {
-            self.git.delete_branch(&repo_root, &worktree.branch, force)?;
+            self.git
+                .delete_branch(&repo_root, &worktree.branch, force)?;
         }
         if worktree.runtime_kind == WorktreeRuntimeKind::Managed {
             let metadata_path = self.metadata_path(&wt_path);
@@ -446,7 +456,9 @@ impl WorktreeManager {
             .chain(status.untracked.iter())
             .cloned()
             .collect();
-        let committable_files = self.config_service.get_committable_files(&wt_path, &all_files);
+        let committable_files = self
+            .config_service
+            .get_committable_files(&wt_path, &all_files);
         let mut result = CompleteWorktreeResult::success(None, false, false);
 
         if !committable_files.is_empty() {
@@ -530,7 +542,10 @@ impl WorktreeManager {
         let parsed = self.parse_forge_remote(&remote_url)?;
         Ok(PreparePullRequestResult {
             worktree_id: worktree.id.clone(),
-            repo_id: worktree.repo_id.clone().unwrap_or_else(|| self.hash_input(&repo_root.to_string_lossy())),
+            repo_id: worktree
+                .repo_id
+                .clone()
+                .unwrap_or_else(|| self.hash_input(&repo_root.to_string_lossy())),
             forge_provider: parsed.provider,
             remote_name,
             remote_url,
@@ -567,15 +582,15 @@ impl WorktreeManager {
         let client = reqwest::Client::builder()
             .user_agent("plan-cascade-desktop")
             .build()
-            .map_err(|error| AppError::command(format!("Failed to build HTTP client: {}", error)))?;
+            .map_err(|error| {
+                AppError::command(format!("Failed to build HTTP client: {}", error))
+            })?;
 
         let (url, number, state) = match parsed.provider {
             ForgeProvider::Github => {
                 let endpoint = format!(
                     "{}/api/v3/repos/{}/{}/pulls",
-                    parsed.origin,
-                    parsed.owner,
-                    parsed.repo
+                    parsed.origin, parsed.owner, parsed.repo
                 );
                 let response = client
                     .post(endpoint)
@@ -590,7 +605,12 @@ impl WorktreeManager {
                     }))
                     .send()
                     .await
-                    .map_err(|error| AppError::command(format!("Failed to create GitHub pull request: {}", error)))?;
+                    .map_err(|error| {
+                        AppError::command(format!(
+                            "Failed to create GitHub pull request: {}",
+                            error
+                        ))
+                    })?;
                 let status = response.status();
                 let body: serde_json::Value = response.json().await.unwrap_or_default();
                 if !status.is_success() {
@@ -600,9 +620,16 @@ impl WorktreeManager {
                     )));
                 }
                 (
-                    body.get("html_url").and_then(|value| value.as_str()).unwrap_or_default().to_string(),
+                    body.get("html_url")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or_default()
+                        .to_string(),
                     body.get("number").and_then(|value| value.as_u64()),
-                    if body.get("draft").and_then(|value| value.as_bool()).unwrap_or(false) {
+                    if body
+                        .get("draft")
+                        .and_then(|value| value.as_bool())
+                        .unwrap_or(false)
+                    {
                         PullRequestState::Draft
                     } else {
                         PullRequestState::Open
@@ -612,7 +639,10 @@ impl WorktreeManager {
             ForgeProvider::Gitlab => {
                 let project_path = format!("{}/{}", parsed.owner, parsed.repo);
                 let project = urlencoding::encode(&project_path).into_owned();
-                let endpoint = format!("{}/api/v4/projects/{}/merge_requests", parsed.origin, project);
+                let endpoint = format!(
+                    "{}/api/v4/projects/{}/merge_requests",
+                    parsed.origin, project
+                );
                 let response = client
                     .post(endpoint)
                     .bearer_auth(token)
@@ -626,7 +656,12 @@ impl WorktreeManager {
                     }))
                     .send()
                     .await
-                    .map_err(|error| AppError::command(format!("Failed to create GitLab merge request: {}", error)))?;
+                    .map_err(|error| {
+                        AppError::command(format!(
+                            "Failed to create GitLab merge request: {}",
+                            error
+                        ))
+                    })?;
                 let status = response.status();
                 let body: serde_json::Value = response.json().await.unwrap_or_default();
                 if !status.is_success() {
@@ -636,7 +671,10 @@ impl WorktreeManager {
                     )));
                 }
                 (
-                    body.get("web_url").and_then(|value| value.as_str()).unwrap_or_default().to_string(),
+                    body.get("web_url")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or_default()
+                        .to_string(),
                     body.get("iid").and_then(|value| value.as_u64()),
                     PullRequestState::Open,
                 )
@@ -644,9 +682,7 @@ impl WorktreeManager {
             ForgeProvider::Gitea => {
                 let endpoint = format!(
                     "{}/api/v1/repos/{}/{}/pulls",
-                    parsed.origin,
-                    parsed.owner,
-                    parsed.repo
+                    parsed.origin, parsed.owner, parsed.repo
                 );
                 let response = client
                     .post(endpoint)
@@ -659,7 +695,9 @@ impl WorktreeManager {
                     }))
                     .send()
                     .await
-                    .map_err(|error| AppError::command(format!("Failed to create Gitea pull request: {}", error)))?;
+                    .map_err(|error| {
+                        AppError::command(format!("Failed to create Gitea pull request: {}", error))
+                    })?;
                 let status = response.status();
                 let body: serde_json::Value = response.json().await.unwrap_or_default();
                 if !status.is_success() {
@@ -669,7 +707,10 @@ impl WorktreeManager {
                     )));
                 }
                 (
-                    body.get("html_url").and_then(|value| value.as_str()).unwrap_or_default().to_string(),
+                    body.get("html_url")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or_default()
+                        .to_string(),
                     body.get("number").and_then(|value| value.as_u64()),
                     PullRequestState::Open,
                 )
@@ -736,7 +777,9 @@ impl WorktreeManager {
         worktree_id: &str,
     ) -> AppResult<Option<Worktree>> {
         let worktrees = self.list_worktrees(repo_root).await?;
-        Ok(worktrees.into_iter().find(|worktree| worktree.id == worktree_id))
+        Ok(worktrees
+            .into_iter()
+            .find(|worktree| worktree.id == worktree_id))
     }
 
     async fn cache_worktree(&self, worktree: &Worktree) {
@@ -834,7 +877,8 @@ impl WorktreeManager {
         metadata: &ManagedWorktreeMetadata,
         planning_config: Option<crate::models::worktree::PlanningConfig>,
     ) -> Worktree {
-        let (created_at, updated_at) = self.get_worktree_timestamps(Path::new(&metadata.runtime_path));
+        let (created_at, updated_at) =
+            self.get_worktree_timestamps(Path::new(&metadata.runtime_path));
         Worktree {
             id: metadata.worktree_id.clone(),
             name: metadata
@@ -922,7 +966,9 @@ impl WorktreeManager {
             .find(|remote| remote.as_str() == "origin")
             .cloned()
             .or_else(|| remotes.first().cloned())
-            .ok_or_else(|| AppError::validation("Repository has no configured remotes".to_string()))?;
+            .ok_or_else(|| {
+                AppError::validation("Repository has no configured remotes".to_string())
+            })?;
         let remote_url = self
             .git
             .execute(repo_root, &["remote", "get-url", &remote_name])?
@@ -942,11 +988,15 @@ impl WorktreeManager {
         } else {
             remote_url.trim_end_matches(".git").to_string()
         };
-        let url = Url::parse(&normalized)
-            .map_err(|error| AppError::parse(format!("Invalid remote URL '{}': {}", remote_url, error)))?;
+        let url = Url::parse(&normalized).map_err(|error| {
+            AppError::parse(format!("Invalid remote URL '{}': {}", remote_url, error))
+        })?;
         let host = url.host_str().unwrap_or_default().to_ascii_lowercase();
         let path = url.path().trim_start_matches('/').trim_end_matches(".git");
-        let mut segments = path.split('/').filter(|value| !value.is_empty()).collect::<Vec<_>>();
+        let mut segments = path
+            .split('/')
+            .filter(|value| !value.is_empty())
+            .collect::<Vec<_>>();
         if segments.len() < 2 {
             return Err(AppError::parse(format!(
                 "Unsupported remote URL '{}'",
@@ -1030,8 +1080,14 @@ mod tests {
     #[test]
     fn test_sanitize_task_name() {
         let manager = WorktreeManager::new();
-        assert_eq!(manager.sanitize_task_name("My Feature Task"), "my-feature-task");
-        assert_eq!(manager.sanitize_task_name("feature/add-button"), "feature_add-button");
+        assert_eq!(
+            manager.sanitize_task_name("My Feature Task"),
+            "my-feature-task"
+        );
+        assert_eq!(
+            manager.sanitize_task_name("feature/add-button"),
+            "feature_add-button"
+        );
         assert_eq!(
             manager.sanitize_task_name("Task with @special#chars!"),
             "task-with-_special_chars_"

@@ -769,7 +769,8 @@ impl IndexManager {
     /// Get the embedding service for a project directory, if one has been
     /// created by a previous indexing run.
     pub async fn get_embedding_service(&self, project_path: &str) -> Option<Arc<EmbeddingService>> {
-        let resolved = Self::resolve_cached_project_key(&self.embedding_services, project_path).await?;
+        let resolved =
+            Self::resolve_cached_project_key(&self.embedding_services, project_path).await?;
         let embeds = self.embedding_services.read().await;
         embeds.get(&resolved).cloned()
     }
@@ -781,7 +782,8 @@ impl IndexManager {
     /// `TfIdfEmbeddingProvider`) and provides the dispatch-layer API with
     /// caching, batching, and optional fallback support.
     pub async fn get_embedding_manager(&self, project_path: &str) -> Option<Arc<EmbeddingManager>> {
-        let resolved = Self::resolve_cached_project_key(&self.embedding_managers, project_path).await?;
+        let resolved =
+            Self::resolve_cached_project_key(&self.embedding_managers, project_path).await?;
         let managers = self.embedding_managers.read().await;
         managers.get(&resolved).cloned()
     }

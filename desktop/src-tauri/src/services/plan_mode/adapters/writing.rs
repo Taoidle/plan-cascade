@@ -205,7 +205,7 @@ mod tests {
         StepQualityRequirements,
     };
     use std::collections::HashMap;
-    
+
     fn sample_step(id: &str, title: &str, priority: StepPriority) -> PlanStep {
         PlanStep {
             id: id.to_string(),

@@ -41,11 +41,11 @@ pub use hooks::{
     build_default_hooks, register_memory_hooks, register_skill_hooks, AgenticHooks,
     BeforeToolResult, HookContext, SessionSummary,
 };
-pub(crate) use service::text_describes_pending_action;
 pub use iteration_budget::{
-    assess_progress, build_iteration_budget, ExecutionKind, IterationBudget,
-    IterationBudgetHints, IterationProgressAssessment, IterationProgressSnapshot,
+    assess_progress, build_iteration_budget, ExecutionKind, IterationBudget, IterationBudgetHints,
+    IterationProgressAssessment, IterationProgressSnapshot,
 };
+pub(crate) use service::text_describes_pending_action;
 pub use service::{
     ExecutionResult, OrchestratorConfig, OrchestratorService, ProviderInfo, SessionExecutionResult,
 };

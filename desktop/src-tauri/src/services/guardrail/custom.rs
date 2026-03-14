@@ -6,9 +6,7 @@
 use async_trait::async_trait;
 use regex::Regex;
 
-use super::{
-    Direction, Guardrail, GuardrailAction, GuardrailResult, GuardrailRuntimeContext,
-};
+use super::{Direction, Guardrail, GuardrailAction, GuardrailResult, GuardrailRuntimeContext};
 
 /// A user-defined guardrail rule.
 pub struct CustomGuardrail {

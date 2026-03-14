@@ -16,8 +16,8 @@ use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig
 use rmcp::transport::{StreamableHttpClientTransport, TokioChildProcess};
 use rmcp::ServiceExt;
 
-use crate::utils::error::{AppError, AppResult};
 use crate::utils::configure_background_process;
+use crate::utils::error::{AppError, AppResult};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -112,7 +112,10 @@ impl McpClient {
             .unwrap_or_default()
     }
 
-    fn extract_debug_metadata(input_schema: &Value, description: &str) -> Option<McpToolDebugMetadata> {
+    fn extract_debug_metadata(
+        input_schema: &Value,
+        description: &str,
+    ) -> Option<McpToolDebugMetadata> {
         let object = input_schema.as_object()?;
         let debug_object = object
             .get("x-plan-cascade-debug")

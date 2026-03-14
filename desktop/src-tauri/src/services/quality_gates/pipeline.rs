@@ -569,7 +569,9 @@ async fn resolve_git_hashes(project_path: &PathBuf) -> Option<(String, String)> 
     use tokio::process::Command;
 
     let mut commit_cmd = Command::new("git");
-    commit_cmd.args(["rev-parse", "HEAD"]).current_dir(project_path);
+    commit_cmd
+        .args(["rev-parse", "HEAD"])
+        .current_dir(project_path);
     configure_background_process(&mut commit_cmd);
     let commit_output = commit_cmd.output().await.ok()?;
 

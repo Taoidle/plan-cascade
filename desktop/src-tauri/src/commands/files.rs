@@ -222,8 +222,8 @@ fn read_attachment_file(path: &str, max_size: usize) -> Result<FileContentResult
         return Err(format!("Not a file: {}", path));
     }
 
-    let metadata =
-        std::fs::metadata(&file_path).map_err(|e| format!("Failed to read file metadata: {}", e))?;
+    let metadata = std::fs::metadata(&file_path)
+        .map_err(|e| format!("Failed to read file metadata: {}", e))?;
     let file_size = metadata.len() as usize;
 
     if file_size > max_size {
@@ -265,7 +265,10 @@ fn read_attachment_file(path: &str, max_size: usize) -> Result<FileContentResult
     })
 }
 
-fn inspect_attachment_file(path: &str, max_size: usize) -> Result<AttachmentMetadataResult, String> {
+fn inspect_attachment_file(
+    path: &str,
+    max_size: usize,
+) -> Result<AttachmentMetadataResult, String> {
     let file_path = PathBuf::from(path);
     if !file_path.exists() {
         return Err(format!("File not found: {}", path));
@@ -273,8 +276,8 @@ fn inspect_attachment_file(path: &str, max_size: usize) -> Result<AttachmentMeta
     if !file_path.is_file() {
         return Err(format!("Not a file: {}", path));
     }
-    let metadata =
-        std::fs::metadata(&file_path).map_err(|e| format!("Failed to read file metadata: {}", e))?;
+    let metadata = std::fs::metadata(&file_path)
+        .map_err(|e| format!("Failed to read file metadata: {}", e))?;
     let file_size = metadata.len() as usize;
     if file_size > max_size {
         return Err(format!(
@@ -918,8 +921,8 @@ mod tests {
             Some(50),
             Some(10),
         )
-                .await
-                .expect("command should resolve");
+        .await
+        .expect("command should resolve");
         assert!(response.success);
 
         let payload = response.data.expect("payload should exist");

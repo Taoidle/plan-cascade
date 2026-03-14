@@ -20,13 +20,13 @@
 //! 7. `on_session_end`    - Session teardown (memory extraction)
 //! 8. `on_compaction`     - Context compaction (memory extraction from compacted content)
 
+use regex::Regex;
+use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
-use regex::Regex;
-use serde_json::Value;
 use tokio::process::Command;
 use tokio::sync::RwLock;
 
@@ -442,9 +442,7 @@ impl AgenticHooks {
             {
                 Ok(result) if result.skip => {
                     let mut skip_result = result;
-                    if skip_result.modified_arguments.is_none()
-                        && current_arguments != arguments
-                    {
+                    if skip_result.modified_arguments.is_none() && current_arguments != arguments {
                         skip_result.modified_arguments = Some(current_arguments);
                     }
                     return Some(skip_result);
@@ -621,7 +619,8 @@ fn selected_skill_documents(
         .iter()
         .map(|skill| skill.skill.id.as_str())
         .collect::<HashSet<_>>();
-    index.skills()
+    index
+        .skills()
         .iter()
         .filter(|doc| selected_ids.contains(doc.id.as_str()))
         .cloned()
@@ -957,15 +956,9 @@ pub fn register_skill_hooks(
                     continue;
                 };
                 for action in &skill_hooks.stop {
-                    let output = run_hook_command(
-                        &ctx,
-                        &doc.name,
-                        "stop",
-                        &action.command,
-                        None,
-                        None,
-                    )
-                    .await?;
+                    let output =
+                        run_hook_command(&ctx, &doc.name, "stop", &action.command, None, None)
+                            .await?;
                     match parse_hook_directive(&output) {
                         HookDirective::Stop(reason) => {
                             let mut pending = stop_requests.write().await;
@@ -1152,7 +1145,11 @@ pub fn register_memory_hooks_with_config(
     let extraction_provider_config = memory_hook_config
         .extraction_provider_config
         .clone()
-        .or_else(|| llm_provider.as_ref().map(|provider| provider.config().clone()));
+        .or_else(|| {
+            llm_provider
+                .as_ref()
+                .map(|provider| provider.config().clone())
+        });
     let extraction_review_base_url = memory_hook_config.review_base_url.clone();
     let selected_ids: HashSet<String> =
         memory_hook_config.selected_memory_ids.into_iter().collect();
@@ -1903,7 +1900,10 @@ mod tests {
 
         let ctx = test_context();
         let result = hooks.fire_on_user_message(&ctx, "hello".to_string()).await;
-        assert_eq!(result.modified_message.as_deref(), Some("[hook2] [hook1] hello"));
+        assert_eq!(
+            result.modified_message.as_deref(),
+            Some("[hook2] [hook1] hello")
+        );
     }
 
     #[tokio::test]

@@ -265,7 +265,12 @@ fn builtin_prompt_entry(id: &str, locale: Option<&str>) -> Option<BuiltinPromptC
         .iter()
         .find(|entry| entry.id == id)
         .copied()
-        .or_else(|| BUILTIN_PROMPTS_EN.iter().find(|entry| entry.id == id).copied())
+        .or_else(|| {
+            BUILTIN_PROMPTS_EN
+                .iter()
+                .find(|entry| entry.id == id)
+                .copied()
+        })
 }
 
 fn matches_search(prompt: &PromptTemplate, search: Option<&str>) -> bool {
@@ -604,9 +609,7 @@ fn row_to_prompt(row: &rusqlite::Row) -> PromptTemplate {
         title: row.get(1).unwrap_or_default(),
         content: row.get(2).unwrap_or_default(),
         description: row.get(3).unwrap_or(None),
-        category: normalize_prompt_category(
-            &row.get::<_, String>(4).unwrap_or_default(),
-        ),
+        category: normalize_prompt_category(&row.get::<_, String>(4).unwrap_or_default()),
         tags: serde_json::from_str(&tags_str).unwrap_or_default(),
         variables: serde_json::from_str(&variables_str).unwrap_or_default(),
         is_builtin: row.get::<_, i32>(7).unwrap_or(0) != 0,

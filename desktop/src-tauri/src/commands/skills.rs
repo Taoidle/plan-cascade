@@ -22,9 +22,7 @@ use crate::services::skills::model::{
     SkillSummary, SkillToolPolicyMode, SkillsOverview,
 };
 use crate::services::skills::select::{lexical_score_skills, select_skills_for_session};
-use crate::services::task_mode::context_provider::{
-    resolve_effective_skills, SkillSelectionMode,
-};
+use crate::services::task_mode::context_provider::{resolve_effective_skills, SkillSelectionMode};
 use crate::state::AppState;
 use crate::utils::configure_background_process;
 use crate::utils::paths::ensure_plan_cascade_dir;
@@ -37,7 +35,8 @@ pub struct EffectiveSkillPreviewV2 {
     pub selection_reason: String,
     pub selection_origin: String,
     pub hierarchy_matches: Vec<String>,
-    pub why_not_selected: Vec<crate::services::task_mode::context_provider::NonSelectedSkillDiagnostic>,
+    pub why_not_selected:
+        Vec<crate::services::task_mode::context_provider::NonSelectedSkillDiagnostic>,
     pub skills_block: String,
 }
 
@@ -506,7 +505,11 @@ pub async fn preview_effective_skills_v2(
             .iter()
             .map(|skill| skill.skill.id.clone())
             .collect(),
-        selected_skills: effective.matches.iter().map(|skill| skill.skill.clone()).collect(),
+        selected_skills: effective
+            .matches
+            .iter()
+            .map(|skill| skill.skill.clone())
+            .collect(),
         blocked_tools: effective.blocked_tools,
         selection_reason: effective.selection_reason,
         selection_origin: effective.selection_origin,
@@ -529,7 +532,10 @@ pub async fn invoke_skill_command_v2(
     };
 
     let Some(skill) = index.get_by_id(&skill_id) else {
-        return Ok(CommandResponse::err(format!("Skill not found: {}", skill_id)));
+        return Ok(CommandResponse::err(format!(
+            "Skill not found: {}",
+            skill_id
+        )));
     };
     if !skill.user_invocable {
         return Ok(CommandResponse::err(format!(
@@ -539,7 +545,11 @@ pub async fn invoke_skill_command_v2(
     }
     if matches!(
         skill.review_status,
-        Some(SkillReviewStatus::PendingReview | SkillReviewStatus::Rejected | SkillReviewStatus::Archived)
+        Some(
+            SkillReviewStatus::PendingReview
+                | SkillReviewStatus::Rejected
+                | SkillReviewStatus::Archived
+        )
     ) {
         return Ok(CommandResponse::err(format!(
             "Skill '{}' is not approved for invocation",
@@ -767,7 +777,13 @@ pub async fn list_skill_sources_v2(
         .sources
         .iter()
         .map(|(name, source)| {
-            source_info_from_definition(name, source, project_root, plan_cascade_dir.as_deref(), &index)
+            source_info_from_definition(
+                name,
+                source,
+                project_root,
+                plan_cascade_dir.as_deref(),
+                &index,
+            )
         })
         .collect();
 
@@ -975,7 +991,9 @@ pub async fn remove_skill_source_v2(
     );
     let mut files_deleted = false;
     if delete_installed_copy.unwrap_or(true) {
-        if let Some(path) = resolve_skill_source_root(&source, project_root, plan_cascade_dir.as_deref()) {
+        if let Some(path) =
+            resolve_skill_source_root(&source, project_root, plan_cascade_dir.as_deref())
+        {
             if should_delete_managed_skill_source(&path, &source.source_type) {
                 let deletion = if path.is_dir() {
                     std::fs::remove_dir_all(&path)
@@ -1047,7 +1065,10 @@ fn derive_skill_source_name(source: &str) -> String {
 
 fn normalize_git_source(source: &str) -> String {
     if let Some(repo) = source.strip_prefix("github:") {
-        return format!("https://github.com/{}.git", repo.trim().trim_end_matches(".git"));
+        return format!(
+            "https://github.com/{}.git",
+            repo.trim().trim_end_matches(".git")
+        );
     }
     if source.starts_with("https://github.com/") && !source.ends_with(".git") {
         return format!("{}.git", source.trim_end_matches('/'));
@@ -1094,8 +1115,7 @@ async fn install_skill_source(
     }
 
     if source.starts_with("http://") || source.starts_with("https://") {
-        if source.contains("github.com/") && !source.contains("/raw/") && !source.ends_with(".md")
-        {
+        if source.contains("github.com/") && !source.contains("/raw/") && !source.ends_with(".md") {
             let git_url = normalize_git_source(source);
             clone_skill_source(&git_url, &target_dir).await?;
             return Ok((
@@ -1137,8 +1157,13 @@ async fn clone_skill_source(git_url: &str, target_dir: &Path) -> Result<(), Stri
     let parent = target_dir
         .parent()
         .ok_or_else(|| "Invalid target directory for skill source".to_string())?;
-    std::fs::create_dir_all(parent)
-        .map_err(|e| format!("Failed to create parent directory {}: {}", parent.display(), e))?;
+    std::fs::create_dir_all(parent).map_err(|e| {
+        format!(
+            "Failed to create parent directory {}: {}",
+            parent.display(),
+            e
+        )
+    })?;
 
     let mut clone_cmd = tokio::process::Command::new("git");
     clone_cmd.args([
@@ -1160,7 +1185,11 @@ async fn clone_skill_source(git_url: &str, target_dir: &Path) -> Result<(), Stri
     }
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-    Err(format!("git clone failed for {}: {}", git_url, stderr.trim()))
+    Err(format!(
+        "git clone failed for {}: {}",
+        git_url,
+        stderr.trim()
+    ))
 }
 
 async fn pull_skill_source(target_dir: &Path) -> Result<(), String> {
@@ -1211,8 +1240,13 @@ async fn download_skill_source(url: &str, target_dir: &Path) -> Result<(), Strin
         .await
         .map_err(|e| format!("Failed to read downloaded skill source: {}", e))?;
 
-    std::fs::create_dir_all(target_dir)
-        .map_err(|e| format!("Failed to create target directory {}: {}", target_dir.display(), e))?;
+    std::fs::create_dir_all(target_dir).map_err(|e| {
+        format!(
+            "Failed to create target directory {}: {}",
+            target_dir.display(),
+            e
+        )
+    })?;
     let filename = url
         .split('/')
         .next_back()

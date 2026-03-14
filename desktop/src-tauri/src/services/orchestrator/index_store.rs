@@ -114,17 +114,19 @@ impl IndexStore {
         }
 
         let projects = self.list_indexed_projects()?;
-        if let Some(project) = projects
-            .into_iter()
-            .find(|project| Self::normalize_project_path_key(&project.project_path) == normalized_target)
-        {
+        if let Some(project) = projects.into_iter().find(|project| {
+            Self::normalize_project_path_key(&project.project_path) == normalized_target
+        }) {
             return Ok(project.project_path);
         }
 
         Ok(project_path.to_string())
     }
 
-    pub fn get_project_summary_resolved(&self, project_path: &str) -> AppResult<ProjectIndexSummary> {
+    pub fn get_project_summary_resolved(
+        &self,
+        project_path: &str,
+    ) -> AppResult<ProjectIndexSummary> {
         let resolved = self.resolve_equivalent_project_path(project_path)?;
         self.get_project_summary(&resolved)
     }

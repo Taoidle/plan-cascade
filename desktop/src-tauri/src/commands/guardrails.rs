@@ -111,8 +111,8 @@ pub async fn set_guardrail_mode(
     mode: String,
     state: State<'_, GuardrailState>,
 ) -> Result<CommandResponse<GuardrailRuntimeStatus>, String> {
-    let parsed_mode = GuardrailMode::parse(&mode)
-        .ok_or_else(|| format!("Invalid guardrail mode '{}'", mode))?;
+    let parsed_mode =
+        GuardrailMode::parse(&mode).ok_or_else(|| format!("Invalid guardrail mode '{}'", mode))?;
     let mut registry = state.registry.write().await;
     match registry.set_mode(parsed_mode) {
         Ok(applied_mode) => Ok(CommandResponse::ok(GuardrailRuntimeStatus {
@@ -255,17 +255,15 @@ mod tests {
 
     #[test]
     fn parse_custom_input_defaults_id_and_action() {
-        let parsed = parse_custom_rule_input(
-            CustomGuardrailInput {
-                id: None,
-                name: "Block TODO".to_string(),
-                pattern: "TODO".to_string(),
-                action: "block".to_string(),
-                enabled: true,
-                scope: vec![Direction::Input],
-                description: String::new(),
-            },
-        )
+        let parsed = parse_custom_rule_input(CustomGuardrailInput {
+            id: None,
+            name: "Block TODO".to_string(),
+            pattern: "TODO".to_string(),
+            action: "block".to_string(),
+            enabled: true,
+            scope: vec![Direction::Input],
+            description: String::new(),
+        })
         .unwrap();
         assert_eq!(parsed.name, "Block TODO");
         assert_eq!(parsed.action, GuardrailAction::Block);

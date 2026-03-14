@@ -6,16 +6,16 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
+use crate::commands::permissions::PermissionState;
 use crate::commands::workflow::{emit_kernel_update_for_session, emit_session_catalog_update};
 use crate::models::CommandResponse;
 use crate::services::debug_mode::{
     build_debug_capability_snapshot, capability_profile_for_environment, DebugArtifactContent,
     DebugArtifactDescriptor, DebugCapabilitySnapshot, DebugEnvironment, DebugEvidenceRef,
     DebugExecutionReport, DebugHypothesis, DebugLifecyclePhase, DebugModeSession,
-    DebugPatchOperation, DebugPendingApproval, DebugProgressPayload, DebugState, DebugSeverity,
+    DebugPatchOperation, DebugPendingApproval, DebugProgressPayload, DebugSeverity, DebugState,
     EnterDebugModeRequest, FixProposal, RootCauseReport, VerificationCheck, VerificationReport,
 };
-use crate::commands::permissions::PermissionState;
 use crate::services::orchestrator::permissions::PermissionLevel;
 use crate::services::workflow_kernel::{
     ModeQualitySnapshot, WorkflowKernelState, WorkflowMode, WorkflowStatus,
@@ -70,10 +70,12 @@ impl DebugModeState {
             return Ok(None);
         }
 
-        let raw = fs::read(&path)
-            .map_err(|error| format!("Failed to read persisted debug session '{session_id}': {error}"))?;
-        let record: DebugModeSessionRecord = serde_json::from_slice(&raw)
-            .map_err(|error| format!("Persisted debug session '{session_id}' is corrupted: {error}"))?;
+        let raw = fs::read(&path).map_err(|error| {
+            format!("Failed to read persisted debug session '{session_id}': {error}")
+        })?;
+        let record: DebugModeSessionRecord = serde_json::from_slice(&raw).map_err(|error| {
+            format!("Persisted debug session '{session_id}' is corrupted: {error}")
+        })?;
         if record.version != DEBUG_MODE_SESSION_VERSION {
             return Err(format!(
                 "Unsupported debug session record version {} for '{}'",
@@ -98,9 +100,18 @@ impl DebugModeState {
             version: DEBUG_MODE_SESSION_VERSION,
             session: session.clone(),
         })
-        .map_err(|error| format!("Failed to encode debug session '{}': {error}", session.session_id))?;
-        fs::write(self.session_file_path(&session.session_id), encoded)
-            .map_err(|error| format!("Failed to persist debug session '{}': {error}", session.session_id))
+        .map_err(|error| {
+            format!(
+                "Failed to encode debug session '{}': {error}",
+                session.session_id
+            )
+        })?;
+        fs::write(self.session_file_path(&session.session_id), encoded).map_err(|error| {
+            format!(
+                "Failed to persist debug session '{}': {error}",
+                session.session_id
+            )
+        })
     }
 
     pub async fn delete_session_snapshot(&self, session_id: &str) -> Result<(), String> {
@@ -110,8 +121,9 @@ impl DebugModeState {
         }
         let path = self.session_file_path(session_id);
         if path.exists() {
-            fs::remove_file(path)
-                .map_err(|error| format!("Failed to delete debug session '{session_id}': {error}"))?;
+            fs::remove_file(path).map_err(|error| {
+                format!("Failed to delete debug session '{session_id}': {error}")
+            })?;
         }
         Ok(())
     }
@@ -192,7 +204,9 @@ fn infer_environment(description: &str) -> DebugEnvironment {
 
 fn extract_first_url(description: &str) -> Option<String> {
     let regex = regex::Regex::new(r#"https?://[^\s)>"]+"#).ok()?;
-    regex.find(description).map(|match_| match_.as_str().to_string())
+    regex
+        .find(description)
+        .map(|match_| match_.as_str().to_string())
 }
 
 fn build_session_title(description: &str) -> String {
@@ -228,11 +242,14 @@ fn infer_severity(description: &str) -> DebugSeverity {
 }
 
 fn split_structured_lines(input: &str) -> Vec<String> {
-    input.lines()
+    input
+        .lines()
         .map(str::trim)
-        .map(|line| line.trim_start_matches(|ch: char| {
-            matches!(ch, '-' | '*' | '•' | '1'..='9' | '.' | ')' | ' ')
-        }))
+        .map(|line| {
+            line.trim_start_matches(|ch: char| {
+                matches!(ch, '-' | '*' | '•' | '1'..='9' | '.' | ')' | ' ')
+            })
+        })
         .map(str::trim)
         .filter(|line| !line.is_empty())
         .map(ToOwned::to_owned)
@@ -245,7 +262,10 @@ fn merge_unique_strings(target: &mut Vec<String>, incoming: impl IntoIterator<It
         if trimmed.is_empty() {
             continue;
         }
-        if !target.iter().any(|existing| existing.eq_ignore_ascii_case(trimmed)) {
+        if !target
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(trimmed))
+        {
             target.push(trimmed.to_string());
         }
     }
@@ -304,7 +324,10 @@ fn default_fix_proposal(summary: &str) -> FixProposal {
     }
 }
 
-fn metadata_string(metadata: &serde_json::Map<String, serde_json::Value>, key: &str) -> Option<String> {
+fn metadata_string(
+    metadata: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Option<String> {
     metadata
         .get(key)
         .and_then(|value| value.as_str())
@@ -371,20 +394,36 @@ fn normalize_candidate_project_path(candidate: &str) -> Option<String> {
         .next()
         .unwrap_or(candidate)
         .replace('\\', "/");
-    let normalized = normalized.trim().trim_matches('`').trim_matches('"').trim_matches('\'');
+    let normalized = normalized
+        .trim()
+        .trim_matches('`')
+        .trim_matches('"')
+        .trim_matches('\'');
     if normalized.is_empty() {
         return None;
     }
-    let path_patterns = ["src/", "app/", "pages/", "components/", "lib/", "server/", "api/", "tests/", "test/"];
+    let path_patterns = [
+        "src/",
+        "app/",
+        "pages/",
+        "components/",
+        "lib/",
+        "server/",
+        "api/",
+        "tests/",
+        "test/",
+    ];
     for pattern in path_patterns {
         if let Some(index) = normalized.find(pattern) {
             return Some(normalized[index..].to_string());
         }
     }
-    let looks_like_file = regex::Regex::new(r"(?i)[\w./-]+\.(ts|tsx|js|jsx|vue|json|rs|py|go|java|kt|swift|css|scss|md)$")
-        .ok()
-        .map(|pattern| pattern.is_match(normalized))
-        .unwrap_or(false);
+    let looks_like_file = regex::Regex::new(
+        r"(?i)[\w./-]+\.(ts|tsx|js|jsx|vue|json|rs|py|go|java|kt|swift|css|scss|md)$",
+    )
+    .ok()
+    .map(|pattern| pattern.is_match(normalized))
+    .unwrap_or(false);
     if looks_like_file {
         return Some(normalized.trim_start_matches('/').to_string());
     }
@@ -400,9 +439,15 @@ fn collect_project_files_recursive(dir: &Path, acc: &mut Vec<PathBuf>, limit: us
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        let name = path.file_name().and_then(|value| value.to_str()).unwrap_or_default();
+        let name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default();
         if path.is_dir() {
-            if matches!(name, ".git" | "node_modules" | "dist" | "build" | "target" | ".next" | ".turbo") {
+            if matches!(
+                name,
+                ".git" | "node_modules" | "dist" | "build" | "target" | ".next" | ".turbo"
+            ) {
                 continue;
             }
             collect_project_files_recursive(&path, acc, limit);
@@ -424,9 +469,15 @@ fn resolve_patch_target_files(session: &DebugModeSession, project_root: &Path) -
         merge_unique_strings(&mut raw_candidates, root_cause.impact_scope.clone());
     }
     if let Some(fix_proposal) = session.state.fix_proposal.as_ref() {
-        merge_unique_strings(&mut raw_candidates, fix_proposal.files_or_systems_touched.clone());
+        merge_unique_strings(
+            &mut raw_candidates,
+            fix_proposal.files_or_systems_touched.clone(),
+        );
     }
-    merge_unique_strings(&mut raw_candidates, session.state.affected_surface.iter().cloned());
+    merge_unique_strings(
+        &mut raw_candidates,
+        session.state.affected_surface.iter().cloned(),
+    );
     for evidence in session
         .state
         .evidence_refs
@@ -526,11 +577,18 @@ fn extract_replacement_instructions(session: &DebugModeSession) -> Vec<(String, 
                 let Some(second) = capture.get(2) else {
                     continue;
                 };
-                let (old_value, new_value) = if pattern.contains("instead of") || pattern.contains("而不是") {
-                    (trim_matching_wrappers(second.as_str()), trim_matching_wrappers(first.as_str()))
-                } else {
-                    (trim_matching_wrappers(first.as_str()), trim_matching_wrappers(second.as_str()))
-                };
+                let (old_value, new_value) =
+                    if pattern.contains("instead of") || pattern.contains("而不是") {
+                        (
+                            trim_matching_wrappers(second.as_str()),
+                            trim_matching_wrappers(first.as_str()),
+                        )
+                    } else {
+                        (
+                            trim_matching_wrappers(first.as_str()),
+                            trim_matching_wrappers(second.as_str()),
+                        )
+                    };
                 if !old_value.is_empty() && old_value != new_value {
                     instructions.push((old_value, new_value));
                 }
@@ -554,23 +612,31 @@ fn extract_replacement_instructions(session: &DebugModeSession) -> Vec<(String, 
         .as_ref()
         .map(|pattern| {
             pattern
-                .captures_iter(session.state.expected_behavior.as_deref().unwrap_or_default())
+                .captures_iter(
+                    session
+                        .state
+                        .expected_behavior
+                        .as_deref()
+                        .unwrap_or_default(),
+                )
                 .filter_map(|capture| capture.get(1))
                 .map(|value| trim_matching_wrappers(value.as_str()))
                 .filter(|value| !value.is_empty())
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    if actual_literals.len() == 1 && expected_literals.len() == 1 && actual_literals[0] != expected_literals[0] {
+    if actual_literals.len() == 1
+        && expected_literals.len() == 1
+        && actual_literals[0] != expected_literals[0]
+    {
         instructions.push((actual_literals[0].clone(), expected_literals[0].clone()));
     }
 
     let mut unique = Vec::new();
     for (old_value, new_value) in instructions {
-        if !unique
-            .iter()
-            .any(|(existing_old, existing_new)| existing_old == &old_value && existing_new == &new_value)
-        {
+        if !unique.iter().any(|(existing_old, existing_new)| {
+            existing_old == &old_value && existing_new == &new_value
+        }) {
             unique.push((old_value, new_value));
         }
     }
@@ -603,8 +669,19 @@ fn patch_inference_corpus(session: &DebugModeSession) -> Vec<String> {
             .state
             .evidence_refs
             .iter()
-            .filter(|entry| matches!(entry.kind.as_str(), "console" | "source_mapping" | "network"))
-            .flat_map(|entry| [entry.title.clone(), entry.summary.clone(), entry.source.clone()]),
+            .filter(|entry| {
+                matches!(
+                    entry.kind.as_str(),
+                    "console" | "source_mapping" | "network"
+                )
+            })
+            .flat_map(|entry| {
+                [
+                    entry.title.clone(),
+                    entry.summary.clone(),
+                    entry.source.clone(),
+                ]
+            }),
     );
     corpus
 }
@@ -683,7 +760,11 @@ fn collect_runtime_guard_properties(session: &DebugModeSession) -> Vec<String> {
 
 fn tree_sitter_language_for_patch_file(file_path: &str) -> Option<tree_sitter::Language> {
     let lower = file_path.to_ascii_lowercase();
-    if lower.ends_with(".tsx") || lower.ends_with(".jsx") || lower.ends_with(".js") || lower.ends_with(".mjs") {
+    if lower.ends_with(".tsx")
+        || lower.ends_with(".jsx")
+        || lower.ends_with(".js")
+        || lower.ends_with(".mjs")
+    {
         Some(tree_sitter_typescript::LANGUAGE_TSX.into())
     } else if lower.ends_with(".ts") || lower.ends_with(".cts") || lower.ends_with(".mts") {
         Some(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into())
@@ -761,7 +842,13 @@ fn collect_ast_member_guard_candidates(
 
     for index in 0..node.child_count() {
         if let Some(child) = node.child(index) {
-            collect_ast_member_guard_candidates(child, source, method_fallbacks, property_fallbacks, results);
+            collect_ast_member_guard_candidates(
+                child,
+                source,
+                method_fallbacks,
+                property_fallbacks,
+                results,
+            );
         }
     }
 }
@@ -776,15 +863,32 @@ fn generate_ast_runtime_guard_patch_operations(
         return Vec::new();
     }
 
-    let collection_methods = ["map", "filter", "find", "reduce", "forEach", "some", "every"];
-    let string_methods = ["trim", "toLowerCase", "toUpperCase", "split", "replace", "match", "includes", "slice"];
+    let collection_methods = [
+        "map", "filter", "find", "reduce", "forEach", "some", "every",
+    ];
+    let string_methods = [
+        "trim",
+        "toLowerCase",
+        "toUpperCase",
+        "split",
+        "replace",
+        "match",
+        "includes",
+        "slice",
+    ];
 
     let method_fallbacks = methods
         .iter()
         .filter_map(|method| {
-            let fallback = if collection_methods.iter().any(|candidate| candidate.eq_ignore_ascii_case(method)) {
+            let fallback = if collection_methods
+                .iter()
+                .any(|candidate| candidate.eq_ignore_ascii_case(method))
+            {
                 Some("[]")
-            } else if string_methods.iter().any(|candidate| candidate.eq_ignore_ascii_case(method)) {
+            } else if string_methods
+                .iter()
+                .any(|candidate| candidate.eq_ignore_ascii_case(method))
+            {
                 Some("''")
             } else {
                 None
@@ -836,7 +940,13 @@ fn generate_ast_runtime_guard_patch_operations(
                 if find_text == replace_text {
                     continue;
                 }
-                matches.push((target_file.clone(), captured_property, find_text, replace_text, expression));
+                matches.push((
+                    target_file.clone(),
+                    captured_property,
+                    find_text,
+                    replace_text,
+                    expression,
+                ));
             }
         }
 
@@ -882,9 +992,7 @@ fn generate_ast_runtime_guard_patch_operations(
             id: format!("auto-ast-guard-{}", operations.len() + 1),
             kind: "replace_text".to_string(),
             file_path: target_file.clone(),
-            description: format!(
-                "AST guard for {expression}.{property} in {target_file}"
-            ),
+            description: format!("AST guard for {expression}.{property} in {target_file}"),
             find_text: Some(find_text),
             replace_text: Some(replace_text),
             content: None,
@@ -912,7 +1020,10 @@ fn infer_binding_default_patch(
         r#"(?s)(?P<full>\(\s*\{(?P<body>[^}]*)\}(?P<suffix>\s*:[^)]+)?\s*\)\s*=>)"#,
     ];
 
-    let target_pattern = regex::Regex::new(&format!(r#"(?m)(?<![\w$]){escaped_identifier}(?!\s*(?:=|:)|[\w$])"#)).ok()?;
+    let target_pattern = regex::Regex::new(&format!(
+        r#"(?m)(?<![\w$]){escaped_identifier}(?!\s*(?:=|:)|[\w$])"#
+    ))
+    .ok()?;
     let already_defaulted_pattern =
         regex::Regex::new(&format!(r#"(?m)(?<![\w$]){escaped_identifier}\s*="#)).ok()?;
 
@@ -964,8 +1075,17 @@ fn generate_runtime_guard_patch_operations(
     project_root: &Path,
     target_files: &[String],
 ) -> Vec<DebugPatchOperation> {
-    let collection_methods = ["map", "filter", "find", "reduce", "forEach", "some", "every"];
-    let string_methods = ["trim", "toLowerCase", "toUpperCase", "split", "replace", "match"];
+    let collection_methods = [
+        "map", "filter", "find", "reduce", "forEach", "some", "every",
+    ];
+    let string_methods = [
+        "trim",
+        "toLowerCase",
+        "toUpperCase",
+        "split",
+        "replace",
+        "match",
+    ];
     let runtime_methods = collect_runtime_guard_methods(session);
     if target_files.is_empty() || runtime_methods.is_empty() {
         return Vec::new();
@@ -973,7 +1093,10 @@ fn generate_runtime_guard_patch_operations(
 
     let mut operations = Vec::new();
     for method in runtime_methods {
-        let fallback_literal = if collection_methods.iter().any(|candidate| candidate.eq_ignore_ascii_case(&method)) {
+        let fallback_literal = if collection_methods
+            .iter()
+            .any(|candidate| candidate.eq_ignore_ascii_case(&method))
+        {
             "[]"
         } else if string_methods
             .iter()
@@ -1019,7 +1142,12 @@ fn generate_runtime_guard_patch_operations(
                 if matched_text == replacement {
                     continue;
                 }
-                matches.push((target_file.clone(), matched_text, replacement, expression.to_string()));
+                matches.push((
+                    target_file.clone(),
+                    matched_text,
+                    replacement,
+                    expression.to_string(),
+                ));
             }
         }
 
@@ -1096,7 +1224,12 @@ fn generate_runtime_property_guard_patch_operations(
                 if matched_text == replacement {
                     continue;
                 }
-                matches.push((target_file.clone(), matched_text, replacement, expression.to_string()));
+                matches.push((
+                    target_file.clone(),
+                    matched_text,
+                    replacement,
+                    expression.to_string(),
+                ));
             }
         }
 
@@ -1158,7 +1291,10 @@ fn generate_patch_operations_for_session(session: &DebugModeSession) -> Vec<Debu
             id: format!("auto-replace-{}", index + 1),
             kind: "replace_text".to_string(),
             file_path: target_file.clone(),
-            description: format!("Replace '{}' with '{}' in {}", old_value, new_value, target_file),
+            description: format!(
+                "Replace '{}' with '{}' in {}",
+                old_value, new_value, target_file
+            ),
             find_text: Some(old_value),
             replace_text: Some(new_value),
             content: None,
@@ -1184,7 +1320,8 @@ fn generate_patch_operations_for_session(session: &DebugModeSession) -> Vec<Debu
         }
     }
 
-    for operation in generate_runtime_guard_patch_operations(session, &project_root, &target_files) {
+    for operation in generate_runtime_guard_patch_operations(session, &project_root, &target_files)
+    {
         let duplicate = operations.iter().any(|existing| {
             existing.kind == operation.kind
                 && existing.file_path == operation.file_path
@@ -1196,7 +1333,9 @@ fn generate_patch_operations_for_session(session: &DebugModeSession) -> Vec<Debu
         }
     }
 
-    for operation in generate_runtime_property_guard_patch_operations(session, &project_root, &target_files) {
+    for operation in
+        generate_runtime_property_guard_patch_operations(session, &project_root, &target_files)
+    {
         let duplicate = operations.iter().any(|existing| {
             existing.kind == operation.kind
                 && existing.file_path == operation.file_path
@@ -1214,8 +1353,9 @@ fn generate_patch_operations_for_session(session: &DebugModeSession) -> Vec<Debu
 
 fn ensure_debug_artifact_dir(state: &DebugModeState, session_id: &str) -> Result<PathBuf, String> {
     let dir = state.artifact_dir_path(session_id);
-    fs::create_dir_all(&dir)
-        .map_err(|error| format!("Failed to create debug artifact directory for '{session_id}': {error}"))?;
+    fs::create_dir_all(&dir).map_err(|error| {
+        format!("Failed to create debug artifact directory for '{session_id}': {error}")
+    })?;
     Ok(dir)
 }
 
@@ -1239,7 +1379,11 @@ fn sanitize_debug_artifact_contents(
         registry
             .read()
             .await
-            .validate_all(text, crate::services::guardrail::Direction::Artifact, &runtime)
+            .validate_all(
+                text,
+                crate::services::guardrail::Direction::Artifact,
+                &runtime,
+            )
             .await
     };
     let result = match tokio::runtime::Handle::try_current() {
@@ -1269,8 +1413,9 @@ fn write_debug_artifact_file(
     let dir = ensure_debug_artifact_dir(state, session_id)?;
     let path = dir.join(file_name);
     let sanitized = sanitize_debug_artifact_contents(session_id, file_name, contents.as_ref())?;
-    fs::write(&path, sanitized)
-        .map_err(|error| format!("Failed to write debug artifact '{file_name}' for '{session_id}': {error}"))?;
+    fs::write(&path, sanitized).map_err(|error| {
+        format!("Failed to write debug artifact '{file_name}' for '{session_id}': {error}")
+    })?;
     Ok(path.to_string_lossy().to_string())
 }
 
@@ -1340,7 +1485,9 @@ fn resolve_debug_project_file_path(
         .components()
         .any(|component| matches!(component, std::path::Component::ParentDir))
     {
-        return Err(format!("Patch operation path cannot escape project root: {relative}"));
+        return Err(format!(
+            "Patch operation path cannot escape project root: {relative}"
+        ));
     }
 
     let candidate = project_root.join(relative_path);
@@ -1355,9 +1502,9 @@ fn resolve_debug_project_file_path(
                 break project_root.to_path_buf();
             };
             if current.exists() {
-                break current
-                    .canonicalize()
-                    .map_err(|error| format!("Patch target parent for '{relative}' is invalid: {error}"))?;
+                break current.canonicalize().map_err(|error| {
+                    format!("Patch target parent for '{relative}' is invalid: {error}")
+                })?;
             }
             existing_ancestor = current.parent().map(PathBuf::from);
         }
@@ -1418,9 +1565,16 @@ fn infer_debug_artifact_description(kind: &str, file_name: &str) -> String {
 }
 
 fn build_debug_artifact_descriptor(path: &Path) -> Result<DebugArtifactDescriptor, String> {
-    let metadata = fs::metadata(path)
-        .map_err(|error| format!("Failed to inspect debug artifact '{}': {error}", path.display()))?;
-    let modified = metadata.modified().ok().map(chrono::DateTime::<chrono::Utc>::from);
+    let metadata = fs::metadata(path).map_err(|error| {
+        format!(
+            "Failed to inspect debug artifact '{}': {error}",
+            path.display()
+        )
+    })?;
+    let modified = metadata
+        .modified()
+        .ok()
+        .map(chrono::DateTime::<chrono::Utc>::from);
     let file_name = path
         .file_name()
         .and_then(|value| value.to_str())
@@ -1440,7 +1594,10 @@ fn build_debug_artifact_descriptor(path: &Path) -> Result<DebugArtifactDescripto
     })
 }
 
-fn collect_debug_artifact_paths(state: &DebugModeState, session: &DebugModeSession) -> Vec<PathBuf> {
+fn collect_debug_artifact_paths(
+    state: &DebugModeState,
+    session: &DebugModeSession,
+) -> Vec<PathBuf> {
     let mut paths: Vec<PathBuf> = Vec::new();
     let mut push_path = |path_str: &str| {
         let path = PathBuf::from(path_str);
@@ -1462,7 +1619,11 @@ fn collect_debug_artifact_paths(state: &DebugModeState, session: &DebugModeSessi
         }
     }
     for evidence in &session.state.evidence_refs {
-        if let Some(path) = evidence.metadata.get("artifactPath").and_then(|value| value.as_str()) {
+        if let Some(path) = evidence
+            .metadata
+            .get("artifactPath")
+            .and_then(|value| value.as_str())
+        {
             push_path(path);
         }
     }
@@ -1485,11 +1646,15 @@ fn apply_debug_patch_operations(
     session: &DebugModeSession,
     project_root: &Path,
     operations: &[DebugPatchOperation],
-    file_change_tracker: Option<&std::sync::Arc<std::sync::Mutex<crate::services::file_change_tracker::FileChangeTracker>>>,
+    file_change_tracker: Option<
+        &std::sync::Arc<std::sync::Mutex<crate::services::file_change_tracker::FileChangeTracker>>,
+    >,
     file_change_turn_index: Option<u32>,
 ) -> Result<(PatchApplicationReport, String), String> {
     if operations.is_empty() {
-        return Err("No executable patch operations were attached to this fix proposal.".to_string());
+        return Err(
+            "No executable patch operations were attached to this fix proposal.".to_string(),
+        );
     }
 
     let mut applied_operations = Vec::new();
@@ -1500,28 +1665,28 @@ fn apply_debug_patch_operations(
             operation.create_if_missing || operation.kind == "write_file",
         )?;
         let previous_contents = if target_path.exists() {
-            Some(
-                fs::read_to_string(&target_path).map_err(|error| {
-                    format!(
-                        "Failed to read patch target '{}': {error}",
-                        target_path.to_string_lossy()
-                    )
-                })?,
-            )
+            Some(fs::read_to_string(&target_path).map_err(|error| {
+                format!(
+                    "Failed to read patch target '{}': {error}",
+                    target_path.to_string_lossy()
+                )
+            })?)
         } else {
             None
         };
 
         let next_contents = match operation.kind.as_str() {
             "replace_text" => {
-                let current = previous_contents
-                    .clone()
-                    .ok_or_else(|| format!("Patch target '{}' does not exist.", operation.file_path))?;
+                let current = previous_contents.clone().ok_or_else(|| {
+                    format!("Patch target '{}' does not exist.", operation.file_path)
+                })?;
                 let find_text = operation
                     .find_text
                     .as_ref()
                     .filter(|value| !value.is_empty())
-                    .ok_or_else(|| format!("Patch operation '{}' is missing findText.", operation.id))?;
+                    .ok_or_else(|| {
+                        format!("Patch operation '{}' is missing findText.", operation.id)
+                    })?;
                 let replace_text = operation.replace_text.as_deref().unwrap_or_default();
                 let occurrences = current.matches(find_text).count();
                 if occurrences == 0 {
@@ -1538,7 +1703,11 @@ fn apply_debug_patch_operations(
                         ));
                     }
                 }
-                current.replacen(find_text, replace_text, operation.expected_occurrences.unwrap_or(occurrences))
+                current.replacen(
+                    find_text,
+                    replace_text,
+                    operation.expected_occurrences.unwrap_or(occurrences),
+                )
             }
             "write_file" => operation
                 .content
@@ -1590,14 +1759,22 @@ fn apply_debug_patch_operations(
                     .and_then(|value| tracker_guard.store_content(value.as_bytes()).ok());
                 let after_hash = tracker_guard.store_content(next_contents.as_bytes()).ok();
                 let metadata = crate::services::file_change_tracker::FileChangeMetadata {
-                    source_mode: Some(crate::services::file_change_tracker::FileChangeSourceMode::Debug),
-                    actor_kind: Some(crate::services::file_change_tracker::FileChangeActorKind::DebugPatch),
+                    source_mode: Some(
+                        crate::services::file_change_tracker::FileChangeSourceMode::Debug,
+                    ),
+                    actor_kind: Some(
+                        crate::services::file_change_tracker::FileChangeActorKind::DebugPatch,
+                    ),
                     actor_id: Some(operation.id.clone()),
                     actor_label: Some("Debug Patch".to_string()),
                     sub_agent_depth: None,
-                    origin_session_id: session.kernel_session_id.clone().or_else(|| Some(session.session_id.clone())),
+                    origin_session_id: session
+                        .kernel_session_id
+                        .clone()
+                        .or_else(|| Some(session.session_id.clone())),
                 };
-                let turn_index = file_change_turn_index.unwrap_or_else(|| tracker_guard.turn_index());
+                let turn_index =
+                    file_change_turn_index.unwrap_or_else(|| tracker_guard.turn_index());
                 tracker_guard.record_change_at_with_metadata(
                     turn_index,
                     &format!("debug-patch-{}-{}", operation.id, index),
@@ -1699,12 +1876,18 @@ fn build_patch_preview_markdown(session: &DebugModeSession, proposal: &FixPropos
             .patch_operations
             .iter()
             .map(|operation| {
-                let mut line = format!("- [{}] {} ({})", operation.kind, operation.file_path, operation.description);
+                let mut line = format!(
+                    "- [{}] {} ({})",
+                    operation.kind, operation.file_path, operation.description
+                );
                 if let Some(find_text) = operation.find_text.as_deref() {
                     line.push_str(&format!("\n  find: `{}`", find_text.replace('`', "\\`")));
                 }
                 if let Some(replace_text) = operation.replace_text.as_deref() {
-                    line.push_str(&format!("\n  replace: `{}`", replace_text.replace('`', "\\`")));
+                    line.push_str(&format!(
+                        "\n  replace: `{}`",
+                        replace_text.replace('`', "\\`")
+                    ));
                 }
                 line
             })
@@ -1823,9 +2006,18 @@ fn persist_verification_report_artifact(
     session: &DebugModeSession,
     report: &VerificationReport,
 ) -> Result<String, String> {
-    let encoded = serde_json::to_vec_pretty(report)
-        .map_err(|error| format!("Failed to encode verification report for '{}': {error}", session.session_id))?;
-    write_debug_artifact_file(state, &session.session_id, "verification-report.json", encoded)
+    let encoded = serde_json::to_vec_pretty(report).map_err(|error| {
+        format!(
+            "Failed to encode verification report for '{}': {error}",
+            session.session_id
+        )
+    })?;
+    write_debug_artifact_file(
+        state,
+        &session.session_id,
+        "verification-report.json",
+        encoded,
+    )
 }
 
 fn materialize_debug_artifacts(
@@ -1847,7 +2039,10 @@ fn materialize_debug_artifacts(
             });
             if !has_patch_evidence {
                 let mut metadata = serde_json::Map::new();
-                metadata.insert("artifactPath".to_string(), serde_json::Value::String(path.clone()));
+                metadata.insert(
+                    "artifactPath".to_string(),
+                    serde_json::Value::String(path.clone()),
+                );
                 session.state.evidence_refs.push(DebugEvidenceRef {
                     id: uuid::Uuid::new_v4().to_string(),
                     kind: "patch_preview".to_string(),
@@ -1863,12 +2058,21 @@ fn materialize_debug_artifacts(
 
     let verification_snapshot = session.clone();
     if let Some(report) = session.state.verification_report.as_mut() {
-        let report_path = persist_verification_report_artifact(state, &verification_snapshot, report)?;
-        if !report.artifacts.iter().any(|artifact| artifact == &report_path) {
+        let report_path =
+            persist_verification_report_artifact(state, &verification_snapshot, report)?;
+        if !report
+            .artifacts
+            .iter()
+            .any(|artifact| artifact == &report_path)
+        {
             report.artifacts.push(report_path.clone());
         }
         let incident_path = persist_incident_summary_artifact(state, &verification_snapshot)?;
-        if !report.artifacts.iter().any(|artifact| artifact == &incident_path) {
+        if !report
+            .artifacts
+            .iter()
+            .any(|artifact| artifact == &incident_path)
+        {
             report.artifacts.push(incident_path.clone());
         }
         let has_verification_evidence = session.state.evidence_refs.iter().any(|entry| {
@@ -1942,7 +2146,10 @@ fn build_verification_report(session: &DebugModeSession) -> VerificationReport {
         .find(|entry| entry.kind == "patch")
         .and_then(|entry| metadata_string(&entry.metadata, "artifactPath"));
     let repro_label = if !session.state.repro_steps.is_empty() {
-        format!("Reproduction path: {}", session.state.repro_steps.join(" -> "))
+        format!(
+            "Reproduction path: {}",
+            session.state.repro_steps.join(" -> ")
+        )
     } else if let Some(target) = session.state.target_url_or_entry.clone() {
         format!("Target path: {target}")
     } else {
@@ -1982,16 +2189,22 @@ fn build_verification_report(session: &DebugModeSession) -> VerificationReport {
     checks.push(VerificationCheck {
         id: "repro".to_string(),
         label: repro_label,
-        status: if !session.state.repro_steps.is_empty() || session.state.target_url_or_entry.is_some() {
+        status: if !session.state.repro_steps.is_empty()
+            || session.state.target_url_or_entry.is_some()
+        {
             "passed"
         } else {
             "skipped"
         }
         .to_string(),
-        details: if !session.state.repro_steps.is_empty() || session.state.target_url_or_entry.is_some() {
+        details: if !session.state.repro_steps.is_empty()
+            || session.state.target_url_or_entry.is_some()
+        {
             Some("Verification kept the original failure path in scope.".to_string())
         } else {
-            Some("No stable reproduction path was attached for post-patch verification.".to_string())
+            Some(
+                "No stable reproduction path was attached for post-patch verification.".to_string(),
+            )
         },
     });
 
@@ -2076,25 +2289,40 @@ fn build_verification_report(session: &DebugModeSession) -> VerificationReport {
         });
     }
 
-    let failed_count = checks.iter().filter(|check| check.status == "failed").count();
-    let passed_count = checks.iter().filter(|check| check.status == "passed").count();
-    let skipped_count = checks.iter().filter(|check| check.status == "skipped").count();
+    let failed_count = checks
+        .iter()
+        .filter(|check| check.status == "failed")
+        .count();
+    let passed_count = checks
+        .iter()
+        .filter(|check| check.status == "passed")
+        .count();
+    let skipped_count = checks
+        .iter()
+        .filter(|check| check.status == "skipped")
+        .count();
 
     let mut residual_risks = Vec::new();
     if verification_console.is_none() && session.state.target_url_or_entry.is_some() {
-        residual_risks.push("Browser console was not re-captured after patch approval.".to_string());
+        residual_risks
+            .push("Browser console was not re-captured after patch approval.".to_string());
     }
     if verification_network.is_none() && session.state.target_url_or_entry.is_some() {
-        residual_risks.push("Network traces were not re-captured after patch approval.".to_string());
+        residual_risks
+            .push("Network traces were not re-captured after patch approval.".to_string());
     }
     if latest_logs.is_none() {
-        residual_risks.push("No service-side log evidence was attached during verification.".to_string());
+        residual_risks
+            .push("No service-side log evidence was attached during verification.".to_string());
     }
     if failed_count > 0 {
-        residual_risks.push("One or more verification checks still report blocking signals.".to_string());
+        residual_risks
+            .push("One or more verification checks still report blocking signals.".to_string());
     }
     if matches!(session.state.environment, DebugEnvironment::Prod) {
-        residual_risks.push("Production rollout remains manual because mutate actions stay blocked.".to_string());
+        residual_risks.push(
+            "Production rollout remains manual because mutate actions stay blocked.".to_string(),
+        );
     }
     if residual_risks.is_empty() {
         residual_risks.push("Monitor adjacent surfaces for related regressions.".to_string());
@@ -2162,15 +2390,19 @@ fn evidence_summary_corpus(session: &DebugModeSession) -> String {
         session.state.actual_behavior.clone().unwrap_or_default(),
         session.state.expected_behavior.clone().unwrap_or_default(),
         session.state.recent_changes.clone().unwrap_or_default(),
-        session.state.target_url_or_entry.clone().unwrap_or_default(),
-    ];
-    chunks.extend(
         session
             .state
-            .evidence_refs
-            .iter()
-            .flat_map(|entry| [entry.title.clone(), entry.summary.clone(), entry.source.clone()]),
-    );
+            .target_url_or_entry
+            .clone()
+            .unwrap_or_default(),
+    ];
+    chunks.extend(session.state.evidence_refs.iter().flat_map(|entry| {
+        [
+            entry.title.clone(),
+            entry.summary.clone(),
+            entry.source.clone(),
+        ]
+    }));
     chunks.join("\n").to_ascii_lowercase()
 }
 
@@ -2196,7 +2428,10 @@ fn derive_debug_hypotheses(session: &DebugModeSession) -> Vec<DebugHypothesis> {
     let mut hypotheses = Vec::new();
 
     if session.state.target_url_or_entry.is_some()
-        || has_any_token(&corpus, &["frontend", "browser", "console", "hydration", "render"])
+        || has_any_token(
+            &corpus,
+            &["frontend", "browser", "console", "hydration", "render"],
+        )
     {
         hypotheses.push(DebugHypothesis {
             id: uuid::Uuid::new_v4().to_string(),
@@ -2216,7 +2451,12 @@ fn derive_debug_hypotheses(session: &DebugModeSession) -> Vec<DebugHypothesis> {
         });
     }
 
-    if has_any_token(&corpus, &["fetch", "request", "api", "network", "500", "404", "timeout"]) {
+    if has_any_token(
+        &corpus,
+        &[
+            "fetch", "request", "api", "network", "500", "404", "timeout",
+        ],
+    ) {
         hypotheses.push(DebugHypothesis {
             id: uuid::Uuid::new_v4().to_string(),
             statement: "The incident may be driven by an upstream API or network failure rather than a purely local UI defect.".to_string(),
@@ -2233,7 +2473,15 @@ fn derive_debug_hypotheses(session: &DebugModeSession) -> Vec<DebugHypothesis> {
 
     if has_any_token(
         &corpus,
-        &["redis", "cache", "db", "database", "query", "sql", "migration"],
+        &[
+            "redis",
+            "cache",
+            "db",
+            "database",
+            "query",
+            "sql",
+            "migration",
+        ],
     ) {
         hypotheses.push(DebugHypothesis {
             id: uuid::Uuid::new_v4().to_string(),
@@ -2306,15 +2554,16 @@ fn derive_root_cause(session: &DebugModeSession) -> Option<RootCauseReport> {
         } else {
             impact_scope
         },
-        recommended_direction: best
-            .next_checks
-            .first()
-            .cloned()
-            .unwrap_or_else(|| "Prepare the smallest fix that addresses the confirmed boundary.".to_string()),
+        recommended_direction: best.next_checks.first().cloned().unwrap_or_else(|| {
+            "Prepare the smallest fix that addresses the confirmed boundary.".to_string()
+        }),
     })
 }
 
-fn derive_fix_proposal_for_session(session: &DebugModeSession, root_cause: &RootCauseReport) -> FixProposal {
+fn derive_fix_proposal_for_session(
+    session: &DebugModeSession,
+    root_cause: &RootCauseReport,
+) -> FixProposal {
     let mut proposal = default_fix_proposal(&session.state.symptom_summary);
     proposal.summary = format!(
         "Prepare a minimal fix for the confirmed boundary: {}",
@@ -2341,20 +2590,29 @@ fn derive_fix_proposal_for_session(session: &DebugModeSession, root_cause: &Root
     };
     proposal.verification_plan = vec![
         if !session.state.repro_steps.is_empty() {
-            format!("Re-run reproduction steps: {}", session.state.repro_steps.join(" -> "))
+            format!(
+                "Re-run reproduction steps: {}",
+                session.state.repro_steps.join(" -> ")
+            )
         } else if let Some(target) = session.state.target_url_or_entry.clone() {
             format!("Re-run the affected target: {}", target)
         } else {
             "Re-run the reported failure path".to_string()
         },
-        "Check browser console, network traces, and service logs for the same scenario.".to_string(),
-        "Run the most targeted automated verification available for the changed surface.".to_string(),
+        "Check browser console, network traces, and service logs for the same scenario."
+            .to_string(),
+        "Run the most targeted automated verification available for the changed surface."
+            .to_string(),
     ];
-    proposal.manual_approvals_required = if matches!(session.state.environment, DebugEnvironment::Prod) {
-        vec!["patch_review".to_string(), "prod_mutation_blocked".to_string()]
-    } else {
-        vec!["patch_review".to_string()]
-    };
+    proposal.manual_approvals_required =
+        if matches!(session.state.environment, DebugEnvironment::Prod) {
+            vec![
+                "patch_review".to_string(),
+                "prod_mutation_blocked".to_string(),
+            ]
+        } else {
+            vec!["patch_review".to_string()]
+        };
     proposal.patch_preview_ref = Some(format!(
         "patch-preview:{}:{}",
         session
@@ -2418,7 +2676,8 @@ fn recompute_debug_analysis(session: &mut DebugModeSession) {
     session.state.active_hypotheses = derive_debug_hypotheses(session);
     session.state.phase = DebugLifecyclePhase::Hypothesizing.as_str().to_string();
     session.state.pending_prompt = Some(
-        "Review the leading hypotheses or attach one more signal to isolate the root cause.".to_string(),
+        "Review the leading hypotheses or attach one more signal to isolate the root cause."
+            .to_string(),
     );
     session.state.selected_root_cause = None;
     session.state.fix_proposal = None;
@@ -2427,18 +2686,22 @@ fn recompute_debug_analysis(session: &mut DebugModeSession) {
 
     if let Some(root_cause) = derive_root_cause(session) {
         session.state.selected_root_cause = Some(root_cause.clone());
-        session.state.phase = DebugLifecyclePhase::IdentifyingRootCause.as_str().to_string();
+        session.state.phase = DebugLifecyclePhase::IdentifyingRootCause
+            .as_str()
+            .to_string();
         session.state.pending_prompt = Some(
             "Root cause is ready for review. Continue to generate the smallest safe fix proposal."
                 .to_string(),
         );
 
         if evidence_count >= 4 || session.state.target_url_or_entry.is_some() {
-            session.state.fix_proposal = Some(derive_fix_proposal_for_session(session, &root_cause));
+            session.state.fix_proposal =
+                Some(derive_fix_proposal_for_session(session, &root_cause));
             session.state.pending_approval = Some(DebugPendingApproval {
                 kind: "patch_review".to_string(),
                 title: "Patch review required".to_string(),
-                description: "Review the proposed fix before applying any code or system changes.".to_string(),
+                description: "Review the proposed fix before applying any code or system changes."
+                    .to_string(),
                 required_actions: vec!["approve_patch".to_string(), "reject_patch".to_string()],
             });
             session.state.phase = DebugLifecyclePhase::PatchReview.as_str().to_string();
@@ -2629,7 +2892,13 @@ pub async fn enter_debug_mode(
     if let Err(error) = state.store_session_snapshot(session.clone()).await {
         return Ok(CommandResponse::err(error));
     }
-    let _ = emit_debug_progress(&app, &session, Some("debug_intake_card"), Some("debug_started")).await;
+    let _ = emit_debug_progress(
+        &app,
+        &session,
+        Some("debug_intake_card"),
+        Some("debug_started"),
+    )
+    .await;
     Ok(CommandResponse::ok(session))
 }
 
@@ -2653,7 +2922,9 @@ pub async fn get_debug_capability_snapshot(
         }
     };
 
-    Ok(CommandResponse::ok(build_debug_capability_snapshot(profile)))
+    Ok(CommandResponse::ok(build_debug_capability_snapshot(
+        profile,
+    )))
 }
 
 #[tauri::command]
@@ -2663,7 +2934,10 @@ pub async fn submit_debug_clarification(
     kernel_state: tauri::State<'_, WorkflowKernelState>,
     request: SubmitDebugClarificationRequest,
 ) -> Result<CommandResponse<DebugModeSession>, String> {
-    let Some(mut session) = (match state.get_or_load_session_snapshot(&request.session_id).await {
+    let Some(mut session) = (match state
+        .get_or_load_session_snapshot(&request.session_id)
+        .await
+    {
         Ok(value) => value,
         Err(error) => return Ok(CommandResponse::err(error)),
     }) else {
@@ -2683,7 +2957,10 @@ pub async fn submit_debug_clarification(
     merge_repro_steps(&mut session.state, &request.answer);
     merge_unique_strings(
         &mut session.state.affected_surface,
-        infer_affected_surface_from_text(&request.answer, session.state.target_url_or_entry.as_deref()),
+        infer_affected_surface_from_text(
+            &request.answer,
+            session.state.target_url_or_entry.as_deref(),
+        ),
     );
     recompute_debug_analysis(&mut session);
     session.updated_at = now_rfc3339();
@@ -2695,12 +2972,23 @@ pub async fn submit_debug_clarification(
         return Ok(CommandResponse::err(error));
     }
 
-    let linked_sessions =
-        match sync_debug_kernel_snapshot(kernel_state.inner(), &session, Some(WorkflowStatus::Active)).await {
-            Ok(value) => value,
-            Err(error) => return Ok(CommandResponse::err(error)),
-        };
-    emit_kernel_updates_for_linked_sessions(&app, kernel_state.inner(), &linked_sessions, "submit_debug_clarification").await;
+    let linked_sessions = match sync_debug_kernel_snapshot(
+        kernel_state.inner(),
+        &session,
+        Some(WorkflowStatus::Active),
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => return Ok(CommandResponse::err(error)),
+    };
+    emit_kernel_updates_for_linked_sessions(
+        &app,
+        kernel_state.inner(),
+        &linked_sessions,
+        "submit_debug_clarification",
+    )
+    .await;
     let phase_card = match session.state.phase.as_str() {
         "patch_review" => Some("patch_review_card"),
         "identifying_root_cause" => Some("root_cause_card"),
@@ -2720,7 +3008,10 @@ pub async fn approve_debug_patch(
     file_changes_state: tauri::State<'_, crate::commands::file_changes::FileChangesState>,
     request: ApproveDebugPatchRequest,
 ) -> Result<CommandResponse<DebugModeSession>, String> {
-    let Some(mut session) = (match state.get_or_load_session_snapshot(&request.session_id).await {
+    let Some(mut session) = (match state
+        .get_or_load_session_snapshot(&request.session_id)
+        .await
+    {
         Ok(value) => value,
         Err(error) => return Ok(CommandResponse::err(error)),
     }) else {
@@ -2745,20 +3036,39 @@ pub async fn approve_debug_patch(
         if let Err(error) = state.store_session_snapshot(session.clone()).await {
             return Ok(CommandResponse::err(error));
         }
-        let linked_sessions =
-            match sync_debug_kernel_snapshot(kernel_state.inner(), &session, Some(WorkflowStatus::Active)).await {
-                Ok(value) => value,
-                Err(error) => return Ok(CommandResponse::err(error)),
-            };
-        emit_kernel_updates_for_linked_sessions(&app, kernel_state.inner(), &linked_sessions, "approve_debug_patch_prod_blocked").await;
-        let _ = emit_debug_progress(&app, &session, Some("patch_review_card"), Some("prod_patch_blocked")).await;
+        let linked_sessions = match sync_debug_kernel_snapshot(
+            kernel_state.inner(),
+            &session,
+            Some(WorkflowStatus::Active),
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(error) => return Ok(CommandResponse::err(error)),
+        };
+        emit_kernel_updates_for_linked_sessions(
+            &app,
+            kernel_state.inner(),
+            &linked_sessions,
+            "approve_debug_patch_prod_blocked",
+        )
+        .await;
+        let _ = emit_debug_progress(
+            &app,
+            &session,
+            Some("patch_review_card"),
+            Some("prod_patch_blocked"),
+        )
+        .await;
         return Ok(CommandResponse::err(
             "Production debug sessions are observe-only; patch application is blocked".to_string(),
         ));
     }
 
     let Some(fix_proposal) = session.state.fix_proposal.clone() else {
-        return Ok(CommandResponse::err("No debug fix proposal is available for patch approval"));
+        return Ok(CommandResponse::err(
+            "No debug fix proposal is available for patch approval",
+        ));
     };
     if fix_proposal.patch_operations.is_empty() {
         session.state.phase = DebugLifecyclePhase::PatchReview.as_str().to_string();
@@ -2773,11 +3083,16 @@ pub async fn approve_debug_patch(
         if let Err(error) = state.store_session_snapshot(session.clone()).await {
             return Ok(CommandResponse::err(error));
         }
-        let linked_sessions =
-            match sync_debug_kernel_snapshot(kernel_state.inner(), &session, Some(WorkflowStatus::Active)).await {
-                Ok(value) => value,
-                Err(error) => return Ok(CommandResponse::err(error)),
-            };
+        let linked_sessions = match sync_debug_kernel_snapshot(
+            kernel_state.inner(),
+            &session,
+            Some(WorkflowStatus::Active),
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(error) => return Ok(CommandResponse::err(error)),
+        };
         emit_kernel_updates_for_linked_sessions(
             &app,
             kernel_state.inner(),
@@ -2785,7 +3100,13 @@ pub async fn approve_debug_patch(
             "approve_debug_patch_missing_operations",
         )
         .await;
-        let _ = emit_debug_progress(&app, &session, Some("patch_review_card"), Some("patch_operations_required")).await;
+        let _ = emit_debug_progress(
+            &app,
+            &session,
+            Some("patch_review_card"),
+            Some("patch_operations_required"),
+        )
+        .await;
         return Ok(CommandResponse::err(
             "Debug patch approval requires executable patch operations".to_string(),
         ));
@@ -2797,7 +3118,8 @@ pub async fn approve_debug_patch(
             session.state.phase = DebugLifecyclePhase::PatchReview.as_str().to_string();
             session.state.pending_prompt = Some(error.clone());
             session.updated_at = now_rfc3339();
-            if let Err(materialize_error) = materialize_debug_artifacts(state.inner(), &mut session) {
+            if let Err(materialize_error) = materialize_debug_artifacts(state.inner(), &mut session)
+            {
                 return Ok(CommandResponse::err(materialize_error));
             }
             if let Err(store_error) = state.store_session_snapshot(session.clone()).await {
@@ -2820,15 +3142,20 @@ pub async fn approve_debug_patch(
                 "approve_debug_patch_missing_project",
             )
             .await;
-            let _ = emit_debug_progress(&app, &session, Some("patch_review_card"), Some("patch_project_required")).await;
+            let _ = emit_debug_progress(
+                &app,
+                &session,
+                Some("patch_review_card"),
+                Some("patch_project_required"),
+            )
+            .await;
             return Ok(CommandResponse::err(error));
         }
     };
 
     session.state.phase = DebugLifecyclePhase::Patching.as_str().to_string();
-    session.state.pending_prompt = Some(
-        "Applying the approved patch and preparing verification artifacts.".to_string(),
-    );
+    session.state.pending_prompt =
+        Some("Applying the approved patch and preparing verification artifacts.".to_string());
     session.updated_at = now_rfc3339();
     if let Err(error) = materialize_debug_artifacts(state.inner(), &mut session) {
         return Ok(CommandResponse::err(error));
@@ -2836,13 +3163,30 @@ pub async fn approve_debug_patch(
     if let Err(error) = state.store_session_snapshot(session.clone()).await {
         return Ok(CommandResponse::err(error));
     }
-    let linked_sessions =
-        match sync_debug_kernel_snapshot(kernel_state.inner(), &session, Some(WorkflowStatus::Active)).await {
-            Ok(value) => value,
-            Err(error) => return Ok(CommandResponse::err(error)),
-        };
-    emit_kernel_updates_for_linked_sessions(&app, kernel_state.inner(), &linked_sessions, "approve_debug_patch_patching").await;
-    let _ = emit_debug_progress(&app, &session, Some("patch_review_card"), Some("debug_patching")).await;
+    let linked_sessions = match sync_debug_kernel_snapshot(
+        kernel_state.inner(),
+        &session,
+        Some(WorkflowStatus::Active),
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => return Ok(CommandResponse::err(error)),
+    };
+    emit_kernel_updates_for_linked_sessions(
+        &app,
+        kernel_state.inner(),
+        &linked_sessions,
+        "approve_debug_patch_patching",
+    )
+    .await;
+    let _ = emit_debug_progress(
+        &app,
+        &session,
+        Some("patch_review_card"),
+        Some("debug_patching"),
+    )
+    .await;
 
     let tracker_session_id = session
         .kernel_session_id
@@ -2883,7 +3227,8 @@ pub async fn approve_debug_patch(
                 metadata: serde_json::Map::new(),
             });
             session.updated_at = now_rfc3339();
-            if let Err(materialize_error) = materialize_debug_artifacts(state.inner(), &mut session) {
+            if let Err(materialize_error) = materialize_debug_artifacts(state.inner(), &mut session)
+            {
                 return Ok(CommandResponse::err(materialize_error));
             }
             if let Err(store_error) = state.store_session_snapshot(session.clone()).await {
@@ -2906,7 +3251,13 @@ pub async fn approve_debug_patch(
                 "approve_debug_patch_apply_failed",
             )
             .await;
-            let _ = emit_debug_progress(&app, &session, Some("patch_review_card"), Some("debug_patch_apply_failed")).await;
+            let _ = emit_debug_progress(
+                &app,
+                &session,
+                Some("patch_review_card"),
+                Some("debug_patch_apply_failed"),
+            )
+            .await;
             return Ok(CommandResponse::err(error));
         }
     };
@@ -2914,7 +3265,8 @@ pub async fn approve_debug_patch(
     session.state.phase = DebugLifecyclePhase::Verifying.as_str().to_string();
     session.state.pending_approval = None;
     session.state.pending_prompt = Some(
-        "Running verification against the approved patch and collecting final artifacts.".to_string(),
+        "Running verification against the approved patch and collecting final artifacts."
+            .to_string(),
     );
     let mut patch_metadata = serde_json::Map::new();
     patch_metadata.insert(
@@ -2923,7 +3275,9 @@ pub async fn approve_debug_patch(
     );
     patch_metadata.insert(
         "operationCount".to_string(),
-        serde_json::Value::Number(serde_json::Number::from(patch_report.operation_count as u64)),
+        serde_json::Value::Number(serde_json::Number::from(
+            patch_report.operation_count as u64,
+        )),
     );
     patch_metadata.insert(
         "projectPath".to_string(),
@@ -2957,7 +3311,11 @@ pub async fn approve_debug_patch(
     });
     session.state.verification_report = Some(build_verification_report(&session));
     if let Some(report) = session.state.verification_report.as_mut() {
-        if !report.artifacts.iter().any(|artifact| artifact == &patch_report_artifact_path) {
+        if !report
+            .artifacts
+            .iter()
+            .any(|artifact| artifact == &patch_report_artifact_path)
+        {
             report.artifacts.push(patch_report_artifact_path.clone());
         }
     }
@@ -2968,13 +3326,30 @@ pub async fn approve_debug_patch(
     if let Err(error) = state.store_session_snapshot(session.clone()).await {
         return Ok(CommandResponse::err(error));
     }
-    let linked_sessions =
-        match sync_debug_kernel_snapshot(kernel_state.inner(), &session, Some(WorkflowStatus::Active)).await {
-            Ok(value) => value,
-            Err(error) => return Ok(CommandResponse::err(error)),
-        };
-    emit_kernel_updates_for_linked_sessions(&app, kernel_state.inner(), &linked_sessions, "approve_debug_patch_verifying").await;
-    let _ = emit_debug_progress(&app, &session, Some("verification_card"), Some("debug_verifying")).await;
+    let linked_sessions = match sync_debug_kernel_snapshot(
+        kernel_state.inner(),
+        &session,
+        Some(WorkflowStatus::Active),
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => return Ok(CommandResponse::err(error)),
+    };
+    emit_kernel_updates_for_linked_sessions(
+        &app,
+        kernel_state.inner(),
+        &linked_sessions,
+        "approve_debug_patch_verifying",
+    )
+    .await;
+    let _ = emit_debug_progress(
+        &app,
+        &session,
+        Some("verification_card"),
+        Some("debug_verifying"),
+    )
+    .await;
 
     session.state.phase = DebugLifecyclePhase::Completed.as_str().to_string();
     session.state.pending_prompt = None;
@@ -2987,13 +3362,30 @@ pub async fn approve_debug_patch(
         return Ok(CommandResponse::err(error));
     }
 
-    let linked_sessions =
-        match sync_debug_kernel_snapshot(kernel_state.inner(), &session, Some(WorkflowStatus::Completed)).await {
-            Ok(value) => value,
-            Err(error) => return Ok(CommandResponse::err(error)),
-        };
-    emit_kernel_updates_for_linked_sessions(&app, kernel_state.inner(), &linked_sessions, "approve_debug_patch").await;
-    let _ = emit_debug_progress(&app, &session, Some("verification_card"), Some("debug_completed")).await;
+    let linked_sessions = match sync_debug_kernel_snapshot(
+        kernel_state.inner(),
+        &session,
+        Some(WorkflowStatus::Completed),
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => return Ok(CommandResponse::err(error)),
+    };
+    emit_kernel_updates_for_linked_sessions(
+        &app,
+        kernel_state.inner(),
+        &linked_sessions,
+        "approve_debug_patch",
+    )
+    .await;
+    let _ = emit_debug_progress(
+        &app,
+        &session,
+        Some("verification_card"),
+        Some("debug_completed"),
+    )
+    .await;
 
     Ok(CommandResponse::ok(session))
 }
@@ -3005,7 +3397,10 @@ pub async fn reject_debug_patch(
     kernel_state: tauri::State<'_, WorkflowKernelState>,
     request: RejectDebugPatchRequest,
 ) -> Result<CommandResponse<DebugModeSession>, String> {
-    let Some(mut session) = (match state.get_or_load_session_snapshot(&request.session_id).await {
+    let Some(mut session) = (match state
+        .get_or_load_session_snapshot(&request.session_id)
+        .await
+    {
         Ok(value) => value,
         Err(error) => return Ok(CommandResponse::err(error)),
     }) else {
@@ -3043,13 +3438,30 @@ pub async fn reject_debug_patch(
         return Ok(CommandResponse::err(error));
     }
 
-    let linked_sessions =
-        match sync_debug_kernel_snapshot(kernel_state.inner(), &session, Some(WorkflowStatus::Active)).await {
-            Ok(value) => value,
-            Err(error) => return Ok(CommandResponse::err(error)),
-        };
-    emit_kernel_updates_for_linked_sessions(&app, kernel_state.inner(), &linked_sessions, "reject_debug_patch").await;
-    let _ = emit_debug_progress(&app, &session, Some("hypothesis_card"), Some("patch_rejected")).await;
+    let linked_sessions = match sync_debug_kernel_snapshot(
+        kernel_state.inner(),
+        &session,
+        Some(WorkflowStatus::Active),
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => return Ok(CommandResponse::err(error)),
+    };
+    emit_kernel_updates_for_linked_sessions(
+        &app,
+        kernel_state.inner(),
+        &linked_sessions,
+        "reject_debug_patch",
+    )
+    .await;
+    let _ = emit_debug_progress(
+        &app,
+        &session,
+        Some("hypothesis_card"),
+        Some("patch_rejected"),
+    )
+    .await;
 
     Ok(CommandResponse::ok(session))
 }
@@ -3061,7 +3473,10 @@ pub async fn retry_debug_phase(
     kernel_state: tauri::State<'_, WorkflowKernelState>,
     request: RetryDebugPhaseRequest,
 ) -> Result<CommandResponse<DebugModeSession>, String> {
-    let Some(mut session) = (match state.get_or_load_session_snapshot(&request.session_id).await {
+    let Some(mut session) = (match state
+        .get_or_load_session_snapshot(&request.session_id)
+        .await
+    {
         Ok(value) => value,
         Err(error) => return Ok(CommandResponse::err(error)),
     }) else {
@@ -3079,9 +3494,8 @@ pub async fn retry_debug_phase(
             "Review the leading hypotheses or attach evidence that rules one out.".to_string(),
         );
     } else if request.phase == DebugLifecyclePhase::IdentifyingRootCause.as_str() {
-        session.state.pending_prompt = Some(
-            "Root cause is isolated. Confirm it or continue gathering evidence.".to_string(),
-        );
+        session.state.pending_prompt =
+            Some("Root cause is isolated. Confirm it or continue gathering evidence.".to_string());
     } else if request.phase == DebugLifecyclePhase::Verifying.as_str() {
         session.state.verification_report = Some(build_verification_report(&session));
         session.state.pending_prompt = Some(
@@ -3096,12 +3510,23 @@ pub async fn retry_debug_phase(
         return Ok(CommandResponse::err(error));
     }
 
-    let linked_sessions =
-        match sync_debug_kernel_snapshot(kernel_state.inner(), &session, Some(WorkflowStatus::Active)).await {
-            Ok(value) => value,
-            Err(error) => return Ok(CommandResponse::err(error)),
-        };
-    emit_kernel_updates_for_linked_sessions(&app, kernel_state.inner(), &linked_sessions, "retry_debug_phase").await;
+    let linked_sessions = match sync_debug_kernel_snapshot(
+        kernel_state.inner(),
+        &session,
+        Some(WorkflowStatus::Active),
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => return Ok(CommandResponse::err(error)),
+    };
+    emit_kernel_updates_for_linked_sessions(
+        &app,
+        kernel_state.inner(),
+        &linked_sessions,
+        "retry_debug_phase",
+    )
+    .await;
     let _ = emit_debug_progress(&app, &session, None, Some("debug_phase_retried")).await;
     Ok(CommandResponse::ok(session))
 }
@@ -3113,7 +3538,10 @@ pub async fn attach_debug_evidence(
     kernel_state: tauri::State<'_, WorkflowKernelState>,
     request: AttachDebugEvidenceRequest,
 ) -> Result<CommandResponse<DebugModeSession>, String> {
-    let Some(mut session) = (match state.get_or_load_session_snapshot(&request.session_id).await {
+    let Some(mut session) = (match state
+        .get_or_load_session_snapshot(&request.session_id)
+        .await
+    {
         Ok(value) => value,
         Err(error) => return Ok(CommandResponse::err(error)),
     }) else {
@@ -3132,7 +3560,10 @@ pub async fn attach_debug_evidence(
     merge_repro_steps(&mut session.state, &request.summary);
     merge_unique_strings(
         &mut session.state.affected_surface,
-        infer_affected_surface_from_text(&request.summary, session.state.target_url_or_entry.as_deref()),
+        infer_affected_surface_from_text(
+            &request.summary,
+            session.state.target_url_or_entry.as_deref(),
+        ),
     );
     recompute_debug_analysis(&mut session);
     session.updated_at = now_rfc3339();
@@ -3142,13 +3573,30 @@ pub async fn attach_debug_evidence(
     if let Err(error) = state.store_session_snapshot(session.clone()).await {
         return Ok(CommandResponse::err(error));
     }
-    let linked_sessions =
-        match sync_debug_kernel_snapshot(kernel_state.inner(), &session, Some(WorkflowStatus::Active)).await {
-            Ok(value) => value,
-            Err(error) => return Ok(CommandResponse::err(error)),
-        };
-    emit_kernel_updates_for_linked_sessions(&app, kernel_state.inner(), &linked_sessions, "attach_debug_evidence").await;
-    let _ = emit_debug_progress(&app, &session, Some("evidence_card"), Some("debug_evidence_attached")).await;
+    let linked_sessions = match sync_debug_kernel_snapshot(
+        kernel_state.inner(),
+        &session,
+        Some(WorkflowStatus::Active),
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => return Ok(CommandResponse::err(error)),
+    };
+    emit_kernel_updates_for_linked_sessions(
+        &app,
+        kernel_state.inner(),
+        &linked_sessions,
+        "attach_debug_evidence",
+    )
+    .await;
+    let _ = emit_debug_progress(
+        &app,
+        &session,
+        Some("evidence_card"),
+        Some("debug_evidence_attached"),
+    )
+    .await;
     Ok(CommandResponse::ok(session))
 }
 
@@ -3158,7 +3606,10 @@ pub async fn seed_debug_fix_proposal(
     kernel_state: tauri::State<'_, WorkflowKernelState>,
     request: SeedDebugFixProposalRequest,
 ) -> Result<CommandResponse<DebugModeSession>, String> {
-    let Some(mut session) = (match state.get_or_load_session_snapshot(&request.session_id).await {
+    let Some(mut session) = (match state
+        .get_or_load_session_snapshot(&request.session_id)
+        .await
+    {
         Ok(value) => value,
         Err(error) => return Ok(CommandResponse::err(error)),
     }) else {
@@ -3169,7 +3620,8 @@ pub async fn seed_debug_fix_proposal(
     session.state.pending_approval = Some(DebugPendingApproval {
         kind: "patch_review".to_string(),
         title: "Patch review required".to_string(),
-        description: "Review the proposed fix before applying any code or system changes.".to_string(),
+        description: "Review the proposed fix before applying any code or system changes."
+            .to_string(),
         required_actions: vec!["approve_patch".to_string(), "reject_patch".to_string()],
     });
     session.state.phase = DebugLifecyclePhase::PatchReview.as_str().to_string();
@@ -3182,7 +3634,8 @@ pub async fn seed_debug_fix_proposal(
         return Ok(CommandResponse::err(error));
     }
     if let Err(error) =
-        sync_debug_kernel_snapshot(kernel_state.inner(), &session, Some(WorkflowStatus::Active)).await
+        sync_debug_kernel_snapshot(kernel_state.inner(), &session, Some(WorkflowStatus::Active))
+            .await
     {
         return Ok(CommandResponse::err(error));
     }
@@ -3208,7 +3661,13 @@ pub async fn fetch_debug_report(
             .verification_report
             .as_ref()
             .map(|report| report.summary.clone())
-            .or_else(|| session.state.fix_proposal.as_ref().map(|proposal| proposal.summary.clone()))
+            .or_else(|| {
+                session
+                    .state
+                    .fix_proposal
+                    .as_ref()
+                    .map(|proposal| proposal.summary.clone())
+            })
             .unwrap_or_else(|| session.state.symptom_summary.clone()),
         root_cause_conclusion: session
             .state
@@ -3266,7 +3725,10 @@ pub async fn load_debug_artifact(
 
     let resolved_artifact = PathBuf::from(artifact_path.trim());
     let known_artifacts = collect_debug_artifact_paths(state.inner(), &session);
-    if !known_artifacts.iter().any(|candidate| candidate == &resolved_artifact) {
+    if !known_artifacts
+        .iter()
+        .any(|candidate| candidate == &resolved_artifact)
+    {
         return Ok(CommandResponse::err(
             "Debug artifact is not registered for this session".to_string(),
         ));
@@ -3290,7 +3752,10 @@ pub async fn load_debug_artifact(
             )))
         }
     };
-    Ok(CommandResponse::ok(DebugArtifactContent { artifact: descriptor, data }))
+    Ok(CommandResponse::ok(DebugArtifactContent {
+        artifact: descriptor,
+        data,
+    }))
 }
 
 #[tauri::command]
@@ -3323,7 +3788,12 @@ pub async fn write_debug_artifact(
         .filter(|value| !value.trim().is_empty())
         .unwrap_or("json");
     let artifact_name = format!("{}.{}", sanitize_artifact_slug(base_name), extension);
-    let artifact_path = write_debug_artifact_file(state.inner(), &session.session_id, &artifact_name, request.content)?;
+    let artifact_path = write_debug_artifact_file(
+        state.inner(),
+        &session.session_id,
+        &artifact_name,
+        request.content,
+    )?;
     let descriptor = build_debug_artifact_descriptor(Path::new(&artifact_path))?;
     Ok(CommandResponse::ok(descriptor))
 }
@@ -3333,11 +3803,13 @@ pub async fn get_debug_session_snapshot(
     state: tauri::State<'_, DebugModeState>,
     session_id: String,
 ) -> Result<CommandResponse<DebugModeSession>, String> {
-    Ok(match state.get_or_load_session_snapshot(&session_id).await {
-        Ok(Some(session)) => CommandResponse::ok(session),
-        Ok(None) => CommandResponse::err("Debug session not found"),
-        Err(error) => CommandResponse::err(error),
-    })
+    Ok(
+        match state.get_or_load_session_snapshot(&session_id).await {
+            Ok(Some(session)) => CommandResponse::ok(session),
+            Ok(None) => CommandResponse::err("Debug session not found"),
+            Err(error) => CommandResponse::err(error),
+        },
+    )
 }
 
 #[tauri::command]
@@ -3359,12 +3831,23 @@ pub async fn cancel_debug_operation(
     if let Err(error) = state.store_session_snapshot(session.clone()).await {
         return Ok(CommandResponse::err(error));
     }
-    let linked_sessions =
-        match sync_debug_kernel_snapshot(kernel_state.inner(), &session, Some(WorkflowStatus::Cancelled)).await {
-            Ok(value) => value,
-            Err(error) => return Ok(CommandResponse::err(error)),
-        };
-    emit_kernel_updates_for_linked_sessions(&app, kernel_state.inner(), &linked_sessions, "cancel_debug_operation").await;
+    let linked_sessions = match sync_debug_kernel_snapshot(
+        kernel_state.inner(),
+        &session,
+        Some(WorkflowStatus::Cancelled),
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => return Ok(CommandResponse::err(error)),
+    };
+    emit_kernel_updates_for_linked_sessions(
+        &app,
+        kernel_state.inner(),
+        &linked_sessions,
+        "cancel_debug_operation",
+    )
+    .await;
     Ok(CommandResponse::ok(true))
 }
 
@@ -3422,7 +3905,8 @@ mod tests {
                 pending_approval: None,
                 verification_report: None,
                 pending_prompt: None,
-                capability_profile: crate::services::debug_mode::DebugCapabilityProfile::StagingLimited,
+                capability_profile:
+                    crate::services::debug_mode::DebugCapabilityProfile::StagingLimited,
                 tool_block_reason: None,
                 background_status: None,
                 last_checkpoint_id: None,
@@ -3439,7 +3923,10 @@ mod tests {
         let mut session = build_test_session();
 
         let mut console_metadata = serde_json::Map::new();
-        console_metadata.insert("stage".to_string(), serde_json::Value::String("verification".to_string()));
+        console_metadata.insert(
+            "stage".to_string(),
+            serde_json::Value::String("verification".to_string()),
+        );
         console_metadata.insert(
             "currentUrl".to_string(),
             serde_json::Value::String("https://example.test/checkout".to_string()),
@@ -3457,7 +3944,10 @@ mod tests {
         });
 
         let mut network_metadata = serde_json::Map::new();
-        network_metadata.insert("stage".to_string(), serde_json::Value::String("verification".to_string()));
+        network_metadata.insert(
+            "stage".to_string(),
+            serde_json::Value::String("verification".to_string()),
+        );
         network_metadata.insert(
             "currentUrl".to_string(),
             serde_json::Value::String("https://example.test/checkout".to_string()),
@@ -3498,7 +3988,8 @@ mod tests {
         fs::create_dir_all(project_root.join("src")).expect("create project dirs");
         let target_file = project_root.join("src/checkout.tsx");
         fs::write(&target_file, "const label = 'Pay now';\n").expect("seed file");
-        let canonical_project_root = fs::canonicalize(&project_root).expect("canonical project root");
+        let canonical_project_root =
+            fs::canonicalize(&project_root).expect("canonical project root");
 
         let storage = tempfile::tempdir().expect("storage");
         let state = DebugModeState::new_with_storage_dir(storage.path().to_path_buf());
@@ -3530,16 +4021,15 @@ mod tests {
             expected_occurrences: Some(1),
         }];
 
-        let (report, artifact_path) =
-            apply_debug_patch_operations(
-                &state,
-                &session,
-                &canonical_project_root,
-                &operations,
-                Some(&tracker),
-                Some(4),
-            )
-                .expect("apply patch");
+        let (report, artifact_path) = apply_debug_patch_operations(
+            &state,
+            &session,
+            &canonical_project_root,
+            &operations,
+            Some(&tracker),
+            Some(4),
+        )
+        .expect("apply patch");
 
         let updated = fs::read_to_string(&target_file).expect("read updated file");
         assert!(updated.contains("Confirm payment"));
@@ -3577,14 +4067,16 @@ mod tests {
         session.project_path = Some(project_root.to_string_lossy().to_string());
         session.state.project_path = session.project_path.clone();
         session.state.symptom_summary =
-            "Replace `/api/legacy-checkout` with `/api/checkout` in the failing checkout route.".to_string();
+            "Replace `/api/legacy-checkout` with `/api/checkout` in the failing checkout route."
+                .to_string();
         session.state.selected_root_cause = Some(RootCauseReport {
             conclusion: "The checkout route still calls the legacy endpoint.".to_string(),
             supporting_evidence_ids: vec![],
             contradictions: vec![],
             confidence: 0.82,
             impact_scope: vec!["src/checkout.tsx".to_string()],
-            recommended_direction: "Replace the legacy checkout endpoint with the current one.".to_string(),
+            recommended_direction: "Replace the legacy checkout endpoint with the current one."
+                .to_string(),
         });
         session.state.evidence_refs.push(DebugEvidenceRef {
             id: "source-map-1".to_string(),
@@ -3597,13 +4089,19 @@ mod tests {
                 let mut metadata = serde_json::Map::new();
                 metadata.insert(
                     "candidateFiles".to_string(),
-                    serde_json::Value::Array(vec![serde_json::Value::String("src/checkout.tsx".to_string())]),
+                    serde_json::Value::Array(vec![serde_json::Value::String(
+                        "src/checkout.tsx".to_string(),
+                    )]),
                 );
                 metadata
             },
         });
 
-        let root_cause = session.state.selected_root_cause.clone().expect("root cause");
+        let root_cause = session
+            .state
+            .selected_root_cause
+            .clone()
+            .expect("root cause");
         let proposal = derive_fix_proposal_for_session(&session, &root_cause);
 
         assert_eq!(proposal.patch_operations.len(), 1);
@@ -3644,7 +4142,10 @@ mod tests {
             supporting_evidence_ids: vec![],
             contradictions: vec![],
             confidence: 0.8,
-            impact_scope: vec!["src/checkout.tsx".to_string(), "src/summary.tsx".to_string()],
+            impact_scope: vec![
+                "src/checkout.tsx".to_string(),
+                "src/summary.tsx".to_string(),
+            ],
             recommended_direction: "Replace the legacy endpoint.".to_string(),
         });
         session.state.evidence_refs.push(DebugEvidenceRef {
@@ -3667,7 +4168,11 @@ mod tests {
             },
         });
 
-        let root_cause = session.state.selected_root_cause.clone().expect("root cause");
+        let root_cause = session
+            .state
+            .selected_root_cause
+            .clone()
+            .expect("root cause");
         let proposal = derive_fix_proposal_for_session(&session, &root_cause);
 
         assert_eq!(proposal.patch_operations.len(), 1);
@@ -3699,13 +4204,23 @@ mod tests {
             recommended_direction: "Update the rendered banner label.".to_string(),
         });
 
-        let root_cause = session.state.selected_root_cause.clone().expect("root cause");
+        let root_cause = session
+            .state
+            .selected_root_cause
+            .clone()
+            .expect("root cause");
         let proposal = derive_fix_proposal_for_session(&session, &root_cause);
 
         assert_eq!(proposal.patch_operations.len(), 1);
         assert_eq!(proposal.patch_operations[0].file_path, "src/banner.tsx");
-        assert_eq!(proposal.patch_operations[0].find_text.as_deref(), Some("旧文案"));
-        assert_eq!(proposal.patch_operations[0].replace_text.as_deref(), Some("新文案"));
+        assert_eq!(
+            proposal.patch_operations[0].find_text.as_deref(),
+            Some("旧文案")
+        );
+        assert_eq!(
+            proposal.patch_operations[0].replace_text.as_deref(),
+            Some("新文案")
+        );
     }
 
     #[test]
@@ -3722,8 +4237,10 @@ mod tests {
         let mut session = build_test_session();
         session.project_path = Some(project_root.to_string_lossy().to_string());
         session.state.project_path = session.project_path.clone();
-        session.state.actual_behavior =
-            Some("Console shows TypeError: Cannot read properties of undefined (reading 'map').".to_string());
+        session.state.actual_behavior = Some(
+            "Console shows TypeError: Cannot read properties of undefined (reading 'map')."
+                .to_string(),
+        );
         session.state.selected_root_cause = Some(RootCauseReport {
             conclusion: "Orders renders before items is initialized.".to_string(),
             supporting_evidence_ids: vec![],
@@ -3752,13 +4269,19 @@ mod tests {
                 let mut metadata = serde_json::Map::new();
                 metadata.insert(
                     "candidateFiles".to_string(),
-                    serde_json::Value::Array(vec![serde_json::Value::String("src/orders.tsx".to_string())]),
+                    serde_json::Value::Array(vec![serde_json::Value::String(
+                        "src/orders.tsx".to_string(),
+                    )]),
                 );
                 metadata
             },
         });
 
-        let root_cause = session.state.selected_root_cause.clone().expect("root cause");
+        let root_cause = session
+            .state
+            .selected_root_cause
+            .clone()
+            .expect("root cause");
         let proposal = derive_fix_proposal_for_session(&session, &root_cause);
         let operation = proposal
             .patch_operations
@@ -3768,7 +4291,10 @@ mod tests {
 
         assert_eq!(operation.file_path, "src/orders.tsx");
         assert_eq!(operation.find_text.as_deref(), Some("items.map("));
-        assert_eq!(operation.replace_text.as_deref(), Some("(items ?? []).map("));
+        assert_eq!(
+            operation.replace_text.as_deref(),
+            Some("(items ?? []).map(")
+        );
     }
 
     #[test]
@@ -3785,8 +4311,10 @@ mod tests {
         let mut session = build_test_session();
         session.project_path = Some(project_root.to_string_lossy().to_string());
         session.state.project_path = session.project_path.clone();
-        session.state.actual_behavior =
-            Some("Console shows TypeError: Cannot read properties of undefined (reading 'map').".to_string());
+        session.state.actual_behavior = Some(
+            "Console shows TypeError: Cannot read properties of undefined (reading 'map')."
+                .to_string(),
+        );
         session.state.selected_root_cause = Some(RootCauseReport {
             conclusion: "Orders renders before items is initialized.".to_string(),
             supporting_evidence_ids: vec![],
@@ -3815,13 +4343,19 @@ mod tests {
                 let mut metadata = serde_json::Map::new();
                 metadata.insert(
                     "candidateFiles".to_string(),
-                    serde_json::Value::Array(vec![serde_json::Value::String("src/orders.tsx".to_string())]),
+                    serde_json::Value::Array(vec![serde_json::Value::String(
+                        "src/orders.tsx".to_string(),
+                    )]),
                 );
                 metadata
             },
         });
 
-        let root_cause = session.state.selected_root_cause.clone().expect("root cause");
+        let root_cause = session
+            .state
+            .selected_root_cause
+            .clone()
+            .expect("root cause");
         let proposal = derive_fix_proposal_for_session(&session, &root_cause);
         let operation = proposal
             .patch_operations
@@ -3848,8 +4382,10 @@ mod tests {
         let mut session = build_test_session();
         session.project_path = Some(project_root.to_string_lossy().to_string());
         session.state.project_path = session.project_path.clone();
-        session.state.actual_behavior =
-            Some("Console shows TypeError: Cannot read properties of undefined (reading 'map').".to_string());
+        session.state.actual_behavior = Some(
+            "Console shows TypeError: Cannot read properties of undefined (reading 'map')."
+                .to_string(),
+        );
         session.state.selected_root_cause = Some(RootCauseReport {
             conclusion: "Orders renders before items is initialized.".to_string(),
             supporting_evidence_ids: vec![],
@@ -3878,13 +4414,19 @@ mod tests {
                 let mut metadata = serde_json::Map::new();
                 metadata.insert(
                     "candidateFiles".to_string(),
-                    serde_json::Value::Array(vec![serde_json::Value::String("src/orders.tsx".to_string())]),
+                    serde_json::Value::Array(vec![serde_json::Value::String(
+                        "src/orders.tsx".to_string(),
+                    )]),
                 );
                 metadata
             },
         });
 
-        let root_cause = session.state.selected_root_cause.clone().expect("root cause");
+        let root_cause = session
+            .state
+            .selected_root_cause
+            .clone()
+            .expect("root cause");
         let proposal = derive_fix_proposal_for_session(&session, &root_cause);
         let operation = proposal
             .patch_operations
@@ -3917,15 +4459,19 @@ mod tests {
         let mut session = build_test_session();
         session.project_path = Some(project_root.to_string_lossy().to_string());
         session.state.project_path = session.project_path.clone();
-        session.state.actual_behavior =
-            Some("Profile crashes with Cannot read properties of undefined (reading 'trim').".to_string());
+        session.state.actual_behavior = Some(
+            "Profile crashes with Cannot read properties of undefined (reading 'trim')."
+                .to_string(),
+        );
         session.state.selected_root_cause = Some(RootCauseReport {
-            conclusion: "The profile normalizer assumes customerName is always present.".to_string(),
+            conclusion: "The profile normalizer assumes customerName is always present."
+                .to_string(),
             supporting_evidence_ids: vec![],
             contradictions: vec![],
             confidence: 0.79,
             impact_scope: vec!["src/profile.ts".to_string()],
-            recommended_direction: "Add a fallback before trimming the customerName string.".to_string(),
+            recommended_direction: "Add a fallback before trimming the customerName string."
+                .to_string(),
         });
         session.state.evidence_refs.push(DebugEvidenceRef {
             id: "console-trim".to_string(),
@@ -3947,13 +4493,19 @@ mod tests {
                 let mut metadata = serde_json::Map::new();
                 metadata.insert(
                     "candidateFiles".to_string(),
-                    serde_json::Value::Array(vec![serde_json::Value::String("src/profile.ts".to_string())]),
+                    serde_json::Value::Array(vec![serde_json::Value::String(
+                        "src/profile.ts".to_string(),
+                    )]),
                 );
                 metadata
             },
         });
 
-        let root_cause = session.state.selected_root_cause.clone().expect("root cause");
+        let root_cause = session
+            .state
+            .selected_root_cause
+            .clone()
+            .expect("root cause");
         let proposal = derive_fix_proposal_for_session(&session, &root_cause);
         let operation = proposal
             .patch_operations
@@ -3963,11 +4515,15 @@ mod tests {
 
         assert_eq!(operation.file_path, "src/profile.ts");
         assert_eq!(operation.find_text.as_deref(), Some("customerName.trim("));
-        assert_eq!(operation.replace_text.as_deref(), Some("(customerName ?? '').trim("));
+        assert_eq!(
+            operation.replace_text.as_deref(),
+            Some("(customerName ?? '').trim(")
+        );
     }
 
     #[test]
-    fn derive_fix_proposal_generates_length_property_guard_patch_operation_without_replacement_instruction() {
+    fn derive_fix_proposal_generates_length_property_guard_patch_operation_without_replacement_instruction(
+    ) {
         let temp = tempfile::tempdir().expect("tempdir");
         let project_root = temp.path().join("project");
         fs::create_dir_all(project_root.join("src")).expect("create project dirs");
@@ -3980,23 +4536,28 @@ mod tests {
         let mut session = build_test_session();
         session.project_path = Some(project_root.to_string_lossy().to_string());
         session.state.project_path = session.project_path.clone();
-        session.state.symptom_summary = "Results page crashes when results is undefined.".to_string();
+        session.state.symptom_summary =
+            "Results page crashes when results is undefined.".to_string();
         session.state.actual_behavior =
             Some("TypeError: Cannot read properties of undefined (reading 'length')".to_string());
-        session.state.expected_behavior = Some("The results page should stay empty instead of crashing.".to_string());
+        session.state.expected_behavior =
+            Some("The results page should stay empty instead of crashing.".to_string());
         session.state.selected_root_cause = Some(RootCauseReport {
-            conclusion: "The results visibility check assumes results is always defined.".to_string(),
+            conclusion: "The results visibility check assumes results is always defined."
+                .to_string(),
             supporting_evidence_ids: vec![],
             contradictions: vec![],
             confidence: 0.8,
             impact_scope: vec!["src/results.ts".to_string()],
-            recommended_direction: "Guard the results length check with optional chaining and a fallback.".to_string(),
+            recommended_direction:
+                "Guard the results length check with optional chaining and a fallback.".to_string(),
         });
         session.state.evidence_refs.push(DebugEvidenceRef {
             id: "console-length".to_string(),
             kind: "console".to_string(),
             title: "Browser console".to_string(),
-            summary: "TypeError: Cannot read properties of undefined (reading 'length')".to_string(),
+            summary: "TypeError: Cannot read properties of undefined (reading 'length')"
+                .to_string(),
             source: "builtin_browser:console:baseline".to_string(),
             created_at: now_rfc3339(),
             metadata: serde_json::Map::new(),
@@ -4012,13 +4573,19 @@ mod tests {
                 let mut metadata = serde_json::Map::new();
                 metadata.insert(
                     "candidateFiles".to_string(),
-                    serde_json::Value::Array(vec![serde_json::Value::String("src/results.ts".to_string())]),
+                    serde_json::Value::Array(vec![serde_json::Value::String(
+                        "src/results.ts".to_string(),
+                    )]),
                 );
                 metadata
             },
         });
 
-        let root_cause = session.state.selected_root_cause.clone().expect("root cause");
+        let root_cause = session
+            .state
+            .selected_root_cause
+            .clone()
+            .expect("root cause");
         let proposal = derive_fix_proposal_for_session(&session, &root_cause);
         let operation = proposal
             .patch_operations
@@ -4028,6 +4595,9 @@ mod tests {
 
         assert_eq!(operation.file_path, "src/results.ts");
         assert_eq!(operation.find_text.as_deref(), Some("results.length"));
-        assert_eq!(operation.replace_text.as_deref(), Some("(results?.length ?? 0)"));
+        assert_eq!(
+            operation.replace_text.as_deref(),
+            Some("(results?.length ?? 0)")
+        );
     }
 }

@@ -2,9 +2,13 @@
 // Prevents additional console window on Windows in release
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use plan_cascade_desktop::app_shell::{
+    handle_run_event, handle_window_event, init_tray, AppShellState,
+};
 use plan_cascade_desktop::commands::analytics::AnalyticsState;
 use plan_cascade_desktop::commands::artifacts::ArtifactState;
 use plan_cascade_desktop::commands::claude_code::ClaudeCodeState;
+use plan_cascade_desktop::commands::debug_mode::DebugModeState;
 use plan_cascade_desktop::commands::file_changes::FileChangesState;
 use plan_cascade_desktop::commands::git::GitState;
 use plan_cascade_desktop::commands::guardrails::GuardrailState;
@@ -14,7 +18,6 @@ use plan_cascade_desktop::commands::mcp::McpRuntimeState;
 use plan_cascade_desktop::commands::permissions::PermissionState;
 use plan_cascade_desktop::commands::pipeline_execution::ExecutionRegistry;
 use plan_cascade_desktop::commands::plan_mode::PlanModeState;
-use plan_cascade_desktop::commands::debug_mode::DebugModeState;
 use plan_cascade_desktop::commands::plugins::PluginState;
 use plan_cascade_desktop::commands::remote::RemoteState;
 use plan_cascade_desktop::commands::spec_interview::SpecInterviewState;
@@ -22,7 +25,6 @@ use plan_cascade_desktop::commands::standalone::StandaloneState;
 use plan_cascade_desktop::commands::task_mode::TaskModeState;
 use plan_cascade_desktop::commands::webhook::WebhookState;
 use plan_cascade_desktop::commands::worktree::WorktreeState;
-use plan_cascade_desktop::app_shell::{handle_run_event, handle_window_event, init_tray, AppShellState};
 use plan_cascade_desktop::services::workflow_kernel::WorkflowKernelState;
 use plan_cascade_desktop::state::AppState;
 

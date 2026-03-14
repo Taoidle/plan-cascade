@@ -10,9 +10,9 @@ use super::command_router::{CommandRouter, HELP_TEXT};
 use super::response_mapper::ResponseMapper;
 use super::session_bridge::SessionBridge;
 use super::types::{
-    GatewayStatus, IncomingRemoteEvent, RemoteActionButton, RemoteActionCard, ReconnectConfig,
-    RemoteCommand, RemoteError, RemoteGatewayConfig, RemoteIncomingEventType,
-    RemoteUiMessage, RemoteWorkflowSession, RemoteWorkspaceEntry, TelegramAdapterConfig,
+    GatewayStatus, IncomingRemoteEvent, ReconnectConfig, RemoteActionButton, RemoteActionCard,
+    RemoteCommand, RemoteError, RemoteGatewayConfig, RemoteIncomingEventType, RemoteUiMessage,
+    RemoteWorkflowSession, RemoteWorkspaceEntry, TelegramAdapterConfig,
 };
 use super::workflow_facade::{RemoteWorkflowExecution, RemoteWorkflowFacade};
 use crate::commands::standalone::normalize_provider_name;
@@ -23,17 +23,19 @@ use crate::services::task_mode::context_provider::ContextSourceConfig;
 use crate::services::webhook::integration::{dispatch_on_remote_event, format_remote_source};
 use crate::services::webhook::types::WebhookEventType;
 use crate::services::webhook::WebhookService;
-use crate::services::workflow_kernel::{HandoffContextBundle, UserInputIntent, UserInputIntentType, WorkflowKernelState, WorkflowMode};
+use crate::services::workflow_kernel::{
+    HandoffContextBundle, UserInputIntent, UserInputIntentType, WorkflowKernelState, WorkflowMode,
+};
 use crate::storage::{ConfigService, Database};
 use rusqlite::params;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use tauri::AppHandle;
 use tokio::sync::{mpsc, RwLock};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
-use tauri::AppHandle;
 
 /// Remote Gateway Service managing adapter lifecycle and message processing.
 #[derive(Clone)]
@@ -376,10 +378,7 @@ impl RemoteGatewayService {
                     let fallback_session = session.clone();
                     match facade.switch_mode(session, mode).await {
                         Ok(updated) => (updated, format!("Switched to {:?} mode.", mode)),
-                        Err(error) => (
-                            fallback_session,
-                            format!("Failed to switch mode: {error}"),
-                        ),
+                        Err(error) => (fallback_session, format!("Failed to switch mode: {error}")),
                     }
                 } else {
                     let mut fallback = session;
@@ -396,9 +395,10 @@ impl RemoteGatewayService {
                             }
                         }
                     }
-                    if let (Some(kernel), false) =
-                        (workflow_kernel.as_ref(), fallback.kernel_session_id.is_empty())
-                    {
+                    if let (Some(kernel), false) = (
+                        workflow_kernel.as_ref(),
+                        fallback.kernel_session_id.is_empty(),
+                    ) {
                         let _ = kernel
                             .transition_mode(&fallback.kernel_session_id, mode, None)
                             .await;
@@ -411,12 +411,15 @@ impl RemoteGatewayService {
                     .write()
                     .await
                     .insert(msg.chat_id, updated_session);
-                RemoteUiMessage::ActionCard(Self::render_status_card(
-                    workflow_facade,
-                    workflow_sessions,
-                    msg.chat_id,
-                    Some(summary),
-                ).await)
+                RemoteUiMessage::ActionCard(
+                    Self::render_status_card(
+                        workflow_facade,
+                        workflow_sessions,
+                        msg.chat_id,
+                        Some(summary),
+                    )
+                    .await,
+                )
             }
             RemoteCommand::PlanGenerate
             | RemoteCommand::PlanApprove
@@ -491,25 +494,33 @@ impl RemoteGatewayService {
                         };
                         {
                             let mut sessions = workflow_sessions.write().await;
-                            let session = sessions
-                                .entry(msg.chat_id)
-                                .or_insert_with(|| Self::new_workflow_session(msg, &current_config));
+                            let session = sessions.entry(msg.chat_id).or_insert_with(|| {
+                                Self::new_workflow_session(msg, &current_config)
+                            });
                             session.kernel_session_id =
                                 kernel_session_id.unwrap_or_else(|| id.clone());
                             session.project_path = Some(resolved_project_path.clone());
                             session.workspace_label = workspace_label;
                             session.provider = resolved_provider.clone();
                             session.model = resolved_model.clone();
-                            session.linked_mode_sessions.insert("chat".to_string(), id.clone());
+                            session
+                                .linked_mode_sessions
+                                .insert("chat".to_string(), id.clone());
                             session.active_mode = WorkflowMode::Chat;
                             session.updated_at = chrono::Utc::now().to_rfc3339();
                         }
-                        RemoteUiMessage::ActionCard(Self::render_status_card(
-                            workflow_facade,
-                            workflow_sessions,
-                            msg.chat_id,
-                            Some(ResponseMapper::format_session_created(&id, &resolved_project_path)),
-                        ).await)
+                        RemoteUiMessage::ActionCard(
+                            Self::render_status_card(
+                                workflow_facade,
+                                workflow_sessions,
+                                msg.chat_id,
+                                Some(ResponseMapper::format_session_created(
+                                    &id,
+                                    &resolved_project_path,
+                                )),
+                            )
+                            .await,
+                        )
                     }
                     Err(e) => RemoteUiMessage::PlainText(ResponseMapper::format_error(&e)),
                 }
@@ -524,7 +535,10 @@ impl RemoteGatewayService {
                 };
                 if current_remote_session.active_mode != WorkflowMode::Chat {
                     if let Some(facade) = workflow_facade {
-                        match facade.handle_text_input(current_remote_session, &content).await {
+                        match facade
+                            .handle_text_input(current_remote_session, &content)
+                            .await
+                        {
                             Ok(RemoteWorkflowExecution::Ui { session, message }) => {
                                 workflow_sessions.write().await.insert(msg.chat_id, session);
                                 message
@@ -532,18 +546,18 @@ impl RemoteGatewayService {
                             Ok(RemoteWorkflowExecution::ChatFallback(session)) => {
                                 workflow_sessions.write().await.insert(msg.chat_id, session);
                                 Self::send_chat_message(
-                                msg,
-                                &content,
-                                bridge,
-                                adapter.as_ref(),
-                                workflow_kernel,
-                                workflow_sessions,
-                                &current_gateway_config,
-                                &current_config,
-                                &mut should_dispatch_webhook,
-                                &mut webhook_event_type,
-                                &mut already_sent_by_bridge,
-                            )
+                                    msg,
+                                    &content,
+                                    bridge,
+                                    adapter.as_ref(),
+                                    workflow_kernel,
+                                    workflow_sessions,
+                                    &current_gateway_config,
+                                    &current_config,
+                                    &mut should_dispatch_webhook,
+                                    &mut webhook_event_type,
+                                    &mut already_sent_by_bridge,
+                                )
                                 .await
                             }
                             Err(error) => RemoteUiMessage::PlainText(format!("Error: {error}")),
@@ -580,7 +594,8 @@ impl RemoteGatewayService {
             RemoteCommand::SwitchSession { session_id } => {
                 match bridge.switch_session(msg.chat_id, &session_id).await {
                     Ok(()) => {
-                        if let Some(session) = workflow_sessions.write().await.get_mut(&msg.chat_id) {
+                        if let Some(session) = workflow_sessions.write().await.get_mut(&msg.chat_id)
+                        {
                             session
                                 .linked_mode_sessions
                                 .insert("chat".to_string(), session_id.clone());
@@ -591,12 +606,10 @@ impl RemoteGatewayService {
                     Err(e) => RemoteUiMessage::PlainText(ResponseMapper::format_error(&e)),
                 }
             }
-            RemoteCommand::Status => {
-                RemoteUiMessage::ActionCard(
-                    Self::render_status_card(workflow_facade, workflow_sessions, msg.chat_id, None)
-                        .await,
-                )
-            }
+            RemoteCommand::Status => RemoteUiMessage::ActionCard(
+                Self::render_status_card(workflow_facade, workflow_sessions, msg.chat_id, None)
+                    .await,
+            ),
             RemoteCommand::Cancel => match bridge.cancel_execution(msg.chat_id).await {
                 Ok(()) => {
                     should_dispatch_webhook = true;
@@ -660,17 +673,26 @@ impl RemoteGatewayService {
                     }
                 }
                 let status_text = bridge.get_status_text(msg.chat_id).await;
-                RemoteUiMessage::ActionCard(Self::render_status_card(
-                    workflow_facade,
-                    workflow_sessions,
-                    msg.chat_id,
-                    Some(format!("Resumed current remote session.\n\n{}", status_text)),
-                ).await)
+                RemoteUiMessage::ActionCard(
+                    Self::render_status_card(
+                        workflow_facade,
+                        workflow_sessions,
+                        msg.chat_id,
+                        Some(format!(
+                            "Resumed current remote session.\n\n{}",
+                            status_text
+                        )),
+                    )
+                    .await,
+                )
             }
             RemoteCommand::Artifacts => {
                 if let Some(facade) = workflow_facade {
-                    if let Some(session) = workflow_sessions.read().await.get(&msg.chat_id).cloned() {
-                        RemoteUiMessage::ActionCard(facade.render_artifacts_card(&session, None).await)
+                    if let Some(session) = workflow_sessions.read().await.get(&msg.chat_id).cloned()
+                    {
+                        RemoteUiMessage::ActionCard(
+                            facade.render_artifacts_card(&session, None).await,
+                        )
                     } else {
                         RemoteUiMessage::ActionCard(Self::build_artifacts_card())
                     }
@@ -913,7 +935,10 @@ impl RemoteGatewayService {
                 "workspacePath".to_string(),
                 serde_json::Value::String(path.clone()),
             );
-            if let Some(label) = workspace_label.as_ref().filter(|value| !value.trim().is_empty()) {
+            if let Some(label) = workspace_label
+                .as_ref()
+                .filter(|value| !value.trim().is_empty())
+            {
                 metadata.insert(
                     "workspaceLabel".to_string(),
                     serde_json::Value::String(label.clone()),
@@ -927,8 +952,13 @@ impl RemoteGatewayService {
         let session = workflow_kernel
             .open_session(Some(WorkflowMode::Chat), initial_context)
             .await?;
-        if let Some(label) = workspace_label.as_ref().filter(|value| !value.trim().is_empty()) {
-            let _ = workflow_kernel.rename_session(&session.session_id, label).await;
+        if let Some(label) = workspace_label
+            .as_ref()
+            .filter(|value| !value.trim().is_empty())
+        {
+            let _ = workflow_kernel
+                .rename_session(&session.session_id, label)
+                .await;
         }
         Ok(session.session_id)
     }
@@ -1002,27 +1032,30 @@ impl RemoteGatewayService {
                 .map(|cfg| cfg.default_provider.trim().to_string())
                 .filter(|value| !value.is_empty())
         });
-        let model_value = explicit_model.or_else(|| {
-            provider_value.as_deref().and_then(|provider_name| {
-                config.as_ref().and_then(|cfg| {
-                    let model = cfg.model_for_provider(provider_name);
-                    (!model.trim().is_empty()).then_some(model)
+        let model_value = explicit_model
+            .or_else(|| {
+                provider_value.as_deref().and_then(|provider_name| {
+                    config.as_ref().and_then(|cfg| {
+                        let model = cfg.model_for_provider(provider_name);
+                        (!model.trim().is_empty()).then_some(model)
+                    })
                 })
             })
-        })
-        .or_else(|| {
-            config
-                .as_ref()
-                .map(|cfg| cfg.default_model.trim().to_string())
-                .filter(|value| !value.is_empty())
-        });
+            .or_else(|| {
+                config
+                    .as_ref()
+                    .map(|cfg| cfg.default_model.trim().to_string())
+                    .filter(|value| !value.is_empty())
+            });
 
         (provider_value, model_value)
     }
 
     fn default_model_for_provider(provider: &str) -> Option<String> {
         let canonical = normalize_provider_name(provider)?;
-        let config = ConfigService::new().ok().map(|svc| svc.get_config_clone())?;
+        let config = ConfigService::new()
+            .ok()
+            .map(|svc| svc.get_config_clone())?;
         let model = config.model_for_provider(canonical);
         if !model.trim().is_empty() {
             return Some(model);
@@ -1062,7 +1095,11 @@ impl RemoteGatewayService {
             .and_then(|value| value.context_sources.as_ref())
             .map(Self::summarize_context)
             .unwrap_or_else(|| "Default".to_string());
-        let password = if config.require_password { "Enabled" } else { "Disabled" };
+        let password = if config.require_password {
+            "Enabled"
+        } else {
+            "Disabled"
+        };
         let auth_hint = if config.require_password {
             "Password gate is on. If this chat is not authenticated yet, send /auth <password> first."
         } else {
@@ -1226,9 +1263,21 @@ impl RemoteGatewayService {
             title: "Remote Session Status".to_string(),
             body,
             actions: vec![
-                RemoteActionButton { id: "remote:home".to_string(), label: "Home".to_string(), style: None },
-                RemoteActionButton { id: "remote:resume".to_string(), label: "Resume".to_string(), style: None },
-                RemoteActionButton { id: "remote:cancel".to_string(), label: "Cancel".to_string(), style: None },
+                RemoteActionButton {
+                    id: "remote:home".to_string(),
+                    label: "Home".to_string(),
+                    style: None,
+                },
+                RemoteActionButton {
+                    id: "remote:resume".to_string(),
+                    label: "Resume".to_string(),
+                    style: None,
+                },
+                RemoteActionButton {
+                    id: "remote:cancel".to_string(),
+                    label: "Cancel".to_string(),
+                    style: None,
+                },
             ],
             metadata: HashMap::new(),
             attachment_refs: Vec::new(),
@@ -1478,7 +1527,9 @@ impl RemoteGatewayService {
         });
     }
 
-    fn normalize_allowed_paths(paths: &[RemoteWorkspaceEntry]) -> Result<Vec<PathBuf>, RemoteError> {
+    fn normalize_allowed_paths(
+        paths: &[RemoteWorkspaceEntry],
+    ) -> Result<Vec<PathBuf>, RemoteError> {
         if paths.is_empty() {
             return Err(RemoteError::ConfigError(
                 "At least one allowed project root must be configured".to_string(),

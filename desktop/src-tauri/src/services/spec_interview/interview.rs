@@ -1926,9 +1926,15 @@ Otherwise, respond with ONLY the JSON object. No formatting, no preamble, no mar
             "BA: generating next question via LLM"
         );
 
-        let response = send_message_tracked(provider.as_ref(), messages, Some(system_prompt), vec![], options)
-            .await
-            .map_err(|e| AppError::command(format!("BA LLM call failed: {}", e)))?;
+        let response = send_message_tracked(
+            provider.as_ref(),
+            messages,
+            Some(system_prompt),
+            vec![],
+            options,
+        )
+        .await
+        .map_err(|e| AppError::command(format!("BA LLM call failed: {}", e)))?;
 
         let response_text = response
             .content
@@ -2100,7 +2106,8 @@ Otherwise, respond with ONLY the JSON object. No formatting, no preamble, no mar
             ..Default::default()
         };
 
-        match send_message_tracked(provider.as_ref(), messages, Some(system), vec![], options).await {
+        match send_message_tracked(provider.as_ref(), messages, Some(system), vec![], options).await
+        {
             Ok(response) => {
                 let content = response
                     .content
@@ -2188,8 +2195,8 @@ Otherwise, respond with ONLY the JSON object. No formatting, no preamble, no mar
             vec![],
             options.clone(),
         )
-            .await
-            .map_err(|e| AppError::command(format!("Spec extraction failed: {}", e)))?;
+        .await
+        .map_err(|e| AppError::command(format!("Spec extraction failed: {}", e)))?;
 
         let response_text = response
             .content
@@ -2225,10 +2232,8 @@ Otherwise, respond with ONLY the JSON object. No formatting, no preamble, no mar
                     vec![],
                     options,
                 )
-                    .await
-                    .map_err(|e| {
-                        AppError::command(format!("Spec extraction retry failed: {}", e))
-                    })?;
+                .await
+                .map_err(|e| AppError::command(format!("Spec extraction retry failed: {}", e)))?;
 
                 let retry_text = retry_response
                     .content

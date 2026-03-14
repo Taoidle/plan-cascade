@@ -259,7 +259,9 @@ fn sanitize_conversation_history(history: &[ConversationTurnInput]) -> Vec<Conve
     history
         .iter()
         .filter_map(|turn| {
-            let assistant = strip_tool_call_artifacts(&turn.assistant).trim().to_string();
+            let assistant = strip_tool_call_artifacts(&turn.assistant)
+                .trim()
+                .to_string();
             if assistant.is_empty() {
                 return None;
             }
@@ -399,8 +401,8 @@ pub async fn generate_prd_with_llm(
         vec![], // No tools needed for PRD generation
         LlmRequestOptions::default(),
     )
-        .await
-        .map_err(|e| format!("LLM request failed: {}", e))?;
+    .await
+    .map_err(|e| format!("LLM request failed: {}", e))?;
 
     let response_text = extract_response_text(&response).map_err(|e| {
         debug!(
@@ -434,8 +436,8 @@ pub async fn generate_prd_with_llm(
                 vec![],
                 LlmRequestOptions::default(),
             )
-                .await
-                .map_err(|e| format!("LLM retry request failed: {}", e))?;
+            .await
+            .map_err(|e| format!("LLM retry request failed: {}", e))?;
 
             let retry_text = extract_response_text(&retry_response)?;
 
@@ -1005,11 +1007,9 @@ Hope this helps!"#;
 
         let result = parse_stories_from_response(response);
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .contains("tool-call output instead of the required PRD JSON stories array")
-        );
+        assert!(result
+            .unwrap_err()
+            .contains("tool-call output instead of the required PRD JSON stories array"));
     }
 
     #[test]

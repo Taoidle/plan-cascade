@@ -212,7 +212,9 @@ impl SkillGeneratorStore {
              WHERE id = ?4",
             params![
                 review_status_to_sql(&decision),
-                review_notes.map(|value| value.trim()).filter(|value| !value.is_empty()),
+                review_notes
+                    .map(|value| value.trim())
+                    .filter(|value| !value.is_empty()),
                 enabled,
                 id,
             ],
@@ -572,7 +574,13 @@ mod tests {
             .unwrap();
 
         assert_eq!(saved.id, duplicate.id);
-        assert_eq!(store.list_generated_skills("/test/project", true).unwrap().len(), 1);
+        assert_eq!(
+            store
+                .list_generated_skills("/test/project", true)
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[test]

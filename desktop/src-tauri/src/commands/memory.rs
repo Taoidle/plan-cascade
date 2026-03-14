@@ -14,13 +14,12 @@ use crate::services::memory::query_policy_v2::{memory_query_tuning_v2, MemoryQue
 use crate::services::memory::query_v2::{
     list_memory_entries_v2 as list_memory_entries_unified_v2,
     list_pending_memory_candidates_v2 as list_pending_memory_candidates_unified_v2,
-    memory_stats_v2 as memory_stats_unified_v2,
-    purge_memories_v2 as purge_memories_unified_v2,
+    memory_stats_v2 as memory_stats_unified_v2, purge_memories_v2 as purge_memories_unified_v2,
     query_memory_entries_v2 as query_memory_entries_unified_v2,
     restore_deleted_memories_v2 as restore_deleted_memories_unified_v2,
-    review_memory_candidates_v2 as review_memory_candidates_unified_v2, MemoryReviewCandidateV2,
-    set_memory_status_v2 as set_memory_status_unified_v2, MemoryReviewDecisionV2,
-    MemoryReviewSummaryV2, MemoryScopeV2, MemoryStatusV2,
+    review_memory_candidates_v2 as review_memory_candidates_unified_v2,
+    set_memory_status_v2 as set_memory_status_unified_v2, MemoryReviewCandidateV2,
+    MemoryReviewDecisionV2, MemoryReviewSummaryV2, MemoryScopeV2, MemoryStatusV2,
     UnifiedMemoryQueryRequestV2, UnifiedMemoryQueryResultV2,
 };
 use crate::services::memory::retrieval::{MemorySearchIntent, MemorySearchResultV2};
@@ -463,7 +462,9 @@ pub async fn delete_project_memory(
     state: State<'_, AppState>,
 ) -> Result<CommandResponse<()>, String> {
     match state
-        .with_memory_store(|store| set_memory_status_unified_v2(store, &[id], MemoryStatusV2::Deleted))
+        .with_memory_store(|store| {
+            set_memory_status_unified_v2(store, &[id], MemoryStatusV2::Deleted)
+        })
         .await
     {
         Ok(_) => Ok(CommandResponse::ok(())),
@@ -953,7 +954,11 @@ pub(crate) async fn extract_session_memories_internal(
     {
         Some(locale.to_string())
     } else {
-        app_state.get_config().await.ok().map(|config| config.language)
+        app_state
+            .get_config()
+            .await
+            .ok()
+            .map(|config| config.language)
     };
     let parsed_review_mode = parse_memory_review_mode(review_mode.as_deref());
 

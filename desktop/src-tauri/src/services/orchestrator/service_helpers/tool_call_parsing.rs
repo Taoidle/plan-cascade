@@ -598,10 +598,15 @@ pub(super) fn prepare_tool_call_for_execution(
             }
             if should_promote_grep_to_codebase_search(&map, codebase_search_ready) {
                 let mut promoted = serde_json::Map::new();
-                promoted.insert("query".to_string(), serde_json::Value::String(pattern.clone()));
+                promoted.insert(
+                    "query".to_string(),
+                    serde_json::Value::String(pattern.clone()),
+                );
                 promoted.insert(
                     "scope".to_string(),
-                    serde_json::Value::String(infer_codebase_scope_from_query(&pattern).to_string()),
+                    serde_json::Value::String(
+                        infer_codebase_scope_from_query(&pattern).to_string(),
+                    ),
                 );
                 if let Some(path) = has_nonempty_string_arg(&map, "path") {
                     insert_codebase_filter_path(&mut promoted, &path);
@@ -652,7 +657,10 @@ pub(super) fn prepare_tool_call_for_execution(
                 .or_else(|| has_nonempty_string_arg(&map, "symbol"))
                 .or_else(|| has_nonempty_string_arg(&map, "name"))
                 .ok_or_else(|| "CodebaseSearch requires non-empty 'query'".to_string())?;
-            map.insert("query".to_string(), serde_json::Value::String(query.clone()));
+            map.insert(
+                "query".to_string(),
+                serde_json::Value::String(query.clone()),
+            );
 
             let normalized_scope = has_nonempty_string_arg(&map, "scope")
                 .map(|scope| normalize_codebase_scope(&scope, &query).to_string())

@@ -24,20 +24,20 @@ use crate::commands::task_mode::generation_commands::generate_task_prd;
 use crate::commands::task_mode::session_lifecycle_commands::{
     confirm_task_configuration, enter_task_mode,
 };
+use crate::commands::task_mode::StoryExecutionMode;
 use crate::commands::task_mode::{
     ApproveTaskPrdRequest, ConfirmTaskConfigurationRequest, EnterTaskModeRequest,
     GenerateTaskPrdRequest, TaskConfigConfirmationState, TaskModeSession, TaskModeState,
     TaskModeStatus, TaskWorkflowConfig,
 };
-use crate::commands::task_mode::StoryExecutionMode;
 use crate::models::CommandResponse;
+use crate::services::debug_mode::DebugModeSession;
 use crate::services::debug_mode::EnterDebugModeRequest;
 use crate::services::orchestrator::permission_gate::PendingPermissionRequestSnapshot;
-use crate::services::orchestrator::permissions::PermissionResponse;
 use crate::services::orchestrator::permissions::PermissionLevel;
+use crate::services::orchestrator::permissions::PermissionResponse;
 use crate::services::plan_mode::types::{PlanModePhase, PlanModeSession};
 use crate::services::strategy::analyzer::RecommendedWorkflowConfig;
-use crate::services::debug_mode::DebugModeSession;
 use crate::services::task_mode::context_provider::{
     ContextSourceConfig, KnowledgeSourceConfig, MemorySourceConfig, SkillsSourceConfig,
 };
@@ -97,15 +97,24 @@ impl RemoteWorkflowFacade {
             WorkflowMode::Chat => Ok(RemoteWorkflowExecution::ChatFallback(session)),
             WorkflowMode::Plan => {
                 let ui = self.handle_plan_text_input(&mut session, content).await?;
-                Ok(RemoteWorkflowExecution::Ui { session, message: ui })
+                Ok(RemoteWorkflowExecution::Ui {
+                    session,
+                    message: ui,
+                })
             }
             WorkflowMode::Task => {
                 let ui = self.handle_task_text_input(&mut session, content).await?;
-                Ok(RemoteWorkflowExecution::Ui { session, message: ui })
+                Ok(RemoteWorkflowExecution::Ui {
+                    session,
+                    message: ui,
+                })
             }
             WorkflowMode::Debug => {
                 let ui = self.handle_debug_text_input(&mut session, content).await?;
-                Ok(RemoteWorkflowExecution::Ui { session, message: ui })
+                Ok(RemoteWorkflowExecution::Ui {
+                    session,
+                    message: ui,
+                })
             }
         }
     }
@@ -297,9 +306,10 @@ impl RemoteWorkflowFacade {
                 request_id,
                 allowed,
                 always_allow,
-            } => self
-                .respond_permission(&mut session, request_id, *allowed, *always_allow)
-                .await?,
+            } => {
+                self.respond_permission(&mut session, request_id, *allowed, *always_allow)
+                    .await?
+            }
             _ => return Err("Unsupported workflow action".to_string()),
         };
         Ok((session, message))
@@ -314,7 +324,9 @@ impl RemoteWorkflowFacade {
             session
                 .context_sources
                 .as_ref()
-                .and_then(|value| (!value.project_id.trim().is_empty()).then_some(value.project_id.clone()))
+                .and_then(|value| {
+                    (!value.project_id.trim().is_empty()).then_some(value.project_id.clone())
+                })
                 .unwrap_or_else(|| "default".to_string()),
             preset,
         ));
@@ -331,32 +343,35 @@ impl RemoteWorkflowFacade {
         session: &mut RemoteWorkflowSession,
         source: &str,
     ) -> Result<RemoteUiMessage, String> {
-        let mut config = session.context_sources.clone().unwrap_or_else(|| ContextSourceConfig {
-            project_id: "default".to_string(),
-            knowledge: Some(KnowledgeSourceConfig {
-                enabled: false,
-                selected_collections: Vec::new(),
-                selected_documents: Vec::new(),
-            }),
-            memory: Some(MemorySourceConfig {
-                enabled: false,
-                selected_categories: Vec::new(),
-                selected_memory_ids: Vec::new(),
-                excluded_memory_ids: Vec::new(),
-                selected_scopes: Vec::new(),
-                session_id: None,
-                statuses: Vec::new(),
-                review_mode: None,
-                selection_mode: None,
-            }),
-            skills: Some(SkillsSourceConfig {
-                enabled: false,
-                selected_skill_ids: Vec::new(),
-                invoked_skill_ids: Vec::new(),
-                selection_mode: Default::default(),
-                review_filter: None,
-            }),
-        });
+        let mut config = session
+            .context_sources
+            .clone()
+            .unwrap_or_else(|| ContextSourceConfig {
+                project_id: "default".to_string(),
+                knowledge: Some(KnowledgeSourceConfig {
+                    enabled: false,
+                    selected_collections: Vec::new(),
+                    selected_documents: Vec::new(),
+                }),
+                memory: Some(MemorySourceConfig {
+                    enabled: false,
+                    selected_categories: Vec::new(),
+                    selected_memory_ids: Vec::new(),
+                    excluded_memory_ids: Vec::new(),
+                    selected_scopes: Vec::new(),
+                    session_id: None,
+                    statuses: Vec::new(),
+                    review_mode: None,
+                    selection_mode: None,
+                }),
+                skills: Some(SkillsSourceConfig {
+                    enabled: false,
+                    selected_skill_ids: Vec::new(),
+                    invoked_skill_ids: Vec::new(),
+                    selection_mode: Default::default(),
+                    review_filter: None,
+                }),
+            });
         match source {
             "knowledge" => {
                 let entry = config.knowledge.get_or_insert(KnowledgeSourceConfig {
@@ -443,11 +458,14 @@ impl RemoteWorkflowFacade {
             )
             .await;
         let pending = self.pending_permission_requests(session).await;
-        session.pending_interaction = pending.first().map(|request| RemotePendingInteraction::ToolApproval {
-            request_id: request.request_id.clone(),
-            tool_name: request.tool_name.clone(),
-            risk: request.risk.clone(),
-        });
+        session.pending_interaction =
+            pending
+                .first()
+                .map(|request| RemotePendingInteraction::ToolApproval {
+                    request_id: request.request_id.clone(),
+                    tool_name: request.tool_name.clone(),
+                    risk: request.risk.clone(),
+                });
         session.updated_at = chrono::Utc::now().to_rfc3339();
         Ok(RemoteUiMessage::ActionCard(Self::permission_action_card(
             session,
@@ -533,7 +551,10 @@ impl RemoteWorkflowFacade {
 
             if let Some(entry_handoff) = self
                 .kernel_state()
-                .mode_entry_handoff_for_kernel_session(&session.kernel_session_id, session.active_mode)
+                .mode_entry_handoff_for_kernel_session(
+                    &session.kernel_session_id,
+                    session.active_mode,
+                )
                 .await
             {
                 if !entry_handoff.artifact_refs.is_empty() {
@@ -629,7 +650,10 @@ impl RemoteWorkflowFacade {
         if attachments.is_empty() {
             lines.push("No attachment-backed artifacts are available yet.".to_string());
         } else {
-            lines.push(format!("Attachment-backed artifacts: {}", attachments.len()));
+            lines.push(format!(
+                "Attachment-backed artifacts: {}",
+                attachments.len()
+            ));
             for attachment in attachments.iter().take(8) {
                 lines.push(format!("- {}: {}", attachment.label, attachment.path));
             }
@@ -755,8 +779,8 @@ impl RemoteWorkflowFacade {
                     .current_question
                     .as_ref()
                     .ok_or_else(|| "No pending clarification question".to_string())?;
-                let response = self
-                    .expect_ok(submit_plan_clarification(
+                let response = self.expect_ok(
+                    submit_plan_clarification(
                         SubmitPlanClarificationRequest {
                             session_id: plan_session_id.clone(),
                             answer: crate::services::plan_mode::types::ClarificationAnswer {
@@ -781,7 +805,8 @@ impl RemoteWorkflowFacade {
                         self.app.state::<WorkflowKernelState>(),
                         self.app.clone(),
                     )
-                    .await)?;
+                    .await,
+                )?;
                 response
             } else {
                 return Ok(RemoteUiMessage::ActionCard(Self::plan_action_card(
@@ -794,8 +819,8 @@ impl RemoteWorkflowFacade {
                 )));
             }
         } else {
-            let response = self
-                .expect_ok(enter_plan_mode(
+            let response = self.expect_ok(
+                enter_plan_mode(
                     EnterPlanModeRequest {
                         description: content.to_string(),
                         kernel_session_id: Some(session.kernel_session_id.clone()),
@@ -815,7 +840,8 @@ impl RemoteWorkflowFacade {
                     self.app.state::<WorkflowKernelState>(),
                     self.app.clone(),
                 )
-                .await)?;
+                .await,
+            )?;
             session
                 .linked_mode_sessions
                 .insert("plan".to_string(), response.session_id.clone());
@@ -838,9 +864,7 @@ impl RemoteWorkflowFacade {
         session.updated_at = chrono::Utc::now().to_rfc3339();
 
         Ok(RemoteUiMessage::ActionCard(Self::plan_action_card(
-            &snapshot,
-            session,
-            None,
+            &snapshot, session, None,
         )))
     }
 
@@ -853,26 +877,28 @@ impl RemoteWorkflowFacade {
             .get("plan")
             .cloned()
             .ok_or_else(|| "No active plan session".to_string())?;
-        self.expect_ok(generate_plan(
-            GeneratePlanRequest {
-                session_id: plan_session_id.clone(),
-                provider: session.provider.clone(),
-                model: session.model.clone(),
-                base_url: session.base_url.clone(),
-                agent_ref: None,
-                agent_source: None,
-                project_path: session.project_path.clone(),
-                context_sources: session.context_sources.clone(),
-                conversation_context: None,
-                locale: None,
-            },
-            self.app.state::<PlanModeState>(),
-            self.app.state::<AppState>(),
-            self.app.state::<KnowledgeState>(),
-            self.app.state::<WorkflowKernelState>(),
-            self.app.clone(),
-        )
-        .await)?;
+        self.expect_ok(
+            generate_plan(
+                GeneratePlanRequest {
+                    session_id: plan_session_id.clone(),
+                    provider: session.provider.clone(),
+                    model: session.model.clone(),
+                    base_url: session.base_url.clone(),
+                    agent_ref: None,
+                    agent_source: None,
+                    project_path: session.project_path.clone(),
+                    context_sources: session.context_sources.clone(),
+                    conversation_context: None,
+                    locale: None,
+                },
+                self.app.state::<PlanModeState>(),
+                self.app.state::<AppState>(),
+                self.app.state::<KnowledgeState>(),
+                self.app.state::<WorkflowKernelState>(),
+                self.app.clone(),
+            )
+            .await,
+        )?;
 
         let snapshot = self
             .app
@@ -913,30 +939,32 @@ impl RemoteWorkflowFacade {
             .plan
             .clone()
             .ok_or_else(|| "No generated plan to approve".to_string())?;
-        self.expect_ok(approve_plan(
-            ApprovePlanRequest {
-                session_id: plan_session_id.clone(),
-                plan,
-                provider: session.provider.clone(),
-                model: session.model.clone(),
-                base_url: session.base_url.clone(),
-                agent_ref: None,
-                agent_source: None,
-                project_path: session.project_path.clone(),
-                context_sources: session.context_sources.clone(),
-                conversation_context: None,
-                locale: None,
-            },
-            plan_state,
-            self.app.state::<FileChangesState>(),
-            self.app.state::<AppState>(),
-            self.app.state::<KnowledgeState>(),
-            self.app.state::<StandaloneState>(),
-            self.app.state::<PermissionState>(),
-            self.app.state::<WorkflowKernelState>(),
-            self.app.clone(),
-        )
-        .await)?;
+        self.expect_ok(
+            approve_plan(
+                ApprovePlanRequest {
+                    session_id: plan_session_id.clone(),
+                    plan,
+                    provider: session.provider.clone(),
+                    model: session.model.clone(),
+                    base_url: session.base_url.clone(),
+                    agent_ref: None,
+                    agent_source: None,
+                    project_path: session.project_path.clone(),
+                    context_sources: session.context_sources.clone(),
+                    conversation_context: None,
+                    locale: None,
+                },
+                plan_state,
+                self.app.state::<FileChangesState>(),
+                self.app.state::<AppState>(),
+                self.app.state::<KnowledgeState>(),
+                self.app.state::<StandaloneState>(),
+                self.app.state::<PermissionState>(),
+                self.app.state::<WorkflowKernelState>(),
+                self.app.clone(),
+            )
+            .await,
+        )?;
 
         let updated = self
             .app
@@ -966,8 +994,8 @@ impl RemoteWorkflowFacade {
                 .await?
                 .ok_or_else(|| "Task session not found".to_string())?
         } else {
-            let response = self
-                .expect_ok(enter_task_mode(
+            let response = self.expect_ok(
+                enter_task_mode(
                     EnterTaskModeRequest {
                         description: content.to_string(),
                         kernel_session_id: Some(session.kernel_session_id.clone()),
@@ -981,7 +1009,8 @@ impl RemoteWorkflowFacade {
                     self.app.clone(),
                     self.app.state::<AppState>(),
                 )
-                .await)?;
+                .await,
+            )?;
             session
                 .linked_mode_sessions
                 .insert("task".to_string(), response.session_id.clone());
@@ -991,7 +1020,9 @@ impl RemoteWorkflowFacade {
         };
 
         session.pending_interaction = match snapshot.status {
-            TaskModeStatus::Initialized if snapshot.config_confirmation_state == TaskConfigConfirmationState::Pending => {
+            TaskModeStatus::Initialized
+                if snapshot.config_confirmation_state == TaskConfigConfirmationState::Pending =>
+            {
                 Some(RemotePendingInteraction::TaskConfiguration {
                     session_id: snapshot.session_id.clone(),
                 })
@@ -1006,9 +1037,7 @@ impl RemoteWorkflowFacade {
         session.updated_at = chrono::Utc::now().to_rfc3339();
 
         Ok(RemoteUiMessage::ActionCard(Self::task_action_card(
-            &snapshot,
-            session,
-            None,
+            &snapshot, session, None,
         )))
     }
 
@@ -1032,8 +1061,8 @@ impl RemoteWorkflowFacade {
             .map(|value| Self::recommended_task_config(&value.recommended_config))
             .or_else(|| snapshot.confirmed_config.clone())
             .unwrap_or_default();
-        let updated = self
-            .expect_ok(confirm_task_configuration(
+        let updated = self.expect_ok(
+            confirm_task_configuration(
                 ConfirmTaskConfigurationRequest {
                     session_id: task_session_id.clone(),
                     workflow_config,
@@ -1042,7 +1071,8 @@ impl RemoteWorkflowFacade {
                 self.app.state::<WorkflowKernelState>(),
                 self.app.clone(),
             )
-            .await)?;
+            .await,
+        )?;
         session.pending_interaction = Some(RemotePendingInteraction::TaskConfiguration {
             session_id: updated.session_id.clone(),
         });
@@ -1063,27 +1093,29 @@ impl RemoteWorkflowFacade {
             .get("task")
             .cloned()
             .ok_or_else(|| "No active task session".to_string())?;
-        self.expect_ok(generate_task_prd(
-            GenerateTaskPrdRequest {
-                session_id: task_session_id.clone(),
-                provider: session.provider.clone(),
-                model: session.model.clone(),
-                api_key: None,
-                base_url: session.base_url.clone(),
-                compiled_spec: None,
-                conversation_history: None,
-                max_context_tokens: None,
-                locale: None,
-                context_sources: session.context_sources.clone(),
-                project_path: session.project_path.clone(),
-            },
-            self.app.state::<TaskModeState>(),
-            self.app.state::<AppState>(),
-            self.app.state::<KnowledgeState>(),
-            self.app.state::<WorkflowKernelState>(),
-            self.app.clone(),
-        )
-        .await)?;
+        self.expect_ok(
+            generate_task_prd(
+                GenerateTaskPrdRequest {
+                    session_id: task_session_id.clone(),
+                    provider: session.provider.clone(),
+                    model: session.model.clone(),
+                    api_key: None,
+                    base_url: session.base_url.clone(),
+                    compiled_spec: None,
+                    conversation_history: None,
+                    max_context_tokens: None,
+                    locale: None,
+                    context_sources: session.context_sources.clone(),
+                    project_path: session.project_path.clone(),
+                },
+                self.app.state::<TaskModeState>(),
+                self.app.state::<AppState>(),
+                self.app.state::<KnowledgeState>(),
+                self.app.state::<WorkflowKernelState>(),
+                self.app.clone(),
+            )
+            .await,
+        )?;
 
         let snapshot = self
             .app
@@ -1130,31 +1162,33 @@ impl RemoteWorkflowFacade {
                 .as_ref()
                 .map(|value| Self::recommended_task_config(&value.recommended_config))
         });
-        self.expect_ok(approve_task_prd(
-            self.app.clone(),
-            ApproveTaskPrdRequest {
-                session_id: task_session_id.clone(),
-                prd,
-                provider: session.provider.clone(),
-                model: session.model.clone(),
-                base_url: session.base_url.clone(),
-                execution_mode: Some(StoryExecutionMode::Llm),
-                workflow_config,
-                global_default_agent: None,
-                phase_configs: None,
-                locale: None,
-                context_sources: session.context_sources.clone(),
-                project_path: session.project_path.clone(),
-            },
-            task_state,
-            self.app.state::<FileChangesState>(),
-            self.app.state::<WorkflowKernelState>(),
-            self.app.state::<AppState>(),
-            self.app.state::<PermissionState>(),
-            self.app.state::<KnowledgeState>(),
-            self.app.state::<PluginState>(),
-        )
-        .await)?;
+        self.expect_ok(
+            approve_task_prd(
+                self.app.clone(),
+                ApproveTaskPrdRequest {
+                    session_id: task_session_id.clone(),
+                    prd,
+                    provider: session.provider.clone(),
+                    model: session.model.clone(),
+                    base_url: session.base_url.clone(),
+                    execution_mode: Some(StoryExecutionMode::Llm),
+                    workflow_config,
+                    global_default_agent: None,
+                    phase_configs: None,
+                    locale: None,
+                    context_sources: session.context_sources.clone(),
+                    project_path: session.project_path.clone(),
+                },
+                task_state,
+                self.app.state::<FileChangesState>(),
+                self.app.state::<WorkflowKernelState>(),
+                self.app.state::<AppState>(),
+                self.app.state::<PermissionState>(),
+                self.app.state::<KnowledgeState>(),
+                self.app.state::<PluginState>(),
+            )
+            .await,
+        )?;
 
         let updated = self
             .app
@@ -1178,25 +1212,27 @@ impl RemoteWorkflowFacade {
     ) -> Result<RemoteUiMessage, String> {
         let debug_session_id = session.linked_mode_sessions.get("debug").cloned();
         let snapshot = if let Some(debug_session_id) = debug_session_id {
-            self.expect_ok(submit_debug_clarification(
-                self.app.clone(),
-                self.app.state::<DebugModeState>(),
-                self.app.state::<WorkflowKernelState>(),
-                SubmitDebugClarificationRequest {
-                    session_id: debug_session_id,
-                    answer: content.to_string(),
-                    provider: session.provider.clone(),
-                    model: session.model.clone(),
-                    base_url: session.base_url.clone(),
-                    project_path: session.project_path.clone(),
-                    context_sources: session.context_sources.clone(),
-                    locale: None,
-                },
-            )
-            .await)?
+            self.expect_ok(
+                submit_debug_clarification(
+                    self.app.clone(),
+                    self.app.state::<DebugModeState>(),
+                    self.app.state::<WorkflowKernelState>(),
+                    SubmitDebugClarificationRequest {
+                        session_id: debug_session_id,
+                        answer: content.to_string(),
+                        provider: session.provider.clone(),
+                        model: session.model.clone(),
+                        base_url: session.base_url.clone(),
+                        project_path: session.project_path.clone(),
+                        context_sources: session.context_sources.clone(),
+                        locale: None,
+                    },
+                )
+                .await,
+            )?
         } else {
-            let response = self
-                .expect_ok(enter_debug_mode(
+            let response = self.expect_ok(
+                enter_debug_mode(
                     self.app.clone(),
                     self.app.state::<DebugModeState>(),
                     self.app.state::<WorkflowKernelState>(),
@@ -1213,7 +1249,8 @@ impl RemoteWorkflowFacade {
                         locale: None,
                     },
                 )
-                .await)?;
+                .await,
+            )?;
             session
                 .linked_mode_sessions
                 .insert("debug".to_string(), response.session_id.clone());
@@ -1230,9 +1267,7 @@ impl RemoteWorkflowFacade {
         };
         session.updated_at = chrono::Utc::now().to_rfc3339();
         Ok(RemoteUiMessage::ActionCard(Self::debug_action_card(
-            &snapshot,
-            session,
-            None,
+            &snapshot, session, None,
         )))
     }
 
@@ -1245,8 +1280,8 @@ impl RemoteWorkflowFacade {
             .get("debug")
             .cloned()
             .ok_or_else(|| "No active debug session".to_string())?;
-        let updated = self
-            .expect_ok(approve_debug_patch(
+        let updated = self.expect_ok(
+            approve_debug_patch(
                 self.app.clone(),
                 self.app.state::<DebugModeState>(),
                 self.app.state::<WorkflowKernelState>(),
@@ -1262,7 +1297,8 @@ impl RemoteWorkflowFacade {
                     locale: None,
                 },
             )
-            .await)?;
+            .await,
+        )?;
         session.pending_interaction = if updated.state.pending_approval.is_some() {
             Some(RemotePendingInteraction::DebugPatchApproval {
                 session_id: updated.session_id.clone(),
@@ -1360,7 +1396,11 @@ impl RemoteWorkflowFacade {
         if let Some(question) = session.current_question.as_ref() {
             lines.push(String::new());
             lines.push(format!("Clarification: {}", question.question));
-            if let Some(hint) = question.hint.as_ref().filter(|value| !value.trim().is_empty()) {
+            if let Some(hint) = question
+                .hint
+                .as_ref()
+                .filter(|value| !value.trim().is_empty())
+            {
                 lines.push(format!("Hint: {}", hint));
             }
             lines.push("Reply directly in Telegram to answer.".to_string());
@@ -1397,7 +1437,10 @@ impl RemoteWorkflowFacade {
             vec![Self::button("remote:status", "Status")]
         };
         let mut metadata: HashMap<String, String> = HashMap::new();
-        metadata.insert("mode".to_string(), format!("{:?}", remote_session.active_mode));
+        metadata.insert(
+            "mode".to_string(),
+            format!("{:?}", remote_session.active_mode),
+        );
         metadata.insert("sessionId".to_string(), session.session_id.clone());
         RemoteActionCard {
             title: "Plan Mode".to_string(),
@@ -1486,7 +1529,10 @@ impl RemoteWorkflowFacade {
             _ => vec![Self::button("remote:status", "Status")],
         };
         let mut metadata: HashMap<String, String> = HashMap::new();
-        metadata.insert("mode".to_string(), format!("{:?}", remote_session.active_mode));
+        metadata.insert(
+            "mode".to_string(),
+            format!("{:?}", remote_session.active_mode),
+        );
         metadata.insert("sessionId".to_string(), session.session_id.clone());
         RemoteActionCard {
             title: "Task Mode".to_string(),
@@ -1574,7 +1620,10 @@ impl RemoteWorkflowFacade {
             }
         }
         let mut metadata: HashMap<String, String> = HashMap::new();
-        metadata.insert("mode".to_string(), format!("{:?}", remote_session.active_mode));
+        metadata.insert(
+            "mode".to_string(),
+            format!("{:?}", remote_session.active_mode),
+        );
         metadata.insert("sessionId".to_string(), session.session_id.clone());
         RemoteActionCard {
             title: "Debug Mode".to_string(),
@@ -1628,7 +1677,10 @@ impl RemoteWorkflowFacade {
             lines.push(prefix);
             lines.push(String::new());
         }
-        lines.push(format!("Current permission level: {:?}", session.permission_level));
+        lines.push(format!(
+            "Current permission level: {:?}",
+            session.permission_level
+        ));
         if pending_requests.is_empty() {
             lines.push("Pending approvals: none".to_string());
         } else {

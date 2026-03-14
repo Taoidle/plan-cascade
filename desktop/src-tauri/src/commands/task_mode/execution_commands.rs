@@ -488,9 +488,7 @@ pub async fn approve_task_prd(
             if let Ok(mut tracker) = file_change_tracker.lock() {
                 tracker.set_app_handle(app.clone());
             }
-            let provider_name = provider_config
-                .as_ref()
-                .map(|cfg| cfg.provider.to_string());
+            let provider_name = provider_config.as_ref().map(|cfg| cfg.provider.to_string());
             let enriched_ctx = assemble_enriched_context_v2(
                 app_state.inner(),
                 knowledge_state.inner(),
@@ -503,7 +501,9 @@ pub async fn approve_task_prd(
                 !matches!(mode, StoryExecutionMode::Llm),
                 provider_name.as_deref(),
                 provider_config.as_ref().map(|cfg| cfg.model.as_str()),
-                provider_config.as_ref().and_then(|cfg| cfg.base_url.as_deref()),
+                provider_config
+                    .as_ref()
+                    .and_then(|cfg| cfg.base_url.as_deref()),
             )
             .await;
             let knowledge_block = enriched_ctx.knowledge_block;
@@ -632,12 +632,12 @@ pub async fn approve_task_prd(
                         executor
                     };
                     let resolver = match &phase_configs {
-                        Some(configs) if !configs.is_empty() => AgentResolver::new(
-                            build_agents_config_from_frontend(
+                        Some(configs) if !configs.is_empty() => {
+                            AgentResolver::new(build_agents_config_from_frontend(
                                 configs,
                                 global_default_agent.as_deref(),
-                            ),
-                        ),
+                            ))
+                        }
                         _ => AgentResolver::with_defaults(),
                     };
 
@@ -780,7 +780,13 @@ pub async fn approve_task_prd(
                     );
 
                     let result = executor
-                        .execute(&sid_for_worker, &resolver, project_path, emit, story_executor)
+                        .execute(
+                            &sid_for_worker,
+                            &resolver,
+                            project_path,
+                            emit,
+                            story_executor,
+                        )
                         .await;
 
                     // Update session state based on result

@@ -167,7 +167,10 @@ impl UsageTracker {
 
         match service.insert_usage_events_batch(buffer) {
             Ok(_) => {
-                tracing::debug!("Flushed {} analytics usage events to database", buffer.len());
+                tracing::debug!(
+                    "Flushed {} analytics usage events to database",
+                    buffer.len()
+                );
             }
             Err(e) => {
                 tracing::error!("Failed to flush analytics usage events: {}", e);

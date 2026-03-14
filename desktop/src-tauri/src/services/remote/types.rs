@@ -179,16 +179,24 @@ pub enum RemoteCommand {
     Start,
     Home,
     Menu,
-    SwitchMode { mode: WorkflowMode },
+    SwitchMode {
+        mode: WorkflowMode,
+    },
     PlanGenerate,
     PlanApprove,
     TaskConfirmConfig,
     TaskGeneratePrd,
     TaskApprovePrd,
     DebugApprovePatch,
-    SetContextPreset { preset: String },
-    ToggleContextSource { source: String },
-    SetPermissionLevel { level: PermissionLevel },
+    SetContextPreset {
+        preset: String,
+    },
+    ToggleContextSource {
+        source: String,
+    },
+    SetPermissionLevel {
+        level: PermissionLevel,
+    },
     RespondPermission {
         request_id: String,
         allowed: bool,
@@ -201,11 +209,15 @@ pub enum RemoteCommand {
         model: Option<String>,
     },
     /// /send <message> or plain text - Send message to active session
-    SendMessage { content: String },
+    SendMessage {
+        content: String,
+    },
     /// /sessions - List active sessions
     ListSessions,
     /// /switch <session_id> - Switch active session
-    SwitchSession { session_id: String },
+    SwitchSession {
+        session_id: String,
+    },
     /// /status - Get current session status
     Status,
     /// /cancel - Cancel current execution
@@ -320,7 +332,10 @@ pub struct RemoteSessionMapping {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum SessionType {
     ClaudeCode,
-    Standalone { provider: String, model: String },
+    Standalone {
+        provider: String,
+        model: String,
+    },
     WorkflowRoot {
         kernel_session_id: String,
         active_mode: WorkflowMode,
@@ -405,11 +420,21 @@ pub enum RemotePendingInteraction {
     SessionWizard,
     ContextWizard,
     PermissionWizard,
-    PlanClarification { session_id: String },
-    PlanReview { session_id: String },
-    TaskConfiguration { session_id: String },
-    TaskPrdApproval { session_id: String },
-    DebugPatchApproval { session_id: String },
+    PlanClarification {
+        session_id: String,
+    },
+    PlanReview {
+        session_id: String,
+    },
+    TaskConfiguration {
+        session_id: String,
+    },
+    TaskPrdApproval {
+        session_id: String,
+    },
+    DebugPatchApproval {
+        session_id: String,
+    },
     ToolApproval {
         request_id: String,
         tool_name: String,

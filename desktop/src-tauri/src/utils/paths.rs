@@ -115,6 +115,9 @@ mod tests {
     fn test_worktrees_dir() {
         let dir = worktrees_dir();
         assert!(dir.is_ok());
-        assert!(dir.unwrap().to_string_lossy().contains(".plan-cascade/worktrees"));
+        assert!(dir
+            .unwrap()
+            .to_string_lossy()
+            .contains(".plan-cascade/worktrees"));
     }
 }

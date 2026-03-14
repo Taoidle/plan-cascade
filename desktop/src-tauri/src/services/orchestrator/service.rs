@@ -202,9 +202,7 @@ fn subagent_token_budget_typed(
     budget.clamp(20_000, 4_000_000)
 }
 
-fn subagent_execution_kind(
-    subagent_type: crate::services::tools::SubAgentType,
-) -> ExecutionKind {
+fn subagent_execution_kind(subagent_type: crate::services::tools::SubAgentType) -> ExecutionKind {
     use crate::services::tools::SubAgentType;
     match subagent_type {
         SubAgentType::Explore => ExecutionKind::SubAgentExplore,

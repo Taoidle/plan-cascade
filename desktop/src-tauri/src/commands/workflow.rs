@@ -11,16 +11,16 @@ use crate::services::plan_mode::types::{
 };
 use crate::services::spec_interview::interview::InterviewSession;
 use crate::services::workflow_kernel::{
-    quality_profiles,
     observability::{self, WorkflowFailureRecordInput, WorkflowObservabilitySnapshot},
-    HandoffContextBundle, ModeQualitySnapshot, ModeTranscriptPayload, PlanClarificationSnapshot,
-    PlanEditOperation, PlanSnapshotRehydrate, QualityDecisionAction, QualityGateOutcome,
-    QualityGateSource, QualityGateStatus, QualityProfileSummary, QualitySeverity, ResumeResult,
-    TaskInterviewSnapshot, TaskSnapshotRehydrate, UserInputIntent, WorkflowKernelState,
-    WorkflowKernelUpdatedEvent, WorkflowMode, WorkflowModeTranscriptUpdatedEvent, WorkflowSession,
-    WorkflowSessionCatalogState, WorkflowSessionCatalogUpdatedEvent, WorkflowSessionMutation,
-    WorkflowSessionState, WorkflowStatus, WORKFLOW_KERNEL_UPDATED_CHANNEL,
-    WORKFLOW_MODE_TRANSCRIPT_UPDATED_CHANNEL, WORKFLOW_SESSION_CATALOG_UPDATED_CHANNEL,
+    quality_profiles, HandoffContextBundle, ModeQualitySnapshot, ModeTranscriptPayload,
+    PlanClarificationSnapshot, PlanEditOperation, PlanSnapshotRehydrate, QualityDecisionAction,
+    QualityGateOutcome, QualityGateSource, QualityGateStatus, QualityProfileSummary,
+    QualitySeverity, ResumeResult, TaskInterviewSnapshot, TaskSnapshotRehydrate, UserInputIntent,
+    WorkflowKernelState, WorkflowKernelUpdatedEvent, WorkflowMode,
+    WorkflowModeTranscriptUpdatedEvent, WorkflowSession, WorkflowSessionCatalogState,
+    WorkflowSessionCatalogUpdatedEvent, WorkflowSessionMutation, WorkflowSessionState,
+    WorkflowStatus, WORKFLOW_KERNEL_UPDATED_CHANNEL, WORKFLOW_MODE_TRANSCRIPT_UPDATED_CHANNEL,
+    WORKFLOW_SESSION_CATALOG_UPDATED_CHANNEL,
 };
 use crate::{commands::plan_mode::PlanModeState, commands::spec_interview::SpecInterviewState};
 use crate::{commands::task_mode::TaskModeState, state::AppState};
@@ -1316,7 +1316,9 @@ pub async fn workflow_update_quality_snapshot(
     state: tauri::State<'_, WorkflowKernelState>,
     app: tauri::AppHandle,
 ) -> Result<CommandResponse<WorkflowSession>, String> {
-    let result = state.update_quality_snapshot(&session_id, mode, snapshot).await;
+    let result = state
+        .update_quality_snapshot(&session_id, mode, snapshot)
+        .await;
     Ok(match result {
         Ok(session) => {
             let _ = emit_kernel_update_for_session(
@@ -1326,8 +1328,12 @@ pub async fn workflow_update_quality_snapshot(
                 "workflow_update_quality_snapshot",
             )
             .await;
-            let _ =
-                emit_session_catalog_update(&app, state.inner(), "workflow_update_quality_snapshot").await;
+            let _ = emit_session_catalog_update(
+                &app,
+                state.inner(),
+                "workflow_update_quality_snapshot",
+            )
+            .await;
             CommandResponse::ok(session)
         }
         Err(error) => CommandResponse::err(error),
@@ -1356,7 +1362,8 @@ pub async fn workflow_apply_quality_decision(
             )
             .await;
             let _ =
-                emit_session_catalog_update(&app, state.inner(), "workflow_apply_quality_decision").await;
+                emit_session_catalog_update(&app, state.inner(), "workflow_apply_quality_decision")
+                    .await;
             CommandResponse::ok(session)
         }
         Err(error) => CommandResponse::err(error),
@@ -1374,10 +1381,15 @@ pub async fn workflow_retry_quality_run(
     let result = state.retry_quality_run(&session_id, mode, &run_id).await;
     Ok(match result {
         Ok(session) => {
-            let _ =
-                emit_kernel_update_for_session(&app, state.inner(), &session_id, "workflow_retry_quality_run")
-                    .await;
-            let _ = emit_session_catalog_update(&app, state.inner(), "workflow_retry_quality_run").await;
+            let _ = emit_kernel_update_for_session(
+                &app,
+                state.inner(),
+                &session_id,
+                "workflow_retry_quality_run",
+            )
+            .await;
+            let _ = emit_session_catalog_update(&app, state.inner(), "workflow_retry_quality_run")
+                .await;
             CommandResponse::ok(session)
         }
         Err(error) => CommandResponse::err(error),
@@ -1406,8 +1418,14 @@ pub async fn workflow_run_custom_quality_gates(
     let mut outcomes = Vec::with_capacity(relevant_gates.len());
     for gate in relevant_gates {
         let mut env = HashMap::new();
-        env.insert("QUALITY_MODE".to_string(), workflow_mode_label(mode).to_string());
-        env.insert("WORKFLOW_MODE".to_string(), workflow_mode_label(mode).to_string());
+        env.insert(
+            "QUALITY_MODE".to_string(),
+            workflow_mode_label(mode).to_string(),
+        );
+        env.insert(
+            "WORKFLOW_MODE".to_string(),
+            workflow_mode_label(mode).to_string(),
+        );
         env.insert("PROJECT_PATH".to_string(), project_path.clone());
         env.insert("QUALITY_GATE_ID".to_string(), gate.id.clone());
         env.insert("QUALITY_GATE_NAME".to_string(), gate.name.clone());
@@ -1980,7 +1998,8 @@ mod tests {
             locale: Some("en-US".to_string()),
             strategy_analysis: None,
             strategy_recommendation: None,
-            config_confirmation_state: crate::commands::task_mode::TaskConfigConfirmationState::Pending,
+            config_confirmation_state:
+                crate::commands::task_mode::TaskConfigConfirmationState::Pending,
             confirmed_config: None,
             prd: None,
             exploration_result: None,

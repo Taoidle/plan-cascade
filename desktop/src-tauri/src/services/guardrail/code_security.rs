@@ -160,9 +160,7 @@ impl Guardrail for CodeSecurityGuardrail {
         _runtime: &GuardrailRuntimeContext,
     ) -> GuardrailResult {
         match direction {
-            Direction::Input | Direction::ToolCall => {
-                GuardrailResult::Pass
-            }
+            Direction::Input | Direction::ToolCall => GuardrailResult::Pass,
             Direction::Output | Direction::Tool | Direction::Artifact => {
                 let violations = self.detect(content);
                 if violations.is_empty() {

@@ -5,8 +5,8 @@
 use std::path::Path;
 use std::process::Command;
 
-use crate::utils::error::{AppError, AppResult};
 use crate::utils::configure_background_std_process;
+use crate::utils::error::{AppError, AppResult};
 
 /// Result of a git command execution
 #[derive(Debug)]

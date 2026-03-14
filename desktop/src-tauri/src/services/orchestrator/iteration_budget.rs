@@ -66,7 +66,10 @@ pub enum IterationProgressAssessment {
 const REVIEW_WINDOW: u32 = 8;
 const REVIEW_INTERVAL: u32 = 8;
 
-pub fn build_iteration_budget(kind: ExecutionKind, hints: &IterationBudgetHints) -> IterationBudget {
+pub fn build_iteration_budget(
+    kind: ExecutionKind,
+    hints: &IterationBudgetHints,
+) -> IterationBudget {
     let base = match kind {
         ExecutionKind::StandaloneRoot => 80,
         ExecutionKind::TaskStory => 140,
@@ -105,7 +108,9 @@ pub fn build_iteration_budget(kind: ExecutionKind, hints: &IterationBudgetHints)
         }
         if matches!(
             kind,
-            ExecutionKind::AnalysisPhase | ExecutionKind::SubAgentExplore | ExecutionKind::SubAgentPlan
+            ExecutionKind::AnalysisPhase
+                | ExecutionKind::SubAgentExplore
+                | ExecutionKind::SubAgentPlan
         ) && !matches!(hints.analysis_profile, Some(AnalysisProfile::Fast))
         {
             soft_limit += 20;

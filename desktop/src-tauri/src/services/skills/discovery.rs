@@ -7,9 +7,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::services::skills::config::{
-    resolve_source_path_for_project, SkillsConfig,
-};
+use crate::services::skills::config::{resolve_source_path_for_project, SkillsConfig};
 use crate::services::skills::model::{
     DiscoveredSkill, InjectionPhase, SkillDetection, SkillSource,
 };

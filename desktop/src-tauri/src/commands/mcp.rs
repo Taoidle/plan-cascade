@@ -2,10 +2,10 @@
 //!
 //! Tauri commands for MCP server management and runtime tool integration.
 
+use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use serde_json::Value;
 use tokio::sync::RwLock;
 
 use crate::models::response::CommandResponse;
@@ -49,10 +49,7 @@ impl Default for McpRuntimeState {
     }
 }
 
-async fn sync_runtime_tools_snapshot(
-    manager: &McpManager,
-    registry: &ToolRegistry,
-) {
+async fn sync_runtime_tools_snapshot(manager: &McpManager, registry: &ToolRegistry) {
     let metadata = manager.runtime_tool_metadata().await;
     runtime_tools::replace_from_registry_with_metadata(registry, metadata);
 }
@@ -746,15 +743,15 @@ pub async fn invoke_connected_mcp_tool(
         )
         .await
     {
-        Ok((server_name, raw_tool_name, value)) => Ok(CommandResponse::ok(
-            ConnectedMcpToolInvokeResult {
+        Ok((server_name, raw_tool_name, value)) => {
+            Ok(CommandResponse::ok(ConnectedMcpToolInvokeResult {
                 qualified_name: format!("mcp:{}:{}", server_id, raw_tool_name),
                 server_id,
                 server_name,
                 tool_name: raw_tool_name,
                 value,
-            },
-        )),
+            }))
+        }
         Err(e) => Ok(CommandResponse::err(e.to_string())),
     }
 }

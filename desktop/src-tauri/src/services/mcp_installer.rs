@@ -21,8 +21,8 @@ use crate::services::mcp::McpService;
 use crate::services::mcp_catalog::McpCatalogService;
 use crate::services::mcp_runtime_manager::McpRuntimeManager;
 use crate::storage::database::Database;
-use crate::utils::error::{AppError, AppResult};
 use crate::utils::configure_background_process;
+use crate::utils::error::{AppError, AppResult};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct McpInstallProgressEvent {

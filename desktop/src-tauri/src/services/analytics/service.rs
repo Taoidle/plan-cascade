@@ -540,7 +540,10 @@ impl AnalyticsService {
         Ok(ids)
     }
 
-    pub fn insert_usage_events_batch(&self, events: &[AnalyticsUsageEvent]) -> AppResult<Vec<String>> {
+    pub fn insert_usage_events_batch(
+        &self,
+        events: &[AnalyticsUsageEvent],
+    ) -> AppResult<Vec<String>> {
         let mut conn = self.get_connection()?;
         let tx = conn.unchecked_transaction()?;
         let mut ids = Vec::with_capacity(events.len());
@@ -1140,7 +1143,10 @@ impl AnalyticsService {
         Ok(count)
     }
 
-    pub fn get_usage_event_detail(&self, event_id: &str) -> AppResult<Option<AnalyticsEventDetail>> {
+    pub fn get_usage_event_detail(
+        &self,
+        event_id: &str,
+    ) -> AppResult<Option<AnalyticsEventDetail>> {
         let conn = self.get_connection()?;
         let mut stmt = conn.prepare(
             "SELECT ue.event_id, ue.timestamp_utc, ue.provider, ue.model,
@@ -1924,10 +1930,7 @@ impl AnalyticsService {
         ))
     }
 
-    fn aggregate_by_model_analytics(
-        &self,
-        filter: &AnalyticsFilter,
-    ) -> AppResult<Vec<ModelUsage>> {
+    fn aggregate_by_model_analytics(&self, filter: &AnalyticsFilter) -> AppResult<Vec<ModelUsage>> {
         let conn = self.get_connection()?;
         let mut sql = String::from(
             "SELECT ue.model, ue.provider,
@@ -1941,7 +1944,9 @@ impl AnalyticsService {
         );
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
         Self::append_analytics_filter_clauses(&mut sql, &mut params_vec, filter, "ue", "uc");
-        sql.push_str(" GROUP BY ue.model, ue.provider ORDER BY total_cost DESC, request_count DESC");
+        sql.push_str(
+            " GROUP BY ue.model, ue.provider ORDER BY total_cost DESC, request_count DESC",
+        );
         let params_refs: Vec<&dyn rusqlite::ToSql> =
             params_vec.iter().map(|p| p.as_ref()).collect();
         let mut stmt = conn.prepare(&sql)?;
@@ -1984,7 +1989,9 @@ impl AnalyticsService {
         );
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
         Self::append_analytics_filter_clauses(&mut sql, &mut params_vec, filter, "ue", "uc");
-        sql.push_str(" GROUP BY COALESCE(ue.project_id, '') ORDER BY total_cost DESC, request_count DESC");
+        sql.push_str(
+            " GROUP BY COALESCE(ue.project_id, '') ORDER BY total_cost DESC, request_count DESC",
+        );
         let params_refs: Vec<&dyn rusqlite::ToSql> =
             params_vec.iter().map(|p| p.as_ref()).collect();
         let mut stmt = conn.prepare(&sql)?;
@@ -2172,19 +2179,31 @@ impl AnalyticsService {
             params_vec.push(Box::new(model.clone()));
         }
         if let Some(ref project_id) = filter.project_id {
-            sql.push_str(&format!(" AND COALESCE({}.project_id, '') = ?", event_alias));
+            sql.push_str(&format!(
+                " AND COALESCE({}.project_id, '') = ?",
+                event_alias
+            ));
             params_vec.push(Box::new(project_id.clone()));
         }
         if let Some(ref kernel_session_id) = filter.kernel_session_id {
-            sql.push_str(&format!(" AND COALESCE({}.kernel_session_id, '') = ?", event_alias));
+            sql.push_str(&format!(
+                " AND COALESCE({}.kernel_session_id, '') = ?",
+                event_alias
+            ));
             params_vec.push(Box::new(kernel_session_id.clone()));
         }
         if let Some(ref mode_session_id) = filter.mode_session_id {
-            sql.push_str(&format!(" AND COALESCE({}.mode_session_id, '') = ?", event_alias));
+            sql.push_str(&format!(
+                " AND COALESCE({}.mode_session_id, '') = ?",
+                event_alias
+            ));
             params_vec.push(Box::new(mode_session_id.clone()));
         }
         if let Some(workflow_mode) = &filter.workflow_mode {
-            sql.push_str(&format!(" AND COALESCE({}.workflow_mode, '') = ?", event_alias));
+            sql.push_str(&format!(
+                " AND COALESCE({}.workflow_mode, '') = ?",
+                event_alias
+            ));
             params_vec.push(Box::new(workflow_mode.as_str().to_string()));
         }
         if let Some(ref phase_id) = filter.phase_id {
@@ -2639,9 +2658,7 @@ impl AnalyticsService {
         })
     }
 
-    fn row_to_analytics_usage_event(
-        row: &rusqlite::Row,
-    ) -> rusqlite::Result<AnalyticsUsageEvent> {
+    fn row_to_analytics_usage_event(row: &rusqlite::Row) -> rusqlite::Result<AnalyticsUsageEvent> {
         let cost_status_raw: String = row.get(10)?;
         let workflow_mode_raw: Option<String> = row.get(14)?;
         let execution_scope_raw: Option<String> = row.get(16)?;

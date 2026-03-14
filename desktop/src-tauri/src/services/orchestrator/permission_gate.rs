@@ -129,7 +129,10 @@ impl PermissionGate {
     ) {
         let mut capabilities = self.session_debug_capabilities.write().await;
         if let Some(profile) = profile {
-            capabilities.insert(session_id.to_string(), runtime_capabilities_for_profile(profile));
+            capabilities.insert(
+                session_id.to_string(),
+                runtime_capabilities_for_profile(profile),
+            );
         } else {
             capabilities.remove(session_id);
         }
@@ -742,8 +745,8 @@ mod tests {
                 &serde_json::json!({"command": "curl https://api.example.com/v1"}),
                 &cwd,
                 &cwd,
-        )
-        .await;
+            )
+            .await;
         assert!(result.is_ok());
     }
 
@@ -759,12 +762,14 @@ mod tests {
         .await;
 
         let result = gate
-            .check("session-1", "Edit", &serde_json::json!({ "file_path": "src/app.ts" }))
+            .check(
+                "session-1",
+                "Edit",
+                &serde_json::json!({ "file_path": "src/app.ts" }),
+            )
             .await;
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .contains("blocks Mutate tools"));
+        assert!(result.unwrap_err().contains("blocks Mutate tools"));
     }
 
     #[tokio::test]
@@ -783,7 +788,11 @@ mod tests {
         let gate_clone = Arc::clone(&gate);
         let check_handle = tokio::spawn(async move {
             gate_clone
-                .check("session-1", "Browser", &serde_json::json!({ "action": "navigate" }))
+                .check(
+                    "session-1",
+                    "Browser",
+                    &serde_json::json!({ "action": "navigate" }),
+                )
                 .await
         });
 

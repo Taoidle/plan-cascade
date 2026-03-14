@@ -358,6 +358,7 @@ impl SessionBridge {
                     svc.workflow_kernel.as_ref(),
                     workflow_session_id,
                     &session_id,
+                    &run_id,
                 )
                 .await
             }
@@ -371,6 +372,7 @@ impl SessionBridge {
                     svc.workflow_kernel.as_ref(),
                     workflow_session_id,
                     &session_id,
+                    &run_id,
                 )
                 .await
             }
@@ -384,6 +386,7 @@ impl SessionBridge {
                     svc.workflow_kernel.as_ref(),
                     workflow_session_id,
                     &session_id,
+                    &run_id,
                 )
                 .await
             }
@@ -661,12 +664,12 @@ impl SessionBridge {
             }
 
             let allowed = allowed_paths.iter().any(|allowed| {
-                    if let Ok(allowed_canonical) = allowed.canonicalize() {
-                        canonical.starts_with(&allowed_canonical)
-                    } else {
-                        false
-                    }
-                });
+                if let Ok(allowed_canonical) = allowed.canonicalize() {
+                    canonical.starts_with(&allowed_canonical)
+                } else {
+                    false
+                }
+            });
             if !allowed {
                 return Err(RemoteError::PathSandboxViolation(format!(
                     "Path '{}' is outside allowed directories",
@@ -931,6 +934,7 @@ impl SessionBridge {
         workflow_kernel: Option<&WorkflowKernelState>,
         workflow_session_id: Option<&str>,
         binding_session_id: &str,
+        run_id: &str,
     ) -> Result<RemoteResponse, RemoteError> {
         let mut text = String::new();
         let mut thinking = String::new();
@@ -941,6 +945,7 @@ impl SessionBridge {
                 workflow_kernel,
                 workflow_session_id,
                 binding_session_id,
+                Some(run_id),
                 &event,
             )
             .await;
@@ -1044,6 +1049,7 @@ impl SessionBridge {
         workflow_kernel: Option<&WorkflowKernelState>,
         workflow_session_id: Option<&str>,
         binding_session_id: &str,
+        run_id: &str,
     ) -> Result<RemoteResponse, RemoteError> {
         let mut text = String::new();
         let mut thinking = String::new();
@@ -1056,6 +1062,7 @@ impl SessionBridge {
                 workflow_kernel,
                 workflow_session_id,
                 binding_session_id,
+                Some(run_id),
                 &event,
             )
             .await;
@@ -1166,6 +1173,7 @@ impl SessionBridge {
         workflow_kernel: Option<&WorkflowKernelState>,
         workflow_session_id: Option<&str>,
         binding_session_id: &str,
+        run_id: &str,
     ) -> Result<RemoteResponse, RemoteError> {
         let mut text = String::new();
         let mut thinking = String::new();
@@ -1179,6 +1187,7 @@ impl SessionBridge {
                 workflow_kernel,
                 workflow_session_id,
                 binding_session_id,
+                Some(run_id),
                 &event,
             )
             .await;
@@ -1343,13 +1352,16 @@ impl SessionBridge {
         workflow_kernel: Option<&WorkflowKernelState>,
         workflow_session_id: Option<&str>,
         binding_session_id: &str,
+        run_id: Option<&str>,
         event: &UnifiedStreamEvent,
     ) {
         if workflow_session_id.is_none() {
             return;
         }
         if let Some(kernel) = workflow_kernel {
-            let _ = kernel.sync_chat_runtime_event(binding_session_id, event).await;
+            let _ = kernel
+                .sync_chat_runtime_event(binding_session_id, run_id, event)
+                .await;
         }
     }
 }
@@ -1367,8 +1379,14 @@ fn truncate_str(s: &str, max_len: usize) -> String {
 mod tests {
     use super::*;
 
-    fn runtime_config(allowed_paths: Vec<PathBuf>, rate_limit_interval_ms: u64) -> Arc<BridgeRuntimeConfig> {
-        Arc::new(BridgeRuntimeConfig::new(allowed_paths, rate_limit_interval_ms))
+    fn runtime_config(
+        allowed_paths: Vec<PathBuf>,
+        rate_limit_interval_ms: u64,
+    ) -> Arc<BridgeRuntimeConfig> {
+        Arc::new(BridgeRuntimeConfig::new(
+            allowed_paths,
+            rate_limit_interval_ms,
+        ))
     }
 
     #[tokio::test]
@@ -1427,12 +1445,16 @@ mod tests {
         let bridge = SessionBridge::new_with_services(db, services);
 
         // /tmp should be allowed
-        let result = bridge.validate_project_path("/tmp", bridge.services.as_ref()).await;
+        let result = bridge
+            .validate_project_path("/tmp", bridge.services.as_ref())
+            .await;
         assert!(result.is_ok());
 
         // /etc should be denied (if it exists)
         if std::path::Path::new("/etc").exists() {
-            let result = bridge.validate_project_path("/etc", bridge.services.as_ref()).await;
+            let result = bridge
+                .validate_project_path("/etc", bridge.services.as_ref())
+                .await;
             assert!(matches!(result, Err(RemoteError::PathSandboxViolation(_))));
         }
     }
@@ -1448,7 +1470,9 @@ mod tests {
         };
         let bridge = SessionBridge::new_with_services(db, services);
 
-        let result = bridge.validate_project_path("/tmp", bridge.services.as_ref()).await;
+        let result = bridge
+            .validate_project_path("/tmp", bridge.services.as_ref())
+            .await;
         assert!(matches!(result, Err(RemoteError::PathSandboxViolation(_))));
     }
 

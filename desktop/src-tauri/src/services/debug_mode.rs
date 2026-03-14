@@ -504,20 +504,47 @@ fn classify_bash_command(command: &str) -> DebugToolClassification {
         return DebugToolClassification {
             capability_class: DebugCapabilityClass::Experiment,
             tool_category: None,
-            rationale: "Bash execution defaults to experiment scope until command intent is clearer."
-                .to_string(),
+            rationale:
+                "Bash execution defaults to experiment scope until command intent is clearer."
+                    .to_string(),
         };
     }
 
     if contains_any(
         &normalized,
         &[
-            "rm ", " rm", "mv ", " mv", "chmod ", " chown ", "sed -i", "tee ", "truncate ",
-            "kill ", "pkill ", "restart", "reboot", "kubectl apply", "kubectl delete",
-            "helm upgrade", "redis-cli set", "redis-cli del", "redis-cli flush", "psql -c insert",
-            "psql -c update", "psql -c delete", "mysql -e insert", "mysql -e update",
-            "mysql -e delete", "git commit", "git push", "npm install", "pnpm install",
-            "yarn add", "cargo add", "cargo install",
+            "rm ",
+            " rm",
+            "mv ",
+            " mv",
+            "chmod ",
+            " chown ",
+            "sed -i",
+            "tee ",
+            "truncate ",
+            "kill ",
+            "pkill ",
+            "restart",
+            "reboot",
+            "kubectl apply",
+            "kubectl delete",
+            "helm upgrade",
+            "redis-cli set",
+            "redis-cli del",
+            "redis-cli flush",
+            "psql -c insert",
+            "psql -c update",
+            "psql -c delete",
+            "mysql -e insert",
+            "mysql -e update",
+            "mysql -e delete",
+            "git commit",
+            "git push",
+            "npm install",
+            "pnpm install",
+            "yarn add",
+            "cargo add",
+            "cargo install",
         ],
     ) || normalized.contains(" >")
         || normalized.contains(">>")
@@ -542,13 +569,37 @@ fn classify_bash_command(command: &str) -> DebugToolClassification {
     if contains_any(
         &normalized,
         &[
-            "tail ", "head ", "cat ", "less ", "more ", "grep ", "rg ", "find ", "ls ", "pwd",
-            "printenv", "env", "which ", "ps ", "docker logs", "kubectl logs", "kubectl get",
-            "kubectl describe", "redis-cli get", "redis-cli keys", "psql -c select",
-            "mysql -e select", "curl -i", "curl -I", "wget --spider",
+            "tail ",
+            "head ",
+            "cat ",
+            "less ",
+            "more ",
+            "grep ",
+            "rg ",
+            "find ",
+            "ls ",
+            "pwd",
+            "printenv",
+            "env",
+            "which ",
+            "ps ",
+            "docker logs",
+            "kubectl logs",
+            "kubectl get",
+            "kubectl describe",
+            "redis-cli get",
+            "redis-cli keys",
+            "psql -c select",
+            "mysql -e select",
+            "curl -i",
+            "curl -I",
+            "wget --spider",
         ],
     ) {
-        let tool_category = if contains_any(&normalized, &["docker logs", "kubectl logs", "tail ", "grep "]) {
+        let tool_category = if contains_any(
+            &normalized,
+            &["docker logs", "kubectl logs", "tail ", "grep "],
+        ) {
             Some("debug:logs".to_string())
         } else if contains_any(&normalized, &["redis"]) {
             Some("debug:cache_read".to_string())
@@ -570,11 +621,35 @@ fn classify_bash_command(command: &str) -> DebugToolClassification {
     if contains_any(
         &normalized,
         &[
-            "npm test", "pnpm test", "yarn test", "vitest", "jest", "playwright", "cypress",
-            "cargo test", "pytest", "go test", "curl ", "wget ", "http ", "grpcurl", "kubectl exec",
+            "npm test",
+            "pnpm test",
+            "yarn test",
+            "vitest",
+            "jest",
+            "playwright",
+            "cypress",
+            "cargo test",
+            "pytest",
+            "go test",
+            "curl ",
+            "wget ",
+            "http ",
+            "grpcurl",
+            "kubectl exec",
         ],
     ) {
-        let tool_category = if contains_any(&normalized, &["vitest", "jest", "playwright", "cypress", "cargo test", "pytest", "go test"]) {
+        let tool_category = if contains_any(
+            &normalized,
+            &[
+                "vitest",
+                "jest",
+                "playwright",
+                "cypress",
+                "cargo test",
+                "pytest",
+                "go test",
+            ],
+        ) {
             Some("debug:test_runner".to_string())
         } else if contains_any(&normalized, &["kubectl"]) {
             Some("debug:k8s".to_string())
@@ -584,15 +659,17 @@ fn classify_bash_command(command: &str) -> DebugToolClassification {
         return DebugToolClassification {
             capability_class: DebugCapabilityClass::Experiment,
             tool_category,
-            rationale: "Shell command looks like a controlled diagnostic experiment or verification run."
-                .to_string(),
+            rationale:
+                "Shell command looks like a controlled diagnostic experiment or verification run."
+                    .to_string(),
         };
     }
 
     DebugToolClassification {
         capability_class: DebugCapabilityClass::Experiment,
         tool_category: None,
-        rationale: "Shell command is treated as an experiment by default in debug mode.".to_string(),
+        rationale: "Shell command is treated as an experiment by default in debug mode."
+            .to_string(),
     }
 }
 
@@ -681,7 +758,7 @@ pub fn classify_debug_tool_invocation(
                 capability_class,
                 tool_category: Some("debug:browser".to_string()),
                 rationale: rationale.to_string(),
-            }
+            };
         }
         "webfetch" | "websearch" => {
             return DebugToolClassification {
@@ -699,22 +776,33 @@ pub fn classify_debug_tool_invocation(
                 .unwrap_or_default();
             return classify_bash_command(&command);
         }
-        "task" => {
-            return DebugToolClassification {
-                capability_class: DebugCapabilityClass::Mutate,
-                tool_category: None,
-                rationale: "Delegating to general-purpose task agents is treated as a mutate-capable action."
+        "task" => return DebugToolClassification {
+            capability_class: DebugCapabilityClass::Mutate,
+            tool_category: None,
+            rationale:
+                "Delegating to general-purpose task agents is treated as a mutate-capable action."
                     .to_string(),
-            }
-        }
+        },
         _ => {}
     }
 
-    let read_hint = contains_any(&combined, &["read", "query", "select", "lookup", "fetch", "inspect", "list"]);
-    let write_hint =
-        contains_any(&combined, &["write", "update", "insert", "delete", "flush", "clear", "set "]);
+    let read_hint = contains_any(
+        &combined,
+        &[
+            "read", "query", "select", "lookup", "fetch", "inspect", "list",
+        ],
+    );
+    let write_hint = contains_any(
+        &combined,
+        &[
+            "write", "update", "insert", "delete", "flush", "clear", "set ",
+        ],
+    );
 
-    if contains_any(&combined, &["log", "sentry", "datadog", "elk", "cloudwatch"]) {
+    if contains_any(
+        &combined,
+        &["log", "sentry", "datadog", "elk", "cloudwatch"],
+    ) {
         return DebugToolClassification {
             capability_class: DebugCapabilityClass::Observe,
             tool_category: Some("debug:logs".to_string()),
@@ -753,7 +841,10 @@ pub fn classify_debug_tool_invocation(
             rationale: "Tool appears to target cache/Redis diagnostics.".to_string(),
         };
     }
-    if contains_any(&combined, &["postgres", "mysql", "sqlite", "database", "db ", "sql"]) {
+    if contains_any(
+        &combined,
+        &["postgres", "mysql", "sqlite", "database", "db ", "sql"],
+    ) {
         return DebugToolClassification {
             capability_class: if write_hint && !read_hint {
                 DebugCapabilityClass::Mutate
@@ -789,14 +880,20 @@ pub fn classify_debug_tool_invocation(
             rationale: "Tool appears to interact with cluster resources or workloads.".to_string(),
         };
     }
-    if contains_any(&combined, &["browser", "playwright", "puppeteer", "devtools"]) {
+    if contains_any(
+        &combined,
+        &["browser", "playwright", "puppeteer", "devtools"],
+    ) {
         return DebugToolClassification {
             capability_class: DebugCapabilityClass::Experiment,
             tool_category: Some("debug:browser".to_string()),
             rationale: "Tool appears to drive or inspect a browser runtime.".to_string(),
         };
     }
-    if contains_any(&combined, &["test", "vitest", "jest", "cypress", "playwright"]) {
+    if contains_any(
+        &combined,
+        &["test", "vitest", "jest", "cypress", "playwright"],
+    ) {
         return DebugToolClassification {
             capability_class: DebugCapabilityClass::Experiment,
             tool_category: Some("debug:test_runner".to_string()),
@@ -830,16 +927,20 @@ pub fn evaluate_debug_tool_access(
     args: &Value,
     runtime_metadata: Option<&RuntimeToolMetadata>,
 ) -> DebugToolAccessDecision {
-    let classification = classify_debug_tool_invocation(tool_name, description, args, runtime_metadata);
+    let classification =
+        classify_debug_tool_invocation(tool_name, description, args, runtime_metadata);
     let class_allowed = runtime_capabilities
         .allowed_classes
         .contains(&classification.capability_class);
-    let category_allowed = classification.tool_category.as_ref().map_or(true, |category| {
-        runtime_capabilities
-            .allowed_tool_categories
-            .iter()
-            .any(|candidate| candidate == category)
-    });
+    let category_allowed = classification
+        .tool_category
+        .as_ref()
+        .map_or(true, |category| {
+            runtime_capabilities
+                .allowed_tool_categories
+                .iter()
+                .any(|candidate| candidate == category)
+        });
     let environment_allowed = runtime_metadata.map_or(true, |metadata| {
         metadata.environment_allowlist.is_empty()
             || metadata
@@ -853,10 +954,12 @@ pub fn evaluate_debug_tool_access(
             runtime_capabilities.profile, classification.capability_class
         ))
     } else if !category_allowed {
-        classification
-            .tool_category
-            .as_ref()
-            .map(|category| format!("Debug capability profile '{:?}' does not allow {category}.", runtime_capabilities.profile))
+        classification.tool_category.as_ref().map(|category| {
+            format!(
+                "Debug capability profile '{:?}' does not allow {category}.",
+                runtime_capabilities.profile
+            )
+        })
     } else if !environment_allowed {
         Some(format!(
             "Tool '{tool_name}' is not allowed in {} debug sessions.",
@@ -952,7 +1055,10 @@ mod tests {
             Some(&metadata),
         );
 
-        assert_eq!(classification.capability_class, DebugCapabilityClass::Observe);
+        assert_eq!(
+            classification.capability_class,
+            DebugCapabilityClass::Observe
+        );
         assert_eq!(classification.tool_category.as_deref(), Some("debug:logs"));
     }
 

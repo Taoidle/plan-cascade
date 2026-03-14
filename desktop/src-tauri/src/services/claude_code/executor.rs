@@ -9,8 +9,8 @@ use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
 
 use crate::services::proxy::ProxyConfig;
-use crate::utils::error::{AppError, AppResult};
 use crate::utils::configure_background_process;
+use crate::utils::error::{AppError, AppResult};
 
 /// Handle to a running Claude Code CLI process
 pub struct ClaudeCodeProcess {

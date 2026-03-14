@@ -120,10 +120,12 @@ fn parse_with_frontmatter(frontmatter: &str, body: &str, path: &Path) -> AppResu
     let tool_policy_mode = fields
         .get("tool-policy-mode")
         .or_else(|| fields.get("tool_policy_mode"))
-        .map(|v| match extract_string(v).trim().to_ascii_lowercase().as_str() {
-            "restrictive" => SkillToolPolicyMode::Restrictive,
-            _ => SkillToolPolicyMode::Advisory,
-        })
+        .map(
+            |v| match extract_string(v).trim().to_ascii_lowercase().as_str() {
+                "restrictive" => SkillToolPolicyMode::Restrictive,
+                _ => SkillToolPolicyMode::Advisory,
+            },
+        )
         .unwrap_or_default();
     let allowed_tools = fields
         .get("allowed-tools")

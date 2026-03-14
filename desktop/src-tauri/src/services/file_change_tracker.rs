@@ -351,17 +351,32 @@ impl FileChangeTracker {
         dir: &Path,
         snapshot: &mut WorkspaceChangeSnapshot,
     ) -> Result<(), String> {
-        let entries = fs::read_dir(dir)
-            .map_err(|e| format!("Failed to read workspace directory '{}': {}", dir.display(), e))?;
+        let entries = fs::read_dir(dir).map_err(|e| {
+            format!(
+                "Failed to read workspace directory '{}': {}",
+                dir.display(),
+                e
+            )
+        })?;
         for entry in entries {
-            let entry =
-                entry.map_err(|e| format!("Failed to inspect workspace entry in '{}': {}", dir.display(), e))?;
+            let entry = entry.map_err(|e| {
+                format!(
+                    "Failed to inspect workspace entry in '{}': {}",
+                    dir.display(),
+                    e
+                )
+            })?;
             let path = entry.path();
             let file_type = entry
                 .file_type()
                 .map_err(|e| format!("Failed to inspect file type '{}': {}", path.display(), e))?;
 
-            if should_skip_workspace_path(&self.project_root, &self.data_dir, &path, file_type.is_dir()) {
+            if should_skip_workspace_path(
+                &self.project_root,
+                &self.data_dir,
+                &path,
+                file_type.is_dir(),
+            ) {
                 continue;
             }
 
@@ -379,8 +394,8 @@ impl FileChangeTracker {
                 .unwrap_or(&path)
                 .to_string_lossy()
                 .replace('\\', "/");
-            let bytes =
-                fs::read(&path).map_err(|e| format!("Failed to read workspace file '{}': {}", rel_path, e))?;
+            let bytes = fs::read(&path)
+                .map_err(|e| format!("Failed to read workspace file '{}': {}", rel_path, e))?;
             let hash = self.store_content(&bytes)?;
             snapshot.files.insert(rel_path, hash);
         }
@@ -1070,7 +1085,14 @@ mod tests {
         let mut tracker = make_tracker(dir.path());
 
         tracker.set_turn_index(0);
-        tracker.record_change("tc1", "Write", "src/a.rs", None, Some("hash_a"), "Wrote 10 lines");
+        tracker.record_change(
+            "tc1",
+            "Write",
+            "src/a.rs",
+            None,
+            Some("hash_a"),
+            "Wrote 10 lines",
+        );
         tracker.set_turn_index(1);
         tracker.record_change(
             "tc2",
@@ -1099,7 +1121,14 @@ mod tests {
         tracker.set_turn_index(0);
         let after_hash = tracker.store_content(b"new content").unwrap();
         fs::write(&file_path, "new content").unwrap();
-        tracker.record_change("tc1", "Write", "new.txt", None, Some(&after_hash), "Wrote file");
+        tracker.record_change(
+            "tc1",
+            "Write",
+            "new.txt",
+            None,
+            Some(&after_hash),
+            "Wrote file",
+        );
 
         // Simulate: Turn 1 edits an existing file
         let existing = dir.path().join("existing.txt");

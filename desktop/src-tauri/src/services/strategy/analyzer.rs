@@ -691,7 +691,10 @@ pub fn build_deterministic_recommendation(
         }
         ExecutionStrategy::MegaPlan => "full".to_string(),
     };
-    rationale.push(format!("Flow level '{}' matches the analyzed task scope.", config.flow_level));
+    rationale.push(format!(
+        "Flow level '{}' matches the analyzed task scope.",
+        config.flow_level
+    ));
 
     config.tdd_mode = if analysis.risk_level == RiskLevel::High {
         "flexible".to_string()
@@ -707,7 +710,9 @@ pub fn build_deterministic_recommendation(
 
     config.max_parallel = if analysis.parallelization_benefit == Benefit::None {
         2
-    } else if analysis.parallelization_benefit == Benefit::Significant || analysis.estimated_stories > 6 {
+    } else if analysis.parallelization_benefit == Benefit::Significant
+        || analysis.estimated_stories > 6
+    {
         6
     } else {
         4
@@ -729,7 +734,8 @@ pub fn build_deterministic_recommendation(
 
     if config.flow_level == "quick" {
         config.spec_interview_enabled = false;
-        rationale.push("Quick flow disables spec interview to keep startup lightweight.".to_string());
+        rationale
+            .push("Quick flow disables spec interview to keep startup lightweight.".to_string());
     }
 
     TaskStrategyRecommendation {

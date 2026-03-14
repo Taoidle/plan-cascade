@@ -14,7 +14,10 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 
-use crate::models::analytics::{AnalyticsAttribution, AnalyticsExecutionScope, AnalyticsWorkflowMode};
+use crate::commands::task_mode::TaskCustomQualityGate;
+use crate::models::analytics::{
+    AnalyticsAttribution, AnalyticsExecutionScope, AnalyticsWorkflowMode,
+};
 use crate::services::llm::provider::LlmProvider;
 use crate::services::quality_gates::ai_verify::AiVerificationGate;
 use crate::services::quality_gates::code_review::CodeReviewGate;
@@ -28,7 +31,6 @@ use crate::services::quality_gates::validation::ValidationGate;
 use crate::services::task_mode::agent_resolver::{
     AgentAssignment, AgentResolver, ExecutionPhase, StoryInfo,
 };
-use crate::commands::task_mode::TaskCustomQualityGate;
 use crate::utils::error::{AppError, AppResult};
 
 // ============================================================================
@@ -1369,7 +1371,8 @@ impl BatchExecutor {
                 match dor_mode {
                     GateMode::Hard => {
                         // DoR hard failure -- skip execution entirely
-                        let failure_reason = format!("DoR pre-flight failed: {}", dor_result.message);
+                        let failure_reason =
+                            format!("DoR pre-flight failed: {}", dor_result.message);
                         tracing::error!(
                             story_id = %story_id,
                             findings = ?dor_result.findings,
@@ -1510,11 +1513,11 @@ impl BatchExecutor {
                 let duration_ms = story_start.elapsed().as_millis() as u64;
                 let mut gate_results = dor_gate_result.clone().into_iter().collect::<Vec<_>>();
                 gate_results.push(PipelineGateResult::skipped(
-                        "quality_gates_disabled",
-                        "Quality Gates",
-                        GatePhase::Validation,
-                        "Quality gates disabled by workflow configuration",
-                    ));
+                    "quality_gates_disabled",
+                    "Quality Gates",
+                    GatePhase::Validation,
+                    "Quality gates disabled by workflow configuration",
+                ));
                 {
                     let mut s = state.write().await;
                     s.story_states.insert(
@@ -1803,7 +1806,10 @@ impl BatchExecutor {
                             let mut env = std::collections::HashMap::new();
                             env.insert("STORY_ID".to_string(), story_id);
                             env.insert("STORY_TITLE".to_string(), story_title);
-                            env.insert("PROJECT_PATH".to_string(), proj_path.to_string_lossy().to_string());
+                            env.insert(
+                                "PROJECT_PATH".to_string(),
+                                proj_path.to_string_lossy().to_string(),
+                            );
                             env.insert(
                                 "DIFF_FILE".to_string(),
                                 diff_file.to_string_lossy().to_string(),
@@ -1833,8 +1839,7 @@ impl BatchExecutor {
                                 } else {
                                     shell_result.stdout.as_str()
                                 };
-                                let (message, findings) =
-                                    parse_plugin_gate_output(fallback_output);
+                                let (message, findings) = parse_plugin_gate_output(fallback_output);
                                 if blocking {
                                     PipelineGateResult::failed(
                                         &gate_id,
@@ -1928,14 +1933,15 @@ impl BatchExecutor {
                                         last_gate_results = Some(gate_results);
 
                                         if attempt < max_attempts {
-                                            let resolver = AgentResolver::new(agents_config.clone());
+                                            let resolver =
+                                                AgentResolver::new(agents_config.clone());
                                             let story_info = StoryInfo {
                                                 title: story.title.clone(),
                                                 description: story.description.clone(),
                                                 agent: None,
                                             };
-                                            let retry_assignment =
-                                                resolver.resolve(&story_info, ExecutionPhase::Retry);
+                                            let retry_assignment = resolver
+                                                .resolve(&story_info, ExecutionPhase::Retry);
                                             current_agent = retry_assignment.agent_name.clone();
 
                                             let mut s = state.write().await;

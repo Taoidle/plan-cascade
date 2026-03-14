@@ -29,27 +29,27 @@ pub async fn enter_task_mode(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
-    let task_entry_handoff = if let Some(kernel_session_id) = normalized_kernel_session_id.as_deref()
-    {
-        let entry = kernel_state
-            .mode_entry_handoff_for_kernel_session(kernel_session_id, WorkflowMode::Task)
-            .await
-            .unwrap_or_default();
-        if !entry.conversation_context.is_empty()
-            || !entry.summary_items.is_empty()
-            || !entry.artifact_refs.is_empty()
-            || !entry.context_sources.is_empty()
-            || !entry.metadata.is_empty()
-        {
-            Some(entry)
-        } else {
-            kernel_state
-                .handoff_context_for_kernel_session(kernel_session_id)
+    let task_entry_handoff =
+        if let Some(kernel_session_id) = normalized_kernel_session_id.as_deref() {
+            let entry = kernel_state
+                .mode_entry_handoff_for_kernel_session(kernel_session_id, WorkflowMode::Task)
                 .await
-        }
-    } else {
-        None
-    };
+                .unwrap_or_default();
+            if !entry.conversation_context.is_empty()
+                || !entry.summary_items.is_empty()
+                || !entry.artifact_refs.is_empty()
+                || !entry.context_sources.is_empty()
+                || !entry.metadata.is_empty()
+            {
+                Some(entry)
+            } else {
+                kernel_state
+                    .handoff_context_for_kernel_session(kernel_session_id)
+                    .await
+            }
+        } else {
+            None
+        };
     let analysis_input = task_entry_handoff
         .as_ref()
         .and_then(render_task_entry_handoff_context)
@@ -174,7 +174,11 @@ pub async fn confirm_task_configuration(
         let mut sessions = state.sessions.write().await;
         let session = match sessions.get_mut(session_id) {
             Some(session) => session,
-            None => return Ok(CommandResponse::err("Invalid session ID or no active session")),
+            None => {
+                return Ok(CommandResponse::err(
+                    "Invalid session ID or no active session",
+                ))
+            }
         };
         session.confirmed_config = Some(request.workflow_config.clone());
         session.config_confirmation_state = TaskConfigConfirmationState::Confirmed;
@@ -254,7 +258,9 @@ async fn build_task_strategy_recommendation(
     app_state: &tauri::State<'_, AppState>,
 ) -> Option<TaskStrategyRecommendation> {
     let config = app_state.inner().get_config().await.ok()?;
-    let provider = provider_override.unwrap_or(config.default_provider.trim()).trim();
+    let provider = provider_override
+        .unwrap_or(config.default_provider.trim())
+        .trim();
     if provider.is_empty() {
         return None;
     }
