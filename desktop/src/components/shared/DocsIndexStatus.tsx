@@ -50,6 +50,7 @@ interface DocsChangesEvent {
 interface DocsIndexStatusProps {
   compact?: boolean;
   className?: string;
+  workspacePathOverride?: string | null;
 }
 
 const DOCS_PREFIX = '[Docs] ';
@@ -73,9 +74,10 @@ function normalizeDocsStatus(raw?: string): DocsStatus {
   }
 }
 
-export function DocsIndexStatus({ compact = false, className }: DocsIndexStatusProps) {
+export function DocsIndexStatus({ compact = false, className, workspacePathOverride }: DocsIndexStatusProps) {
   const { t } = useTranslation('common');
-  const workspacePath = useSettingsStore((s) => s.workspacePath);
+  const settingsWorkspacePath = useSettingsStore((s) => s.workspacePath);
+  const workspacePath = workspacePathOverride !== undefined ? workspacePathOverride : settingsWorkspacePath;
   const projectId = useProjectsStore((s) => s.selectedProject?.id ?? 'default');
 
   const [status, setStatus] = useState<DocsStatus>('idle');
@@ -141,11 +143,7 @@ export function DocsIndexStatus({ compact = false, className }: DocsIndexStatusP
         setStatus('queued');
       } else if (payload.stage === 'chunking' && normalizedProgress === 0) {
         setStatus('scanning');
-      } else if (
-        payload.stage === 'chunking' ||
-        payload.stage === 'embedding' ||
-        payload.stage === 'storing'
-      ) {
+      } else if (payload.stage === 'chunking' || payload.stage === 'embedding' || payload.stage === 'storing') {
         setStatus('indexing');
       }
 
@@ -293,9 +291,7 @@ export function DocsIndexStatus({ compact = false, className }: DocsIndexStatusP
           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
         </svg>
-        <span className={clsx('text-amber-600 dark:text-amber-400', compact ? 'text-xs' : 'text-sm')}>
-          {text}
-        </span>
+        <span className={clsx('text-amber-600 dark:text-amber-400', compact ? 'text-xs' : 'text-sm')}>{text}</span>
       </div>
     );
   }

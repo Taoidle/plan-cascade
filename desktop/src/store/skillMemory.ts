@@ -163,6 +163,8 @@ interface SkillMemoryState {
   memories: MemoryEntry[];
   memoriesLoading: boolean;
   memoriesError: string | null;
+  panelMemories: MemoryEntry[];
+  panelMemoriesLoading: boolean;
   memoryStats: MemoryStats | null;
   memorySearchQuery: string;
   memoryCategoryFilter: MemoryCategoryFilter;
@@ -214,6 +216,7 @@ interface SkillMemoryState {
   setSkillSourceFilter: (filter: SkillSourceFilter) => void;
 
   // --- Memory Actions ---
+  loadPanelMemories: (projectPath: string, sessionId?: string | null) => Promise<void>;
   loadMemories: (projectPath: string) => Promise<void>;
   loadMoreMemories: (projectPath: string) => Promise<void>;
   loadMemoryStats: (projectPath: string) => Promise<void>;
@@ -289,6 +292,8 @@ const defaultState = {
   memories: [] as MemoryEntry[],
   memoriesLoading: false,
   memoriesError: null as string | null,
+  panelMemories: [] as MemoryEntry[],
+  panelMemoriesLoading: false,
   memoryStats: null as MemoryStats | null,
   memorySearchQuery: '',
   memoryCategoryFilter: 'all' as MemoryCategoryFilter,
@@ -813,6 +818,43 @@ export const useSkillMemoryStore = create<SkillMemoryState>()((set, get) => ({
   setSkillSourceFilter: (filter: SkillSourceFilter) => set({ skillSourceFilter: filter }),
 
   // --- Memory Actions ---
+
+  loadPanelMemories: async (projectPath: string, sessionId?: string | null) => {
+    set({ panelMemoriesLoading: true });
+    try {
+      const normalizedSessionId = sessionId?.trim() || null;
+      const scopes = normalizedSessionId ? ['session', 'project', 'global'] : ['project', 'global'];
+      const response = await invoke<CommandResponse<MemoryEntry[]>>('list_memory_entries_v2', {
+        projectPath,
+        categories: null,
+        scopes,
+        statuses: ['active'],
+        offset: 0,
+        limit: 20,
+        sessionId: normalizedSessionId,
+      });
+      if (response.success && response.data) {
+        const deduped = Array.from(new Map(response.data.map((entry) => [entry.id, entry])).values()).sort(
+          (left, right) => right.updated_at.localeCompare(left.updated_at),
+        );
+        set({
+          panelMemories: deduped,
+          panelMemoriesLoading: false,
+        });
+      } else {
+        set({
+          panelMemories: [],
+          panelMemoriesLoading: false,
+        });
+      }
+    } catch (error) {
+      reportNonFatal('skillMemory.loadPanelMemories', error, { projectPath, sessionId: sessionId ?? null });
+      set({
+        panelMemories: [],
+        panelMemoriesLoading: false,
+      });
+    }
+  },
 
   loadMemories: async (projectPath: string) => {
     set({ memoriesLoading: true, memoriesError: null, memoryPage: 0 });

@@ -41,11 +41,13 @@ interface IndexStatusProps {
   /** Compact mode for embedding in headers */
   compact?: boolean;
   className?: string;
+  workspacePathOverride?: string | null;
 }
 
-export function IndexStatus({ compact = false, className }: IndexStatusProps) {
+export function IndexStatus({ compact = false, className, workspacePathOverride }: IndexStatusProps) {
   const { t } = useTranslation('common');
-  const workspacePath = useSettingsStore((s) => s.workspacePath);
+  const settingsWorkspacePath = useSettingsStore((s) => s.workspacePath);
+  const workspacePath = workspacePathOverride !== undefined ? workspacePathOverride : settingsWorkspacePath;
 
   const [status, setStatus] = useState<IndexStatusEvent['status']>('idle');
   const [indexedFiles, setIndexedFiles] = useState(0);

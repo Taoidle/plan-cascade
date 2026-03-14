@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import type { WorkflowSession } from '../../types/workflowKernel';
+import { resolveSessionRuntimePath, resolveSessionWorkspaceRootPath } from '../../lib/workflowSessionPaths';
 
 export interface ActiveSessionPaths {
   workspaceRootPath: string | null;
@@ -10,20 +11,13 @@ export interface ActiveSessionPaths {
   managedWorktreeId: string | null;
 }
 
-export function resolveSessionRuntimePath(
-  session: WorkflowSession | null,
-  fallbackWorkspacePath: string | null,
-): string | null {
-  return session?.runtime?.runtimePath ?? session?.workspacePath ?? fallbackWorkspacePath;
-}
-
 export function useActiveSessionPaths(
   session: WorkflowSession | null,
   fallbackWorkspacePath: string | null,
 ): ActiveSessionPaths {
   return useMemo(
     () => ({
-      workspaceRootPath: session?.runtime?.rootPath ?? session?.workspacePath ?? fallbackWorkspacePath,
+      workspaceRootPath: resolveSessionWorkspaceRootPath(session, fallbackWorkspacePath),
       runtimePath: resolveSessionRuntimePath(session, fallbackWorkspacePath),
       runtimeKind: session?.runtime?.runtimeKind ?? 'main',
       runtimeBranch: session?.runtime?.branch ?? null,

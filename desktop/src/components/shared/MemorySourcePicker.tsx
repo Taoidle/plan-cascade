@@ -13,7 +13,8 @@ import { ChevronDownIcon, ChevronRightIcon, MagnifyingGlassIcon } from '@radix-u
 import { useContextSourcesStore } from '../../store/contextSources';
 import { useSettingsStore } from '../../store/settings';
 import { useSkillMemoryStore } from '../../store/skillMemory';
-import { MEMORY_CATEGORIES, type MemoryCategory, type MemoryEntry, type MemoryScope } from '../../types/skillMemory';
+import { MEMORY_CATEGORIES, type MemoryCategory, type MemoryScope } from '../../types/skillMemory';
+import { inferMemoryScope } from '../../lib/memorySession';
 
 /** Color classes for each memory category */
 const CATEGORY_COLORS: Record<string, string> = {
@@ -35,14 +36,6 @@ const SCOPE_STYLES: Record<MemoryScope, string> = {
   project: 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300',
   session: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
 };
-
-function inferScope(entry: MemoryEntry): MemoryScope {
-  if (entry.scope) return entry.scope;
-  const projectPath = entry.project_path;
-  if (projectPath === '__global__') return 'global';
-  if (projectPath.startsWith('__session__:')) return 'session';
-  return 'project';
-}
 
 export function MemorySourcePicker() {
   const { t } = useTranslation('simpleMode');
@@ -301,8 +294,10 @@ export function MemorySourcePicker() {
                     CATEGORY_COLORS[entry.category] || 'bg-gray-400',
                   )}
                 />
-                <span className={clsx('text-2xs px-1 py-0.5 rounded flex-shrink-0', SCOPE_STYLES[inferScope(entry)])}>
-                  {SCOPE_LABELS[inferScope(entry)]}
+                <span
+                  className={clsx('text-2xs px-1 py-0.5 rounded flex-shrink-0', SCOPE_STYLES[inferMemoryScope(entry)])}
+                >
+                  {SCOPE_LABELS[inferMemoryScope(entry)]}
                 </span>
                 <span className="flex-1 text-2xs text-gray-600 dark:text-gray-400 truncate">
                   {entry.content.slice(0, 80)}
@@ -392,10 +387,10 @@ export function MemorySourcePicker() {
                         <span
                           className={clsx(
                             'text-2xs px-1 py-0.5 rounded flex-shrink-0',
-                            SCOPE_STYLES[inferScope(entry)],
+                            SCOPE_STYLES[inferMemoryScope(entry)],
                           )}
                         >
-                          {SCOPE_LABELS[inferScope(entry)]}
+                          {SCOPE_LABELS[inferMemoryScope(entry)]}
                         </span>
                         <span className="flex-1 text-2xs text-gray-600 dark:text-gray-400 truncate">
                           {entry.content.slice(0, 60)}

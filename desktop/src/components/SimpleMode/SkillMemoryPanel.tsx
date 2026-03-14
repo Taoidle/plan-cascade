@@ -17,10 +17,13 @@ import { useSkillMemoryStore } from '../../store/skillMemory';
 import { useSettingsStore } from '../../store/settings';
 import { useContextSourcesStore } from '../../store/contextSources';
 import { useContextOpsStore } from '../../store/contextOps';
+import { useExecutionStore } from '../../store/execution';
 import { useWorkflowKernelStore } from '../../store/workflowKernel';
+import { selectKernelChatRuntime } from '../../store/workflowKernelSelectors';
 import { SkillRow } from './SkillRow';
 import { MemoryRow } from './MemoryRow';
-import type { SkillSummary } from '../../types/skillMemory';
+import type { MemoryEntry, SkillSummary } from '../../types/skillMemory';
+import { inferMemoryScope, resolveActiveMemorySessionId } from '../../lib/memorySession';
 import { Collapsible } from './Collapsible';
 
 // ============================================================================
@@ -75,28 +78,47 @@ export function SkillMemoryPanel() {
   const { t } = useTranslation('simpleMode');
   const workspacePath = useSettingsStore((s) => s.workspacePath);
   const rootSessionId = useWorkflowKernelStore((s) => s.sessionId);
+  const kernelChatBindingSessionId = useWorkflowKernelStore((s) => selectKernelChatRuntime(s.session).bindingSessionId);
+  const taskId = useExecutionStore((s) => s.taskId);
+  const standaloneSessionId = useExecutionStore((s) => s.standaloneSessionId);
+  const foregroundOriginSessionId = useExecutionStore((s) => s.foregroundOriginSessionId);
   const invokedSkillIds = useContextSourcesStore((s) => s.invokedSkillIds);
   const latestEnvelope = useContextOpsStore((s) => s.latestEnvelope);
 
   const skills = useSkillMemoryStore((s) => s.skills);
   const skillsLoading = useSkillMemoryStore((s) => s.skillsLoading);
-  const memories = useSkillMemoryStore((s) => s.memories);
-  const memoriesLoading = useSkillMemoryStore((s) => s.memoriesLoading);
+  const panelMemories = useSkillMemoryStore((s) => s.panelMemories);
+  const panelMemoriesLoading = useSkillMemoryStore((s) => s.panelMemoriesLoading);
   const loadSkills = useSkillMemoryStore((s) => s.loadSkills);
-  const loadMemories = useSkillMemoryStore((s) => s.loadMemories);
+  const loadPanelMemories = useSkillMemoryStore((s) => s.loadPanelMemories);
+  const setMemorySessionId = useSkillMemoryStore((s) => s.setMemorySessionId);
   const toggleSkill = useSkillMemoryStore((s) => s.toggleSkill);
   const toggleGeneratedSkill = useSkillMemoryStore((s) => s.toggleGeneratedSkill);
   const openDialog = useSkillMemoryStore((s) => s.openDialog);
   const memoryPipelineSnapshot = useSkillMemoryStore((s) =>
     rootSessionId ? (s.memoryPipelineByRootSession[rootSessionId] ?? null) : null,
   );
+  const activeSessionId = useMemo(
+    () =>
+      resolveActiveMemorySessionId({
+        foregroundOriginSessionId,
+        bindingSessionId: kernelChatBindingSessionId,
+        taskId,
+        standaloneSessionId,
+      }),
+    [foregroundOriginSessionId, kernelChatBindingSessionId, standaloneSessionId, taskId],
+  );
 
   // Fallback loading for direct panel usage (sidebar preloads on mount).
   useEffect(() => {
     if (!workspacePath) return;
     if (skills.length === 0) void loadSkills(workspacePath);
-    if (memories.length === 0) void loadMemories(workspacePath);
-  }, [workspacePath, skills.length, memories.length, loadSkills, loadMemories]);
+    void loadPanelMemories(workspacePath, activeSessionId);
+  }, [activeSessionId, workspacePath, skills.length, loadPanelMemories, loadSkills]);
+
+  useEffect(() => {
+    setMemorySessionId(activeSessionId);
+  }, [activeSessionId, setMemorySessionId]);
 
   // Separate auto-detected skills from others
   const { activeSkills, detectedSkills, projectSkills, generatedSkills } = useMemo(() => {
@@ -140,9 +162,17 @@ export function SkillMemoryPanel() {
     openDialog('skills');
   }, [openDialog]);
 
-  const handleMemoryClick = useCallback(() => {
-    openDialog('memory', { memoryViewMode: 'all' });
-  }, [openDialog]);
+  const handleMemoryClick = useCallback(
+    (memory?: MemoryEntry) => {
+      const preferredScope = memory ? inferMemoryScope(memory) : activeSessionId ? 'session' : 'project';
+      openDialog('memory', {
+        memoryViewMode: 'all',
+        memoryScope: preferredScope,
+        memorySessionId: activeSessionId,
+      });
+    },
+    [activeSessionId, openDialog],
+  );
 
   const currentSkillSummary = latestEnvelope?.diagnostics;
 
@@ -186,7 +216,7 @@ export function SkillMemoryPanel() {
       {/* Content */}
       <div className="px-2 py-2 space-y-1 flex-1 min-h-0 overflow-y-auto">
         {/* Loading state */}
-        {(skillsLoading || memoriesLoading) && skills.length === 0 && memories.length === 0 && (
+        {(skillsLoading || panelMemoriesLoading) && skills.length === 0 && panelMemories.length === 0 && (
           <div className="text-center py-4">
             <span className="text-xs text-gray-400 dark:text-gray-500">{t('skillPanel.loading')}</span>
           </div>
@@ -284,20 +314,20 @@ export function SkillMemoryPanel() {
         </CollapsibleSection>
 
         {/* Memories */}
-        <CollapsibleSection title={t('skillPanel.memories')} count={memories.length} defaultExpanded={false}>
-          {memories.length > 0 ? (
-            memories
+        <CollapsibleSection title={t('skillPanel.memories')} count={panelMemories.length} defaultExpanded={false}>
+          {panelMemories.length > 0 ? (
+            panelMemories
               .slice(0, 5)
               .map((memory) => <MemoryRow key={memory.id} memory={memory} onClick={handleMemoryClick} />)
           ) : (
             <p className="text-2xs text-gray-400 dark:text-gray-500 px-2 py-1">{t('skillPanel.noMemories')}</p>
           )}
-          {memories.length > 5 && (
+          {panelMemories.length > 5 && (
             <button
-              onClick={() => openDialog('memory', { memoryViewMode: 'all' })}
+              onClick={() => handleMemoryClick()}
               className="w-full text-2xs text-primary-600 dark:text-primary-400 hover:underline px-2 py-1"
             >
-              {t('skillPanel.viewAll', { count: memories.length })}
+              {t('skillPanel.viewAll', { count: panelMemories.length })}
             </button>
           )}
         </CollapsibleSection>

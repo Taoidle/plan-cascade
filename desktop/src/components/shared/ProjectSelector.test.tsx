@@ -138,4 +138,11 @@ describe('ProjectSelector - Open File Manager Button', () => {
     // The parent should not receive the click event because stopPropagation is called
     expect(parentClickHandler).not.toHaveBeenCalled();
   });
+
+  it('should render the override workspace path when provided', () => {
+    setWorkspacePath('/home/user/projects/workspace-a');
+    render(<ProjectSelector workspacePathOverride="/home/user/projects/workspace-b" />);
+
+    expect(screen.getByText('workspace-b')).toBeInTheDocument();
+  });
 });

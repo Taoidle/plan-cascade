@@ -5,6 +5,7 @@ import { useContextOpsStore } from '../../store/contextOps';
 import { useExecutionStore } from '../../store/execution';
 import { useSettingsStore } from '../../store/settings';
 import { useSkillMemoryStore } from '../../store/skillMemory';
+import { useWorkflowKernelStore } from '../../store/workflowKernel';
 
 vi.mock('react-i18next', () => ({
   initReactI18next: {
@@ -97,6 +98,10 @@ describe('SkillMemoryDialog integration', () => {
       taskId: null,
       standaloneSessionId: null,
       foregroundOriginSessionId: null,
+    });
+    useWorkflowKernelStore.setState({
+      session: null,
+      sessionId: null,
     });
     useSettingsStore.setState({ workspacePath: '' });
     seedEnvelope();

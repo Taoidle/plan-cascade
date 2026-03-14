@@ -20,6 +20,7 @@ import { useContextSourcesStore } from '../../store/contextSources';
 import { useExecutionStore } from '../../store/execution';
 import { useContextOpsStore } from '../../store/contextOps';
 import { useWorkflowKernelStore } from '../../store/workflowKernel';
+import { selectKernelChatRuntime } from '../../store/workflowKernelSelectors';
 import { SkillRow } from '../SimpleMode/SkillRow';
 import { SkillDetail } from './SkillDetail';
 import { MemoryDetail } from './MemoryDetail';
@@ -37,6 +38,7 @@ import type {
   MemoryReviewCandidate,
 } from '../../types/skillMemory';
 import { MEMORY_CATEGORIES } from '../../types/skillMemory';
+import { resolveActiveMemorySessionId } from '../../lib/memorySession';
 
 // ============================================================================
 // Source filter options
@@ -885,6 +887,7 @@ function MemoryTab() {
   const workspacePath = useSettingsStore((s) => s.workspacePath);
   const latestEnvelope = useContextOpsStore((s) => s.latestEnvelope);
   const rootSessionId = useWorkflowKernelStore((s) => s.sessionId);
+  const kernelChatBindingSessionId = useWorkflowKernelStore((s) => selectKernelChatRuntime(s.session).bindingSessionId);
   const taskId = useExecutionStore((s) => s.taskId);
   const standaloneSessionId = useExecutionStore((s) => s.standaloneSessionId);
   const foregroundOriginSessionId = useExecutionStore((s) => s.foregroundOriginSessionId);
@@ -932,11 +935,13 @@ function MemoryTab() {
     [latestEnvelope],
   );
   const activeSessionId = useMemo(() => {
-    if (foregroundOriginSessionId?.trim()) return foregroundOriginSessionId.trim();
-    if (taskId?.trim()) return `claude:${taskId.trim()}`;
-    if (standaloneSessionId?.trim()) return `standalone:${standaloneSessionId.trim()}`;
-    return null;
-  }, [foregroundOriginSessionId, taskId, standaloneSessionId]);
+    return resolveActiveMemorySessionId({
+      foregroundOriginSessionId,
+      bindingSessionId: kernelChatBindingSessionId,
+      taskId,
+      standaloneSessionId,
+    });
+  }, [foregroundOriginSessionId, kernelChatBindingSessionId, taskId, standaloneSessionId]);
   const persistedStatusCounts = memoryStats?.status_counts ?? {};
   const allPersistedCount =
     (persistedStatusCounts.active ?? 0) +

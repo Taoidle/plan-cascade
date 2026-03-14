@@ -15,7 +15,7 @@ import {
   isForegroundSession,
   updateBackgroundSessionByTaskId,
 } from './sessionRouting';
-import { buildExecutionRuntimeHandleId } from './runtimeRegistryActions';
+import { buildExecutionRuntimeHandleId, resolveRuntimeWorkspacePath } from './runtimeRegistryActions';
 import type {
   AnalysisCoverageSnapshot,
   BackendUsageStats,
@@ -339,7 +339,7 @@ function upsertForegroundChatRuntimeFromState(state: ExecutionState): Partial<Ex
         latestUsage: state.latestUsage ? { ...state.latestUsage } : null,
         sessionUsageTotals: state.sessionUsageTotals ? { ...state.sessionUsageTotals } : null,
         startedAt: state.startedAt,
-        workspacePath: settings.workspacePath ?? null,
+        workspacePath: resolveRuntimeWorkspacePath(rootSessionId ?? null, settings.workspacePath ?? null),
         llmBackend: settings.backend,
         llmProvider: settings.provider,
         llmModel: settings.model,

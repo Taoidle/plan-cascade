@@ -1610,6 +1610,9 @@ fn looks_project_candidate(candidate: &ExtractedMemoryCandidate) -> bool {
 }
 
 fn route_scope(candidate: &ExtractedMemoryCandidate) -> Option<MemoryScopeV2> {
+    if candidate.suggested_scope.is_some() {
+        return candidate.suggested_scope;
+    }
     if looks_global_candidate(candidate) {
         return Some(MemoryScopeV2::Global);
     }
@@ -1815,5 +1818,48 @@ async fn mark_session_extraction_done(state: &AppState, session_id: Option<&str>
             "[memory-extraction] Failed to persist extraction marker for session {}: {}",
             session_id, e
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn candidate(
+        content: &str,
+        category: MemoryCategory,
+        suggested_scope: Option<MemoryScopeV2>,
+    ) -> ExtractedMemoryCandidate {
+        ExtractedMemoryCandidate {
+            category,
+            content: content.to_string(),
+            keywords: vec![],
+            importance: 0.7,
+            source_session_id: Some("claude:task-1".to_string()),
+            source_context: "llm_extract:auto_v3".to_string(),
+            suggested_scope,
+            evidence_snippets: vec![],
+            confidence: 0.9,
+        }
+    }
+
+    #[test]
+    fn route_scope_preserves_explicit_session_suggestion() {
+        let scoped = route_scope(&candidate(
+            "Runtime workaround for the current failing branch",
+            MemoryCategory::Fact,
+            Some(MemoryScopeV2::Session),
+        ));
+        assert_eq!(scoped, Some(MemoryScopeV2::Session));
+    }
+
+    #[test]
+    fn route_scope_uses_heuristics_when_suggestion_is_missing() {
+        let scoped = route_scope(&candidate(
+            "Respond in Chinese for future coding help",
+            MemoryCategory::Preference,
+            None,
+        ));
+        assert_eq!(scoped, Some(MemoryScopeV2::Global));
     }
 }

@@ -1,4 +1,5 @@
 import { ToolCallStreamFilter } from '../../utils/toolCallFilter';
+import { resolveSessionWorkspaceRootPath } from '../../lib/workflowSessionPaths';
 import { useWorkflowKernelStore } from '../workflowKernel';
 import { useSettingsStore, type Backend } from '../settings';
 import type { ExecutionRuntimeHandle, ExecutionState, ExecutionStatus } from './types';
@@ -16,6 +17,28 @@ interface RuntimeRegistryActions {
 
 export function buildExecutionRuntimeHandleId(source: 'claude' | 'standalone', rawSessionId: string): string {
   return `${source}:${rawSessionId}`;
+}
+
+export function resolveRuntimeWorkspacePath(
+  rootSessionId: string | null | undefined,
+  fallbackWorkspacePath: string | null | undefined,
+): string | null {
+  const kernel = useWorkflowKernelStore.getState();
+  const normalizedRootSessionId =
+    rootSessionId?.trim() || kernel.activeRootSessionId || kernel.session?.sessionId || null;
+
+  if (normalizedRootSessionId) {
+    if (kernel.session?.sessionId === normalizedRootSessionId) {
+      return resolveSessionWorkspaceRootPath(kernel.session, fallbackWorkspacePath ?? null);
+    }
+
+    const catalogItem = kernel.sessionCatalog.find((item) => item.sessionId === normalizedRootSessionId);
+    if (catalogItem) {
+      return resolveSessionWorkspaceRootPath(catalogItem, fallbackWorkspacePath ?? null);
+    }
+  }
+
+  return fallbackWorkspacePath ?? null;
 }
 
 type ExecutionSetState = (
@@ -142,6 +165,7 @@ export function buildActiveChatRuntimeRegistryPatch(
 ): Pick<ExecutionState, 'runtimeRegistry' | 'activeRuntimeHandleId'> {
   const handle = buildExecutionRuntimeHandle({
     ...params,
+    workspacePath: resolveRuntimeWorkspacePath(params.rootSessionId, params.workspacePath),
     status: state.status,
     streamingOutput: state.streamingOutput,
     streamLineCounter: state.streamLineCounter,
@@ -184,7 +208,7 @@ function buildRuntimeHandleFromForeground(state: ExecutionState): ExecutionRunti
     latestUsage: state.latestUsage,
     sessionUsageTotals: state.sessionUsageTotals,
     startedAt: state.startedAt,
-    workspacePath: settingsState.workspacePath ?? null,
+    workspacePath: resolveRuntimeWorkspacePath(rootSessionId, settingsState.workspacePath ?? null),
     llmBackend: settingsState.backend,
     llmProvider: settingsState.provider,
     llmModel: settingsState.model,
@@ -258,8 +282,12 @@ export function createRuntimeRegistryActions(deps: RuntimeRegistryActionDeps): R
         llmModel: matchedRuntime?.llmModel,
       });
 
-      if (matchedRuntime?.workspacePath) {
-        useSettingsStore.setState({ workspacePath: matchedRuntime.workspacePath });
+      const restoredWorkspacePath = resolveRuntimeWorkspacePath(
+        matchedRuntime?.rootSessionId ?? null,
+        matchedRuntime?.workspacePath ?? null,
+      );
+      if (restoredWorkspacePath) {
+        useSettingsStore.setState({ workspacePath: restoredWorkspacePath });
       }
     },
   };

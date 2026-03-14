@@ -16,7 +16,10 @@ import { useContextSourcesStore } from '../../store/contextSources';
 import { useSettingsStore } from '../../store/settings';
 import { useProjectsStore } from '../../store/projects';
 import { useExecutionStore } from '../../store/execution';
+import { useWorkflowKernelStore } from '../../store/workflowKernel';
+import { selectKernelChatRuntime } from '../../store/workflowKernelSelectors';
 import { ragSyncDocsCollection } from '../../lib/knowledgeApi';
+import { resolveActiveMemorySessionId } from '../../lib/memorySession';
 import { KnowledgeSourcePicker } from './KnowledgeSourcePicker';
 import { MemorySourcePicker } from './MemorySourcePicker';
 import { SkillsSourcePicker } from './SkillsSourcePicker';
@@ -81,16 +84,16 @@ export function ContextSourceBar() {
   const taskId = useExecutionStore((s) => s.taskId);
   const standaloneSessionId = useExecutionStore((s) => s.standaloneSessionId);
   const foregroundOriginSessionId = useExecutionStore((s) => s.foregroundOriginSessionId);
+  const kernelChatBindingSessionId = useWorkflowKernelStore((s) => selectKernelChatRuntime(s.session).bindingSessionId);
   const projectId = selectedProject?.id ?? 'default';
   const activeSessionId = useMemo(() => {
-    const normalizedForeground = typeof foregroundOriginSessionId === 'string' ? foregroundOriginSessionId.trim() : '';
-    const normalizedTaskId = typeof taskId === 'string' ? taskId.trim() : '';
-    const normalizedStandaloneId = typeof standaloneSessionId === 'string' ? standaloneSessionId.trim() : '';
-    if (normalizedForeground) return normalizedForeground;
-    if (normalizedTaskId) return `claude:${normalizedTaskId}`;
-    if (normalizedStandaloneId) return `standalone:${normalizedStandaloneId}`;
-    return null;
-  }, [foregroundOriginSessionId, taskId, standaloneSessionId]);
+    return resolveActiveMemorySessionId({
+      foregroundOriginSessionId,
+      bindingSessionId: kernelChatBindingSessionId,
+      taskId,
+      standaloneSessionId,
+    });
+  }, [foregroundOriginSessionId, kernelChatBindingSessionId, taskId, standaloneSessionId]);
 
   useEffect(() => {
     setMemorySessionId(activeSessionId);

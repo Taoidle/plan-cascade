@@ -392,6 +392,38 @@ describe('Execution Store - Background Session State', () => {
   });
 
   describe('parkForegroundRuntime()', () => {
+    it('captures workspacePath from the bound workflow session instead of stale settings state', () => {
+      const kernelSession = {
+        ...createKernelSession('root-1'),
+        workspacePath: '/tmp/project-correct',
+      };
+      useWorkflowKernelStore.setState({
+        sessionId: 'root-1',
+        activeRootSessionId: 'root-1',
+        session: kernelSession,
+      });
+      useSettingsStore.setState({ workspacePath: '/tmp/project-stale' });
+      useExecutionStore.setState({
+        taskDescription: 'Chat runtime',
+        status: 'running',
+        streamingOutput: [{ id: 1, content: 'hello', type: 'text', timestamp: 1000 }],
+        streamLineCounter: 1,
+        currentTurnStartLineId: 0,
+        taskId: 'chat-session-1',
+        isChatSession: true,
+        standaloneTurns: [],
+        standaloneSessionId: null,
+        latestUsage: null,
+        sessionUsageTotals: null,
+        startedAt: 1000,
+      });
+
+      const parkedId = useExecutionStore.getState().parkForegroundRuntime();
+      const parked = parkedId ? useExecutionStore.getState().runtimeRegistry[parkedId] : null;
+
+      expect(parked?.workspacePath).toBe('/tmp/project-correct');
+    });
+
     it('parks the current runtime into runtimeRegistry and resets the foreground', () => {
       useExecutionStore.setState({
         taskDescription: 'Chat runtime',
@@ -425,6 +457,16 @@ describe('Execution Store - Background Session State', () => {
     });
 
     it('restores chat runtime from runtimeRegistry without reading backgroundSessions', () => {
+      const kernelSession = {
+        ...createKernelSession('root-1'),
+        workspacePath: '/tmp/project-correct',
+      };
+      useWorkflowKernelStore.setState({
+        sessionId: 'root-1',
+        activeRootSessionId: 'root-1',
+        session: kernelSession,
+      });
+      useSettingsStore.setState({ workspacePath: '/tmp/project-stale' });
       useExecutionStore.setState({
         runtimeRegistry: {
           'claude:chat-session-1': {
@@ -441,7 +483,7 @@ describe('Execution Store - Background Session State', () => {
             latestUsage: { input_tokens: 10, output_tokens: 20 },
             sessionUsageTotals: { input_tokens: 10, output_tokens: 20 },
             startedAt: 1000,
-            workspacePath: '/tmp/project',
+            workspacePath: '/tmp/project-wrong-runtime',
             llmBackend: 'openai',
             llmProvider: 'openai',
             llmModel: 'gpt-4o',
@@ -464,6 +506,7 @@ describe('Execution Store - Background Session State', () => {
       expect(state.streamingOutput).toEqual([{ id: 1, content: 'restored', type: 'text', timestamp: 1000 }]);
       expect(state.activeRuntimeHandleId).toBe('claude:chat-session-1');
       expect(state.backgroundSessions).toEqual({});
+      expect(useSettingsStore.getState().workspacePath).toBe('/tmp/project-correct');
     });
 
     it('restores runtime transcript without synthesizing kernel fallback lines', () => {

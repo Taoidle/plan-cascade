@@ -18,8 +18,8 @@ use crate::services::memory::retrieval::{
     MemorySearchResultV2,
 };
 use crate::services::memory::store::{
-    build_session_project_path, bytes_to_embedding, MemoryCategory, MemoryEntry, MemoryStats,
-    ProjectMemoryStore, GLOBAL_PROJECT_PATH,
+    build_session_project_path, bytes_to_embedding, normalize_memory_session_id, MemoryCategory,
+    MemoryEntry, MemoryStats, ProjectMemoryStore, GLOBAL_PROJECT_PATH,
 };
 use crate::services::orchestrator::embedding_service::cosine_similarity;
 use crate::utils::error::{AppError, AppResult};
@@ -289,6 +289,10 @@ fn normalize_statuses(statuses: &[MemoryStatusV2]) -> Vec<MemoryStatusV2> {
     out
 }
 
+fn normalize_request_session_id(session_id: Option<&str>) -> Option<String> {
+    session_id.and_then(normalize_memory_session_id)
+}
+
 fn scope_legacy_project_path(
     scope: MemoryScopeV2,
     project_path: Option<&str>,
@@ -436,7 +440,8 @@ fn load_candidates(
         ))
     })?;
 
-    let scopes = normalize_scopes(&request.scopes, request.session_id.as_deref());
+    let normalized_session_id = normalize_request_session_id(request.session_id.as_deref());
+    let scopes = normalize_scopes(&request.scopes, normalized_session_id.as_deref());
     let statuses = normalize_statuses(&request.statuses);
     let mut params: Vec<Value> = vec![Value::Real(request.min_importance as f64)];
 
@@ -445,7 +450,7 @@ fn load_candidates(
     let scope_filter = build_scope_filter(
         &scopes,
         request.project_path.trim(),
-        request.session_id.as_deref(),
+        normalized_session_id.as_deref(),
         &mut params,
     );
 
@@ -777,14 +782,15 @@ pub fn memory_stats_v2(
             e
         ))
     })?;
-    let scopes = normalize_scopes(&request.scopes, request.session_id.as_deref());
+    let normalized_session_id = normalize_request_session_id(request.session_id.as_deref());
+    let scopes = normalize_scopes(&request.scopes, normalized_session_id.as_deref());
     let statuses = normalize_statuses(&request.statuses);
     let mut params: Vec<Value> = vec![];
     let status_filter = build_status_filter(&statuses, &mut params);
     let scope_filter = build_scope_filter(
         &scopes,
         request.project_path.trim(),
-        request.session_id.as_deref(),
+        normalized_session_id.as_deref(),
         &mut params,
     );
     let category_filter = build_category_filter(&request.categories, &mut params);
@@ -855,12 +861,13 @@ pub fn list_pending_memory_candidates_v2(
             e
         ))
     })?;
-    let normalized_scopes = normalize_scopes(scopes, session_id);
+    let normalized_session_id = normalize_request_session_id(session_id);
+    let normalized_scopes = normalize_scopes(scopes, normalized_session_id.as_deref());
     let mut params: Vec<Value> = vec![Value::Text("pending_review".to_string())];
     let scope_filter = build_scope_filter(
         &normalized_scopes,
         project_path.trim(),
-        session_id,
+        normalized_session_id.as_deref(),
         &mut params,
     );
     let sql = format!(
@@ -1129,6 +1136,44 @@ mod tests {
 
         let result = query_memory_entries_v2(&store, &request).await.unwrap();
         assert_eq!(result.results.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_session_queries_accept_prefixed_session_ids() {
+        let store = create_store();
+        let conn = store.pool().get().unwrap();
+        conn.execute(
+            "INSERT INTO memory_entries_v2 (id, scope, session_id, category, content, content_hash, status, importance)
+             VALUES ('session-prefixed', 'session', 'sess-a', 'fact', 'session only memory', 'session only memory', 'active', 0.9)",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let request = UnifiedMemoryQueryRequestV2 {
+            project_path: "/scope-test".to_string(),
+            query: String::new(),
+            scopes: vec![MemoryScopeV2::Session],
+            categories: vec![],
+            include_ids: vec![],
+            exclude_ids: vec![],
+            session_id: Some("claude:sess-a".to_string()),
+            top_k_total: 10,
+            min_importance: 0.0,
+            per_scope_budget: 10,
+            intent: MemorySearchIntent::Default,
+            enable_semantic: false,
+            enable_lexical: false,
+            statuses: vec![MemoryStatusV2::Active],
+        };
+
+        let listed = list_memory_entries_v2(&store, request.clone()).await.unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].scope.as_deref(), Some("session"));
+        assert_eq!(listed[0].session_id.as_deref(), Some("sess-a"));
+
+        let stats = memory_stats_v2(&store, &request).unwrap();
+        assert_eq!(stats.total_count, 1);
     }
 
     #[test]

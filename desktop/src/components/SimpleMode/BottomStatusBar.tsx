@@ -61,6 +61,7 @@ export const BottomStatusBar = memo(function BottomStatusBar({
   onMemoryStatusClick,
 }: BottomStatusBarProps) {
   const { t } = useTranslation('simpleMode');
+  const projectWorkspacePath = workspaceRootPath ?? workspacePath;
   const turn = turnUsage || { input_tokens: 0, output_tokens: 0 };
   const total = sessionUsage || turn;
   const hasUsage = turnUsage || sessionUsage;
@@ -75,7 +76,7 @@ export const BottomStatusBar = memo(function BottomStatusBar({
         'text-xs text-gray-600 dark:text-gray-400',
       )}
     >
-      <ProjectSelector compact />
+      <ProjectSelector compact workspacePathOverride={projectWorkspacePath} />
       {runtimeKind !== 'main' && (
         <>
           <Divider />
@@ -101,12 +102,12 @@ export const BottomStatusBar = memo(function BottomStatusBar({
         sessionId={sessionId}
         dropdownDirection="up"
       />
-      {workspacePath && (
+      {projectWorkspacePath && (
         <>
           <Divider />
           <div className="flex items-center gap-2 min-w-0">
-            <IndexStatus compact />
-            <DocsIndexStatus compact />
+            <IndexStatus compact workspacePathOverride={projectWorkspacePath} />
+            <DocsIndexStatus compact workspacePathOverride={projectWorkspacePath} />
           </div>
         </>
       )}

@@ -5,6 +5,7 @@ import { useContextSourcesStore } from '../../store/contextSources';
 import { useProjectsStore } from '../../store/projects';
 import { useSettingsStore } from '../../store/settings';
 import { useExecutionStore } from '../../store/execution';
+import { useWorkflowKernelStore } from '../../store/workflowKernel';
 
 const {
   mockListen,
@@ -94,6 +95,10 @@ describe('ContextSourceBar integration', () => {
       taskId: null,
       standaloneSessionId: null,
       foregroundOriginSessionId: null,
+    });
+    useWorkflowKernelStore.setState({
+      session: null,
+      sessionId: null,
     });
   });
 

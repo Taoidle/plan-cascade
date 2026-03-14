@@ -16,12 +16,14 @@ interface ProjectSelectorProps {
   /** Compact mode for embedding in headers */
   compact?: boolean;
   className?: string;
+  workspacePathOverride?: string | null;
 }
 
-export function ProjectSelector({ compact = false, className }: ProjectSelectorProps) {
+export function ProjectSelector({ compact = false, className, workspacePathOverride }: ProjectSelectorProps) {
   const { t } = useTranslation('simpleMode');
-  const workspacePath = useSettingsStore((s) => s.workspacePath);
+  const settingsWorkspacePath = useSettingsStore((s) => s.workspacePath);
   const setWorkspacePath = useSettingsStore((s) => s.setWorkspacePath);
+  const workspacePath = workspacePathOverride !== undefined ? workspacePathOverride : settingsWorkspacePath;
 
   const basename = workspacePath ? workspacePath.split(/[/\\]/).filter(Boolean).pop() || workspacePath : 'No directory';
 
